@@ -1,0 +1,243 @@
+openapi: 3.1.0
+info:
+  title: 11408 Immersive Clock API
+  version: 1.0.0
+  description: |
+    单用户学习计时器的版本化 HTTP API。
+    所有持久化时间戳为 UTC；自然日、显示与汇总一律 Asia/Shanghai（固定 UTC+8）。
+    API 只返回时长事实，不输出掌握、完成度或评价。
+servers:
+  - url: /api/v1
+
+security:
+  - api-key: []
+  - owner-cookie: []
+
+components:
+  securitySchemes:
+    api-key:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: 总控只读凭据（sha256 存储，可轮换/撤销）。只允许 GET。
+    owner-cookie:
+      type: apiKey
+      in: cookie
+      name: clock_session
+      description: owner 登录后下发的 HttpOnly 会话 cookie。
+
+  schemas:
+    SubjectEntry:
+      type: object
+      required: [subject_id, display_name, aggregate_group, color_id, sort_order]
+      properties:
+        subject_id:
+          type: string
+          enum: [math, english, data-structures, computer-organization, operating-systems, computer-networks, politics]
+        display_name: { type: string }
+        aggregate_group:
+          type: string
+          enum: [math, english, 408, politics]
+        color_id: { type: string }
+        sort_order: { type: integer }
+
+    SessionEntry:
+      type: object
+      required: [session_id, subject_id, started_at, active_seconds, status]
+      properties:
+        session_id: { type: string }
+        subject_id: { type: string }
+        started_at: { type: string, format: date-time, description: UTC ISO 8601 }
+        ended_at: { type: [string, 'null'], format: date-time }
+        active_seconds: { type: integer, description: 当日窗口内净秒数 }
+        status: { type: string, enum: [running, paused, stopped, voided] }
+        end_reason: { type: [string, 'null'], enum: [manual, subject_switch, void, null] }
+        note: { type: [string, 'null'] }
+
+    RunningSessionEntry:
+      type: object
+      required: [session_id, subject_id, started_at, status, active_seconds]
+      properties:
+        session_id: { type: string }
+        subject_id: { type: string }
+        started_at: { type: string, format: date-time }
+        status: { type: string, enum: [running, paused] }
+        active_seconds: { type: integer, description: 截至 generated_at 的暂算净秒数 }
+        current_segment_started_at: { type: [string, 'null'], format: date-time }
+        intent_note: { type: [string, 'null'] }
+
+    AdjustmentEntry:
+      type: object
+      required: [session_id, kind, at]
+      properties:
+        session_id: { type: string }
+        kind: { type: string, enum: [retime, void, note] }
+        reason: { type: [string, 'null'] }
+        at: { type: string, format: date-time }
+
+    DailySummary:
+      type: object
+      required: [date, timezone, revision, generated_at, total_active_seconds, by_subject, aggregates, sessions, adjustments_or_revocations]
+      properties:
+        date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        timezone: { type: string, const: Asia/Shanghai }
+        revision: { type: integer, description: 事件序号；同 date/revision 响应确定 }
+        generated_at: { type: string, format: date-time }
+        total_active_seconds: { type: integer }
+        by_subject:
+          type: array
+          items:
+            type: object
+            required: [subject_id, display_name, active_seconds, session_count]
+            properties:
+              subject_id: { type: string }
+              display_name: { type: string }
+              active_seconds: { type: integer }
+              session_count: { type: integer }
+        aggregates:
+          type: array
+          description: math / english / 408（四模块之和）/ politics
+          items:
+            type: object
+            required: [group, active_seconds]
+            properties:
+              group: { type: string, enum: [math, english, 408, politics] }
+              active_seconds: { type: integer }
+        sessions:
+          type: array
+          items: { $ref: '#/components/schemas/SessionEntry' }
+        running_session:
+          oneOf: [{ $ref: '#/components/schemas/RunningSessionEntry' }, { type: 'null' }]
+        adjustments_or_revocations:
+          type: array
+          items: { $ref: '#/components/schemas/AdjustmentEntry' }
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+paths:
+  /health:
+    get:
+      summary: 健康检查（无鉴权）
+      security: []
+      responses:
+        '200':
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ok }
+                  server_time: { type: string, format: date-time }
+                  version: { type: string }
+
+  /subjects:
+    get:
+      summary: 7 科目固定表
+      responses:
+        '200':
+          description: 科目列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SubjectEntry' }
+        '401': { description: 凭据缺失或已撤销 }
+
+  /daily-summary:
+    get:
+      summary: 北京时间某日学习时长汇总（总控每晚约 22:30 调用）
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        - name: timezone
+          in: query
+          required: true
+          description: 只接受 Asia/Shanghai；日切口径由服务端统一实现。
+          schema: { type: string, enum: [Asia/Shanghai] }
+      responses:
+        '200':
+          description: 当日汇总
+          headers:
+            ETag:
+              description: W/"<date>-<revision>"；配合 If-None-Match 使用
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DailySummary' }
+        '304': { description: revision 未变化 }
+        '400': { description: date 或 timezone 非法 }
+        '401': { description: 凭据缺失或已撤销 }
+
+  /sessions:
+    get:
+      summary: 某日会话明细（含 segment）
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+      responses:
+        '200': { description: 会话列表 }
+        '400': { description: date 非法 }
+        '401': { description: 未鉴权 }
+
+  /sessions/{id}/pause:
+    post:
+      summary: 暂停（幂等；需要 Idempotency-Key）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 8, maxLength: 64 } }
+      responses:
+        '200': { description: 已暂停 }
+        '409': { description: 非法状态转移 }
+
+  /sessions/{id}/resume:
+    post:
+      summary: 继续（幂等）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 已继续 }
+        '409': { description: 非法状态转移 }
+
+  /sessions/{id}/stop:
+    post:
+      summary: 结束并保存（幂等）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                end_note: { type: string, maxLength: 200 }
+      responses:
+        '200': { description: 已结束 }
+        '409': { description: 非法状态转移 }
+
+  /sessions/{id}/void:
+    post:
+      summary: 作废已停止会话（保留审计）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 200 }
+      responses:
+        '200': { description: 已作废 }
+        '409': { description: 非法状态转移 }

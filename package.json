@@ -1,0 +1,24 @@
+{
+  "name": "immersive-clock",
+  "version": "0.1.0",
+  "private": true,
+  "description": "11408 沉浸式学习时钟：单用户公网学习计时器与北京时间日时间轴",
+  "workspaces": [
+    "shared",
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w shared && npm run build -w server && npm run build -w web",
+    "test": "npm run test -w shared && npm run test -w server",
+    "test:e2e": "playwright test",
+    "typecheck": "npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w web"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^26.2.0",
+    "typescript": "^7.0.2"
+  }
+}
