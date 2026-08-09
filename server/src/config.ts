@@ -20,8 +20,8 @@ export function loadConfig(): AppConfig {
   const dataDir = process.env.CLOCK_DATA_DIR ?? join(process.cwd(), 'data');
   return {
     dbPath: process.env.CLOCK_DB_PATH ?? join(dataDir, 'clock.sqlite'),
-    port: Number(process.env.CLOCK_PORT ?? 4310),
-    baseUrl: process.env.CLOCK_BASE_URL ?? 'http://127.0.0.1:4310',
+    port: Number(process.env.CLOCK_PORT ?? 4517),
+    baseUrl: process.env.CLOCK_BASE_URL ?? 'http://127.0.0.1:4517',
     isProduction: process.env.NODE_ENV === 'production',
     sessionTtlMs: 7 * 86_400_000,
     version: '0.1.0',

@@ -25,7 +25,7 @@ docs/        设计与契约文档
 npm install
 npm run test            # shared + server 单测/集成
 npm run build -w web    # 前端产物到 web/dist
-npm run start -w server # http://127.0.0.1:4310（静态前端 + API）
+npm run start -w server # http://127.0.0.1:4517（静态前端 + API）
 npm run test:e2e        # Playwright（自动起服务，端口 4390）
 ```
 
