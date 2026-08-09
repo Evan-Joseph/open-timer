@@ -1,0 +1,16 @@
+{
+  "name": "immersive-clock-11408",
+  "main": "server/dist/worker.mjs",
+  "compatibility_date": "2026-07-01",
+  "assets": {
+    "directory": "./web/dist",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "clock-11408",
+      "database_id": "17851214-abca-41ee-a581-b0d8dccf3b3f"
+    }
+  ]
+}

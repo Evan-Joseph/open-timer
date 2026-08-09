@@ -1,13 +1,13 @@
 /**
  * SQLite 存储适配器（better-sqlite3）。
  * 所有写路径在单个事务内完成"事件 + 段 + 会话状态"，保证可重放事实一致性。
+ * 接口异步化，与 D1 适配器保持同一契约。
  */
 
 import Database from 'better-sqlite3';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ulid } from '../util/ulid.js';
 import type {
   SessionRow,
   SessionEventRow,
@@ -61,7 +61,7 @@ export class SqliteStorage implements Storage {
     return Date.now();
   }
 
-  migrate(): void {
+  async migrate(): Promise<void> {
     const files = readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort();
     this.db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at_ms INTEGER NOT NULL)');
     const applied = new Set(
@@ -97,20 +97,20 @@ export class SqliteStorage implements Storage {
 
   /* ---- owner ---- */
 
-  getOwnerPasswordHash(): string | null {
+  async getOwnerPasswordHash(): Promise<string | null> {
     const r = this.db.prepare('SELECT password_hash FROM owner_credential WHERE id = 1').get() as
       | { password_hash: string }
       | undefined;
     return r?.password_hash ?? null;
   }
 
-  setOwnerPasswordHash(hash: string): void {
+  async setOwnerPasswordHash(hash: string): Promise<void> {
     this.db
       .prepare('INSERT INTO owner_credential (id, password_hash, updated_at_ms) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET password_hash=excluded.password_hash, updated_at_ms=excluded.updated_at_ms')
       .run(hash, Date.now());
   }
 
-  getOwnerSession(tokenSha: string): { expiresAtMs: number } | null {
+  async getOwnerSession(tokenSha: string): Promise<{ expiresAtMs: number } | null> {
     const r = this.db.prepare('SELECT expires_at_ms FROM owner_session WHERE token_sha = ?').get(tokenSha) as
       | { expires_at_ms: number }
       | undefined;
@@ -122,13 +122,13 @@ export class SqliteStorage implements Storage {
     return { expiresAtMs: r.expires_at_ms };
   }
 
-  createOwnerSession(tokenSha: string, expiresAtMs: number): void {
+  async createOwnerSession(tokenSha: string, expiresAtMs: number): Promise<void> {
     this.db
       .prepare('INSERT INTO owner_session (token_sha, expires_at_ms) VALUES (?, ?) ON CONFLICT(token_sha) DO UPDATE SET expires_at_ms=excluded.expires_at_ms')
       .run(tokenSha, expiresAtMs);
   }
 
-  deleteOwnerSession(tokenSha: string): void {
+  async deleteOwnerSession(tokenSha: string): Promise<void> {
     this.db.prepare('DELETE FROM owner_session WHERE token_sha = ?').run(tokenSha);
   }
 
@@ -139,20 +139,20 @@ export class SqliteStorage implements Storage {
     return r ? rowToSession(r) : null;
   }
 
-  getSession(id: string): SessionRow | null {
+  async getSession(id: string): Promise<SessionRow | null> {
     return this.sessionById(id);
   }
 
-  getActiveSession(userId: string): ActiveSessionWithSegments | null {
+  async getActiveSession(userId: string): Promise<ActiveSessionWithSegments | null> {
     const r = this.db
       .prepare("SELECT * FROM session WHERE user_id = ? AND status IN ('running','paused')")
       .get(userId) as Record<string, unknown> | undefined;
     if (!r) return null;
     const session = rowToSession(r);
-    return { session, segments: this.getSegments(session.id) };
+    return { session, segments: await this.getSegments(session.id) };
   }
 
-  getSegments(sessionId: string): ActiveSegmentRow[] {
+  async getSegments(sessionId: string): Promise<ActiveSegmentRow[]> {
     return (
       this.db
         .prepare('SELECT * FROM active_segment WHERE session_id = ? ORDER BY started_at_ms, id')
@@ -167,23 +167,25 @@ export class SqliteStorage implements Storage {
   }
 
   private recomputeActiveSeconds(sessionId: string): void {
-    const segs = this.getSegments(sessionId);
+    const rows = this.db
+      .prepare('SELECT started_at_ms, ended_at_ms FROM active_segment WHERE session_id = ?')
+      .all(sessionId) as Array<{ started_at_ms: number; ended_at_ms: number | null }>;
     let ms = 0;
-    for (const s of segs) {
-      if (s.endedAtMs !== null) ms += Math.max(0, s.endedAtMs - s.startedAtMs);
+    for (const s of rows) {
+      if (s.ended_at_ms !== null) ms += Math.max(0, s.ended_at_ms - s.started_at_ms);
     }
     this.db.prepare('UPDATE session SET active_seconds = ? WHERE id = ?').run(Math.floor(ms / 1000), sessionId);
   }
 
-  createSession(args: {
+  async createSession(args: {
     id: string;
     userId: string;
     subjectId: SubjectId;
     intentNote: string | null;
     nowMs: number;
     idempotencyKey: string;
-  }): SessionRow | null {
-    const existing = this.getActiveSession(args.userId);
+  }): Promise<SessionRow | null> {
+    const existing = await this.getActiveSession(args.userId);
     if (existing) return null; // 并发冲突：已有活动会话
     const tx = this.db.transaction(() => {
       this.db
@@ -209,7 +211,7 @@ export class SqliteStorage implements Storage {
     return s;
   }
 
-  pauseSession(sessionId: string, nowMs: number, idempotencyKey: string): void {
+  async pauseSession(sessionId: string, nowMs: number, idempotencyKey: string): Promise<void> {
     const tx = this.db.transaction(() => {
       const s = this.requireActive(sessionId);
       if (s.status !== 'running') throw new Error('ILLEGAL_TRANSITION');
@@ -223,7 +225,7 @@ export class SqliteStorage implements Storage {
     tx();
   }
 
-  resumeSession(sessionId: string, nowMs: number, idempotencyKey: string): void {
+  async resumeSession(sessionId: string, nowMs: number, idempotencyKey: string): Promise<void> {
     const tx = this.db.transaction(() => {
       const s = this.requireActive(sessionId);
       if (s.status !== 'paused') throw new Error('ILLEGAL_TRANSITION');
@@ -234,7 +236,7 @@ export class SqliteStorage implements Storage {
     tx();
   }
 
-  stopSession(sessionId: string, nowMs: number, endReason: string, idempotencyKey: string): void {
+  async stopSession(sessionId: string, nowMs: number, endReason: string, idempotencyKey: string): Promise<void> {
     const tx = this.db.transaction(() => {
       const s = this.requireActive(sessionId);
       if (s.status !== 'running' && s.status !== 'paused') throw new Error('ILLEGAL_TRANSITION');
@@ -250,7 +252,7 @@ export class SqliteStorage implements Storage {
     tx();
   }
 
-  voidSession(sessionId: string, nowMs: number, reason: string | null, idempotencyKey: string): void {
+  async voidSession(sessionId: string, nowMs: number, reason: string | null, idempotencyKey: string): Promise<void> {
     const tx = this.db.transaction(() => {
       const s = this.requireActive(sessionId);
       if (s.status !== 'stopped') throw new Error('ILLEGAL_TRANSITION');
@@ -270,7 +272,7 @@ export class SqliteStorage implements Storage {
     tx();
   }
 
-  setSessionNote(sessionId: string, note: string, nowMs: number): void {
+  async setSessionNote(sessionId: string, note: string, nowMs: number): Promise<void> {
     const s = this.requireActive(sessionId);
     if (s.status !== 'stopped') throw new Error('ILLEGAL_TRANSITION');
     const tx = this.db.transaction(() => {
@@ -282,25 +284,26 @@ export class SqliteStorage implements Storage {
     tx();
   }
 
-  applyRetime(sessionId: string, deltaSeconds: number, reason: string | null, nowMs: number): void {
+  async applyRetime(sessionId: string, deltaSeconds: number, reason: string | null, nowMs: number): Promise<void> {
     const s = this.requireActive(sessionId);
     if (s.status !== 'stopped') throw new Error('ILLEGAL_TRANSITION');
     const before = s.activeSeconds;
     const after = Math.max(0, before + deltaSeconds);
     const tx = this.db.transaction(() => {
-      // 以 adjustment 记录差值；净时长字段为派生口径，事件链仍完整保留真实段。
       this.db.prepare('UPDATE session SET active_seconds = ? WHERE id = ?').run(after, sessionId);
       this.db
         .prepare('INSERT INTO manual_adjustment (session_id, kind, before_json, after_json, reason, created_at_ms) VALUES (?, ?, ?, ?, ?, ?)')
         .run(sessionId, 'retime', JSON.stringify({ active_seconds: before }), JSON.stringify({ active_seconds: after }), reason, nowMs);
-      this.appendAudit('owner', 'retime', sessionId, JSON.stringify({ delta_seconds: deltaSeconds }), nowMs);
+      this.db
+        .prepare('INSERT INTO audit_log (actor, action, target, detail_json, server_time_ms) VALUES (?, ?, ?, ?, ?)')
+        .run('owner', 'retime', sessionId, JSON.stringify({ delta_seconds: deltaSeconds }), nowMs);
     });
     tx();
   }
 
   /* ---- 查询 ---- */
 
-  sessionsOverlapping(startMs: number, endMs: number): SessionRow[] {
+  async sessionsOverlapping(startMs: number, endMs: number): Promise<SessionRow[]> {
     return (
       this.db
         .prepare(
@@ -311,7 +314,7 @@ export class SqliteStorage implements Storage {
     ).map(rowToSession);
   }
 
-  segmentsForSessions(sessionIds: string[]): Map<string, ActiveSegmentRow[]> {
+  async segmentsForSessions(sessionIds: string[]): Promise<Map<string, ActiveSegmentRow[]>> {
     const map = new Map<string, ActiveSegmentRow[]>();
     if (sessionIds.length === 0) return map;
     const placeholders = sessionIds.map(() => '?').join(',');
@@ -327,7 +330,7 @@ export class SqliteStorage implements Storage {
     return map;
   }
 
-  adjustmentsSince(ms: number): ManualAdjustmentRow[] {
+  async adjustmentsSince(ms: number): Promise<ManualAdjustmentRow[]> {
     return (
       this.db.prepare('SELECT * FROM manual_adjustment WHERE created_at_ms >= ? ORDER BY created_at_ms').all(ms) as Array<
         Record<string, unknown>
@@ -343,14 +346,14 @@ export class SqliteStorage implements Storage {
     }));
   }
 
-  maxEventId(): number {
+  async maxEventId(): Promise<number> {
     const r = this.db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM session_event').get() as { m: number };
     return r.m;
   }
 
   /* ---- API 凭据 ---- */
 
-  listCredentials(): ApiCredentialRow[] {
+  async listCredentials(): Promise<ApiCredentialRow[]> {
     return (this.db.prepare('SELECT * FROM api_credential ORDER BY created_at_ms DESC').all() as Array<Record<string, unknown>>).map(
       (r) => ({
         id: r.id as string,
@@ -363,17 +366,17 @@ export class SqliteStorage implements Storage {
     );
   }
 
-  createCredential(row: ApiCredentialRow): void {
+  async createCredential(row: ApiCredentialRow): Promise<void> {
     this.db
       .prepare('INSERT INTO api_credential (id, name, scope, token_sha256, revoked_at_ms, created_at_ms) VALUES (?, ?, ?, ?, ?, ?)')
       .run(row.id, row.name, row.scope, row.tokenSha256, row.revokedAtMs, row.createdAtMs);
   }
 
-  revokeCredential(id: string, nowMs: number): void {
+  async revokeCredential(id: string, nowMs: number): Promise<void> {
     this.db.prepare('UPDATE api_credential SET revoked_at_ms = ? WHERE id = ?').run(nowMs, id);
   }
 
-  credentialByTokenSha(tokenSha: string): ApiCredentialRow | null {
+  async credentialByTokenSha(tokenSha: string): Promise<ApiCredentialRow | null> {
     const r = this.db.prepare('SELECT * FROM api_credential WHERE token_sha256 = ?').get(tokenSha) as
       | Record<string, unknown>
       | undefined;
@@ -390,32 +393,32 @@ export class SqliteStorage implements Storage {
 
   /* ---- 幂等 ---- */
 
-  getIdempotentResponse(key: string): { endpoint: string; responseJson: string } | null {
+  async getIdempotentResponse(key: string): Promise<{ endpoint: string; responseJson: string } | null> {
     const r = this.db.prepare('SELECT endpoint, response_json FROM idempotency_record WHERE key = ?').get(key) as
       | { endpoint: string; response_json: string }
       | undefined;
     return r ? { endpoint: r.endpoint, responseJson: r.response_json } : null;
   }
 
-  saveIdempotentResponse(key: string, endpoint: string, responseJson: string, nowMs: number): void {
+  async saveIdempotentResponse(key: string, endpoint: string, responseJson: string, nowMs: number): Promise<void> {
     this.db
       .prepare('INSERT OR IGNORE INTO idempotency_record (key, endpoint, response_json, created_at_ms) VALUES (?, ?, ?, ?)')
       .run(key, endpoint, responseJson, nowMs);
   }
 
-  purgeIdempotentBefore(ms: number): void {
+  async purgeIdempotentBefore(ms: number): Promise<void> {
     this.db.prepare('DELETE FROM idempotency_record WHERE created_at_ms < ?').run(ms);
   }
 
   /* ---- 审计与导出 ---- */
 
-  appendAudit(actor: string, action: string, target: string, detailJson: string | null, nowMs: number): void {
+  async appendAudit(actor: string, action: string, target: string, detailJson: string | null, nowMs: number): Promise<void> {
     this.db
       .prepare('INSERT INTO audit_log (actor, action, target, detail_json, server_time_ms) VALUES (?, ?, ?, ?, ?)')
       .run(actor, action, target, detailJson, nowMs);
   }
 
-  allEvents(): SessionEventRow[] {
+  async allEvents(): Promise<SessionEventRow[]> {
     return (this.db.prepare('SELECT * FROM session_event ORDER BY id').all() as Array<Record<string, unknown>>).map((r) => ({
       id: r.id as number,
       sessionId: r.session_id as string,
@@ -426,9 +429,7 @@ export class SqliteStorage implements Storage {
     }));
   }
 
-  allSessions(): SessionRow[] {
+  async allSessions(): Promise<SessionRow[]> {
     return (this.db.prepare('SELECT * FROM session ORDER BY started_at_ms').all() as Array<Record<string, unknown>>).map(rowToSession);
   }
 }
-
-export { ulid };

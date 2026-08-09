@@ -1,17 +1,27 @@
-/** 鉴权：owner cookie 会话 + 总控只读 API token（sha256 存储）。 */
+/** 鉴权：owner cookie 会话 + 总控只读 API token（sha256 存储）。全部 Web Crypto，跨运行时。 */
 
-import { createHash, randomBytes } from 'node:crypto';
 import type { Context, Next } from 'hono';
 import type { Storage } from './repo/storage.js';
 
 export const OWNER_COOKIE = 'clock_session';
 
-export function sha256hex(v: string): string {
-  return createHash('sha256').update(v).digest('hex');
+function toHex(bytes: Uint8Array): string {
+  let out = '';
+  for (const b of bytes) out += b.toString(16).padStart(2, '0');
+  return out;
+}
+
+export async function sha256hex(v: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v));
+  return toHex(new Uint8Array(digest));
 }
 
 export function generateToken(prefix: string): string {
-  return `${prefix}_${randomBytes(24).toString('base64url')}`;
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  const b64url = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `${prefix}_${b64url}`;
 }
 
 export type AuthKind = 'owner' | 'api_read';
@@ -28,26 +38,26 @@ declare module 'hono' {
 }
 
 /** 解析 owner cookie（session token sha256）。 */
-export function getOwnerAuth(c: Context, storage: Storage): AuthInfo | null {
+export async function getOwnerAuth(c: Context, storage: Storage): Promise<AuthInfo | null> {
   const raw = getCookie(c, OWNER_COOKIE);
   if (!raw) return null;
-  const s = storage.getOwnerSession(sha256hex(raw));
+  const s = await storage.getOwnerSession(await sha256hex(raw));
   if (!s) return null;
   return { kind: 'owner', actor: 'owner' };
 }
 
 /** 解析 X-API-Key（总控只读）。 */
-export function getApiAuth(c: Context, storage: Storage): AuthInfo | null {
+export async function getApiAuth(c: Context, storage: Storage): Promise<AuthInfo | null> {
   const key = c.req.header('x-api-key');
   if (!key) return null;
-  const cred = storage.credentialByTokenSha(sha256hex(key));
+  const cred = await storage.credentialByTokenSha(await sha256hex(key));
   if (!cred || cred.revokedAtMs !== null) return null;
   return { kind: 'api_read', actor: `api:${cred.name}` };
 }
 
 export function requireOwner(storage: Storage) {
   return async (c: Context, next: Next) => {
-    const auth = getOwnerAuth(c, storage);
+    const auth = await getOwnerAuth(c, storage);
     if (!auth) return c.json({ error: 'UNAUTHORIZED' }, 401);
     c.set('auth', auth);
     await next();
@@ -57,7 +67,7 @@ export function requireOwner(storage: Storage) {
 /** 任一有效凭据（owner 或只读 token）可读。 */
 export function requireAnyRead(storage: Storage) {
   return async (c: Context, next: Next) => {
-    const auth = getOwnerAuth(c, storage) ?? getApiAuth(c, storage);
+    const auth = (await getOwnerAuth(c, storage)) ?? (await getApiAuth(c, storage));
     if (!auth) return c.json({ error: 'UNAUTHORIZED' }, 401);
     c.set('auth', auth);
     await next();
@@ -66,7 +76,7 @@ export function requireAnyRead(storage: Storage) {
 
 export function requireApiRead(storage: Storage) {
   return async (c: Context, next: Next) => {
-    const auth = getApiAuth(c, storage);
+    const auth = await getApiAuth(c, storage);
     if (!auth) return c.json({ error: 'UNAUTHORIZED' }, 401);
     c.set('auth', auth);
     await next();
