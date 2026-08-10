@@ -15,7 +15,9 @@
   --accent: #0071e3;
   --accent-press: #0077ed;
   --danger: #d70015;
+  --success: #30a46c;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
   --material: rgba(255, 255, 255, 0.72);
 
   /* 科目色：浅/深两套；色相分散，避免蓝紫扎堆 */
@@ -28,6 +30,7 @@
   --c-coral: #be123c;      --c-coral-bg: #ffe4e6;
 
   --radius: 8px;
+  --radius-sm: 6px;
   --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', sans-serif;
 }
 
@@ -43,6 +46,7 @@
   --accent: #0a84ff;
   --accent-press: #409cff;
   --danger: #ff453a;
+  --success: #4ade80;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
   --material: rgba(28, 28, 30, 0.72);
 
@@ -89,6 +93,18 @@ button:focus-visible, input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* Press 反馈分级（Apple 式）：实心按钮缩放，透明/文字按钮降透明；
+   不在全局 button 上定义，避免热区/片段等交互元素意外变形 */
+.primary-btn:active:not(:disabled),
+.start-btn:active:not(:disabled) { transform: scale(0.98); }
+.control-btn:active:not(:disabled) { transform: scale(0.96); }
+.icon-btn:active:not(:disabled),
+.text-btn:active:not(:disabled),
+.nudge-btn:active:not(:disabled),
+.switch-btn:active:not(:disabled),
+.subject-chip:active:not(:disabled),
+.seg-item:active:not(:disabled) { opacity: 0.65; }
 
 .material {
   background: var(--material);
@@ -159,13 +175,19 @@ button:focus-visible, input:focus-visible {
   display: inline-block; flex: none;
 }
 
-.intent-input, .finish-note {
-  width: 100%; max-width: 400px;
-  padding: 10px 14px; border-radius: var(--radius);
-  border: 1px solid var(--border); background: var(--surface-1);
-  color: var(--text-1); font-size: 14px; font-family: inherit;
+/* 输入框统一规范（15px 文本、surface-2 底、focus 边框变 accent） */
+.intent-input, .finish-note, .auth-input {
+  padding: 10px 12px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text-1); font-size: 15px; font-family: inherit;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.intent-input::placeholder, .finish-note::placeholder { color: var(--text-3); }
+.intent-input, .finish-note { width: 100%; max-width: 400px; font-size: 14px; }
+.intent-input:focus, .finish-note:focus, .auth-input:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.intent-input::placeholder, .finish-note::placeholder, .auth-input::placeholder { color: var(--text-3); }
 
 .start-btn {
   display: inline-flex; align-items: center; gap: 8px;
@@ -177,7 +199,7 @@ button:focus-visible, input:focus-visible {
 .start-btn:hover { background: var(--accent-press); }
 .start-btn:active { transform: scale(0.98); }
 
-.today-hint { color: var(--text-3); font-size: 13px; }
+.today-hint { color: var(--text-2); font-size: 13px; }
 
 /* 运行/暂停态 */
 .subject-pill {
@@ -268,11 +290,6 @@ button:focus-visible, input:focus-visible {
 }
 .timeline-title { font-size: 14px; font-weight: 600; margin: 0; }
 .timeline-nav { display: flex; align-items: center; gap: 4px; }
-
-.timeline-empty {
-  max-width: 960px; margin: 0 auto; padding: 18px 0;
-  color: var(--text-3); font-size: 13px;
-}
 
 .timeline-scroll {
   overflow-x: auto; -webkit-overflow-scrolling: touch;
@@ -365,11 +382,6 @@ button:focus-visible, input:focus-visible {
 }
 .auth-title { font-size: 17px; font-weight: 600; margin: 0; text-align: center; }
 .auth-hint { font-size: 13px; color: var(--text-2); margin: 0; text-align: center; }
-.auth-input {
-  padding: 10px 12px; border-radius: var(--radius);
-  border: 1px solid var(--border); background: var(--surface-2);
-  color: var(--text-1); font-size: 15px; font-family: inherit;
-}
 .auth-error { color: var(--danger); font-size: 13px; margin: 0; text-align: center; }
 
 .boot { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
@@ -384,6 +396,7 @@ button:focus-visible, input:focus-visible {
 .dialog-content {
   position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
   z-index: 50; width: min(400px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px); overflow-y: auto;
   padding: 22px; border-radius: var(--radius);
   border: 1px solid var(--border); box-shadow: var(--shadow);
   display: flex; flex-direction: column; gap: 16px;
@@ -395,17 +408,22 @@ button:focus-visible, input:focus-visible {
 .setting-label { font-size: 13px; font-weight: 600; color: var(--text-2); }
 .setting-hint { font-size: 12px; color: var(--text-3); margin: 0; }
 
+/* 分段控件：iOS Settings 风格（中性底 + 白色滑块 + 阴影），而非蓝底白字 */
 .seg-control {
-  display: inline-flex; border: 1px solid var(--border);
-  border-radius: var(--radius); overflow: hidden; width: fit-content;
+  display: inline-flex; gap: 2px; padding: 2px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius); width: fit-content;
 }
 .seg-item {
-  padding: 6px 16px; font-size: 13px; color: var(--text-2);
-  background: var(--surface-1);
-  border-right: 1px solid var(--border);
+  padding: 5px 14px; font-size: 13px; color: var(--text-2);
+  background: transparent; border: none;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease, color 0.15s ease;
 }
-.seg-item:last-child { border-right: none; }
-.seg-item.active { background: var(--accent); color: #fff; }
+.seg-item.active {
+  background: var(--surface-1); color: var(--text-1);
+  font-weight: 600; box-shadow: var(--shadow-sm);
+}
 
 .icon-btn {
   width: 32px; height: 32px; border-radius: var(--radius);
@@ -415,7 +433,7 @@ button:focus-visible, input:focus-visible {
 .icon-btn:hover { background: var(--surface-2); }
 .icon-btn:active { transform: scale(0.96); }
 
-.text-btn { font-size: 13px; color: var(--accent); padding: 4px 8px; border-radius: 6px; }
+.text-btn { font-size: 13px; color: var(--accent); padding: 4px 8px; border-radius: var(--radius-sm); }
 .text-btn:hover { background: var(--surface-2); }
 
 .danger-btn {
@@ -456,8 +474,7 @@ button:focus-visible, input:focus-visible {
   stroke: var(--accent);
   transition: stroke-dashoffset 0.9s linear, stroke 0.3s ease;
 }
-.rhythm-progress.complete { stroke: #30a46c; }
-[data-theme='dark'] .rhythm-progress.complete { stroke: #4ade80; }
+.rhythm-progress.complete { stroke: var(--success); }
 
 .rhythm-center {
   position: absolute; inset: 0;
@@ -470,7 +487,7 @@ button:focus-visible, input:focus-visible {
 .rhythm-dot.done { background: var(--accent); }
 .rhythm-dot.current { background: var(--text-2); }
 
-.rhythm-meta { font-size: 12px; color: var(--text-3); }
+.rhythm-meta { font-size: 12px; color: var(--text-2); }
 
 .rhythm-nudge {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center;
@@ -482,7 +499,7 @@ button:focus-visible, input:focus-visible {
 }
 .nudge-icon { color: var(--text-2); display: inline-flex; }
 .nudge-btn {
-  padding: 4px 12px; border-radius: 6px; font-size: 12px;
+  padding: 4px 12px; border-radius: var(--radius-sm); font-size: 12px;
   border: 1px solid var(--border); color: var(--text-2); background: transparent;
 }
 .nudge-btn:hover { background: var(--surface-2); }
@@ -507,12 +524,6 @@ button:focus-visible, input:focus-visible {
   color: var(--text-1); font-size: 13px; text-align: center;
 }
 
-.toggle-lines { display: flex; flex-direction: column; gap: 8px; }
-.toggle-line {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 13px; color: var(--text-1); cursor: pointer;
-}
-.toggle-line input { accent-color: var(--accent); width: 15px; height: 15px; }
 
 /* ---------- 时间轴上方：今日概览 ---------- */
 
@@ -538,10 +549,18 @@ button:focus-visible, input:focus-visible {
 
 /* ---------- 空闲态微动效 ---------- */
 
-.subject-chip { will-change: transform; }
 .start-btn { box-shadow: var(--shadow); }
 .start-btn:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.10); }
-.control-btn { will-change: transform; }
+
+/* ---------- 三态切换空间连续性 ---------- */
+
+.clockface > * {
+  animation: state-in 0.25s ease both;
+}
+@keyframes state-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 /* 按钮 press 反馈统一 */
 button:active:not(:disabled) { transform: scale(0.98); }
@@ -562,8 +581,31 @@ button:active:not(:disabled) { transform: scale(0.98); }
 
 .timeline-empty-inline {
   position: absolute; left: 8px; top: 60px;
-  font-size: 12px; color: var(--text-3);
+  font-size: 12px; color: var(--text-2);
 }
+
+/* iOS 风格开关（Radix Switch） */
+.switch-root {
+  width: 44px; height: 26px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  position: relative; flex: none;
+  transition: background 0.2s ease;
+}
+.switch-root[data-state='checked'] { background: #34c759; border-color: #34c759; }
+[data-theme='dark'] .switch-root[data-state='checked'] { background: #30d158; border-color: #30d158; }
+.switch-thumb {
+  display: block; width: 22px; height: 22px; border-radius: 50%;
+  background: #fff; box-shadow: var(--shadow-sm);
+  transform: translateX(1px);
+  transition: transform 0.2s ease;
+}
+.switch-thumb[data-state='checked'] { transform: translateX(19px); }
+
+.switch-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  font-size: 13px; color: var(--text-1);
+}
+.switch-row + .switch-row { margin-top: 10px; }
 
 /* 顶栏状态指示点 */
 .topbar-status-dot {
@@ -572,10 +614,9 @@ button:active:not(:disabled) { transform: scale(0.98); }
   display: inline-block; vertical-align: middle;
 }
 .topbar-status-dot.live {
-  background: #30a46c;
+  background: var(--success);
   animation: flag-breathe 2.4s ease-in-out infinite;
 }
-[data-theme='dark'] .topbar-status-dot.live { background: #4ade80; }
 
 /* 结束反馈卡片入场（温和、可关由 reduced-motion 兜底） */
 .finish-card { animation: card-in 0.28s ease; }

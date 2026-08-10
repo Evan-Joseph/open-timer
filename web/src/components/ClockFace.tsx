@@ -1,7 +1,7 @@
 /** 时钟主区：空闲 / 运行 / 暂停 / 结束反馈四态。 */
 
 import { useEffect, useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { motion } from 'motion/react';
 import { Pause, Play, Square, Flag } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
 import { useMonotonicSeconds, useBeijingTime, formatHms, formatDurationZh, formatBeijingTime } from '../lib/clock.js';

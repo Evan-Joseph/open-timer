@@ -1,4 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog';
+import * as Switch from '@radix-ui/react-switch';
+import { X } from 'lucide-react';
 import { useSettings, updateSettings } from '../lib/settings.js';
 import { RHYTHM_PRESETS } from '@clock/shared';
 
@@ -129,21 +131,27 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
           <div className="setting-row">
             <span className="setting-label">提示与声音</span>
             <div className="toggle-lines">
-              <label className="toggle-line">
-                <input
-                  type="checkbox"
+              <label className="switch-row">
+                <span>到节奏点时温和提示休息</span>
+                <Switch.Root
+                  className="switch-root"
                   checked={settings.rhythmNudge}
-                  onChange={(e) => updateSettings({ rhythmNudge: e.target.checked })}
-                />
-                到节奏点时温和提示休息
+                  onCheckedChange={(v) => updateSettings({ rhythmNudge: v })}
+                  aria-label="到节奏点时温和提示休息"
+                >
+                  <Switch.Thumb className="switch-thumb" />
+                </Switch.Root>
               </label>
-              <label className="toggle-line">
-                <input
-                  type="checkbox"
+              <label className="switch-row">
+                <span>结束计时时播放轻提示音</span>
+                <Switch.Root
+                  className="switch-root"
                   checked={settings.finishSound}
-                  onChange={(e) => updateSettings({ finishSound: e.target.checked })}
-                />
-                结束计时时播放轻提示音
+                  onCheckedChange={(v) => updateSettings({ finishSound: v })}
+                  aria-label="结束计时时播放轻提示音"
+                >
+                  <Switch.Thumb className="switch-thumb" />
+                </Switch.Root>
               </label>
             </div>
           </div>
@@ -187,7 +195,7 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
           </div>
 
           <Dialog.Close className="icon-btn dialog-close" aria-label="关闭">
-            ✕
+            <X size={16} />
           </Dialog.Close>
         </Dialog.Content>
       </Dialog.Portal>
