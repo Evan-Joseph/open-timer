@@ -15,6 +15,8 @@ export interface ClockStore {
   anchor: SyncAnchor | null;
   /** 当前开放段（本轮连续专注）的单调锚点，用于节奏环 */
   segmentAnchor: SyncAnchor | null;
+  /** 暂停（离开）已有时长的单调锚点；非 paused 为 null */
+  awayAnchor: SyncAnchor | null;
   sessions: SessionApi[];
   todayDate: string;
   busy: boolean;
@@ -182,9 +184,11 @@ export function useClockStore(): ClockStore {
         // 继续：重锚到"现在"，否则会把暂停时长也算进 elapsed
         perfAtStateRef.current = performance.now();
       }
+      // 乐观 paused：暂停时刻记为当前墙钟；resume/stop 时清空（以服务端为准）
+      const paused_at = status === 'paused' ? prev.active_session.paused_at ?? new Date().toISOString() : null;
       return {
         ...prev,
-        active_session: status === null ? null : { ...prev.active_session, status, active_seconds: seconds },
+        active_session: status === null ? null : { ...prev.active_session, status, active_seconds: seconds, paused_at },
       };
     });
   }, []);
@@ -218,6 +222,7 @@ export function useClockStore(): ClockStore {
                   status: 'running',
                   active_seconds: 0,
                   current_segment_started_at: d.started_at,
+                  paused_at: null,
                   intent_note: intentNote || null,
                 },
               }
@@ -346,12 +351,27 @@ export function useClockStore(): ClockStore {
     };
   }, [state]);
 
+  // 暂停（离开）计时锚点：now - paused_at
+  const awayAnchor: SyncAnchor | null = useMemo(() => {
+    const a = state?.active_session;
+    if (!a || a.status !== 'paused' || !a.paused_at) return null;
+    const pausedMs = Date.parse(a.paused_at);
+    if (!Number.isFinite(pausedMs)) return null;
+    return {
+      confirmedSeconds: Math.max(0, Math.floor((state.server_now_ms - pausedMs) / 1000)),
+      running: true,
+      anchorPerfMs: perfAtStateRef.current,
+      serverNowMs: state.server_now_ms,
+    };
+  }, [state]);
+
   return {
     phase,
     subjects,
     state,
     anchor,
     segmentAnchor,
+    awayAnchor,
     sessions,
     todayDate,
     busy,

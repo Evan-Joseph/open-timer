@@ -25,6 +25,7 @@ export const RHYTHM_PRESETS: Record<string, RhythmConfig> = {
   off: { enabled: false, focusMin: 25, breakMin: 5, longBreakEvery: 4, longBreakMin: 15 },
   classic: { enabled: true, focusMin: 25, breakMin: 5, longBreakEvery: 4, longBreakMin: 15 },
   flow: { enabled: true, focusMin: 52, breakMin: 17, longBreakEvery: 2, longBreakMin: 30 },
+  deep: { enabled: true, focusMin: 90, breakMin: 20, longBreakEvery: 2, longBreakMin: 30 },
 };
 
 export function isValidRhythm(r: unknown): r is RhythmConfig {

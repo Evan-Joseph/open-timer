@@ -71,7 +71,7 @@ export default function RhythmRing({ segmentSeconds, totalSeconds, config, pause
           <div className="rhythm-round">第 {status.round} 轮</div>
           <div className="rhythm-remain" data-testid="rhythm-remain">
             {paused || segmentSeconds === null
-              ? '已暂停'
+              ? '已离开'
               : status.atCheckpoint
                 ? '到节奏点了'
                 : formatRemain(status.roundRemainingSec)}

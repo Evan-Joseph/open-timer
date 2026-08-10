@@ -20,9 +20,11 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
   const r = settings.rhythm;
   const presetKey = !r.enabled
     ? 'off'
-    : r.focusMin === 52 && r.breakMin === 17
-      ? 'flow'
-      : 'classic';
+    : r.focusMin === 90
+      ? 'deep'
+      : r.focusMin === 52 && r.breakMin === 17
+        ? 'flow'
+        : 'classic';
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -57,11 +59,12 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
             <div className="seg-control" role="radiogroup" aria-label="专注节奏">
               {[
                 ['off', '关闭'],
-                ['classic', '经典 25/5'],
-                ['flow', '沉浸 52/17'],
+                ['classic', '25/5'],
+                ['flow', '52/17'],
+                ['deep', '90/20'],
                 ['custom', '自定义'],
               ].map(([value, label]) => {
-                const active = presetKey === value || (value === 'custom' && r.enabled && presetKey === 'classic' && isCustom(r));
+                const active = value === 'custom' ? r.enabled && isCustom(r) : presetKey === value;
                 return (
                   <button
                     key={value}
@@ -72,7 +75,8 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
                       if (value === 'off') updateSettings({ rhythm: RHYTHM_PRESETS.off });
                       else if (value === 'classic') updateSettings({ rhythm: RHYTHM_PRESETS.classic });
                       else if (value === 'flow') updateSettings({ rhythm: RHYTHM_PRESETS.flow });
-                      else updateSettings({ rhythm: { ...r, enabled: true } });
+                      else if (value === 'deep') updateSettings({ rhythm: RHYTHM_PRESETS.deep });
+                      else updateSettings({ rhythm: { enabled: true, focusMin: 40, breakMin: 10, longBreakEvery: 3, longBreakMin: 20 } });
                     }}
                   >
                     {label}
@@ -80,9 +84,8 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
                 );
               })}
             </div>
-            {r.enabled && (
-              <div className="rhythm-custom">
-                <label className="rhythm-field">
+            {r.enabled && isCustom(r) && (
+              <div className="rhythm-custom">                <label className="rhythm-field">
                   专注
                   <input
                     type="number"
@@ -125,7 +128,13 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
                 </label>
               </div>
             )}
-            <p className="setting-hint">到节奏点只给温和提示，你可以随时忽略继续专注。休息 = 暂停，不计学习时长。</p>
+            <p className="setting-hint">
+              {!r.enabled && '节奏仅作参考，到点只提醒不自动暂停；不开也完全不影响计时。'}
+              {r.enabled && !isCustom(r) && presetKey === 'classic' && '经典番茄钟：适合刚进入状态或任务较碎时。'}
+              {r.enabled && presetKey === 'flow' && 'DeskTime 生产力研究的高效比例，平衡专注与恢复。'}
+              {r.enabled && presetKey === 'deep' && '贴合人体约 90 分钟的超昼夜节律，适合考研深度学习的心流时段。'}
+              {r.enabled && isCustom(r) && '按你的节奏来。到点只提醒，不自动暂停。'}
+            </p>
           </div>
 
           <div className="setting-row">
@@ -209,5 +218,9 @@ function clamp(v: number, min: number, max: number): number {
 }
 
 function isCustom(r: { focusMin: number; breakMin: number }): boolean {
-  return !(r.focusMin === 25 && r.breakMin === 5) && !(r.focusMin === 52 && r.breakMin === 17);
+  return !(
+    (r.focusMin === 25 && r.breakMin === 5) ||
+    (r.focusMin === 52 && r.breakMin === 17) ||
+    (r.focusMin === 90 && r.breakMin === 20)
+  );
 }

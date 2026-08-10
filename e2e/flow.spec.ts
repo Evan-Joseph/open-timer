@@ -59,7 +59,7 @@ test.describe('核心流程', () => {
 
     // 暂停
     await page.getByRole('button', { name: '暂停计时' }).click();
-    await expect(page.getByText('· 已暂停')).toBeVisible();
+    await expect(page.getByText('· 离开中')).toBeVisible();
     const pausedUi = await page.getByTestId('timer-seconds').innerText();
 
     // 暂停期间数字冻结
@@ -250,9 +250,10 @@ test.describe('番茄节奏（可选参考）', () => {
     // 到节奏点前不出现提示
     await expect(page.getByTestId('rhythm-nudge')).toHaveCount(0);
 
-    // 暂停后节奏环显示已暂停
+    // 暂停后显示离开时长与节奏环的离开提示
     await page.getByRole('button', { name: '暂停计时' }).click();
-    await expect(page.getByText('已暂停').first()).toBeVisible();
+    await expect(page.getByTestId('away-line')).toBeVisible();
+    await expect(page.getByText('已离开').first()).toBeVisible();
 
     // 继续并结束清理
     await page.getByRole('button', { name: '继续计时' }).click();
@@ -371,5 +372,32 @@ test.describe('撤回（作废）与一致性', () => {
     await page.getByTestId('withdraw-btn').click();
     await expect(page.getByTestId('toast')).toContainText('已撤回');
     await expect(page.locator('.seg')).toHaveCount(beforeSegs);
+  });
+});
+
+test.describe('离开（暂停）时长显示', () => {
+  test('暂停后显示「已离开」计时且不计学习时长', async ({ page }) => {
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数学一' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1000);
+
+    // 暂停前不显示离开行
+    await expect(page.getByTestId('away-line')).toHaveCount(0);
+
+    await page.getByRole('button', { name: '暂停计时' }).click();
+    await expect(page.getByTestId('away-line')).toBeVisible();
+    await expect(page.getByTestId('away-line')).toContainText('已离开');
+    await expect(page.getByTestId('away-line')).toContainText('不计学习时长');
+
+    // 离开时长在增长（等待 1.5s 后应至少为 00:00:01）
+    await page.waitForTimeout(1500);
+    const text = await page.getByTestId('away-line').innerText();
+    expect(text).toMatch(/已离开 00:00:0[1-9]/);
+
+    await page.getByRole('button', { name: '继续计时' }).click();
+    await expect(page.getByTestId('away-line')).toHaveCount(0);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
   });
 });

@@ -672,3 +672,13 @@ body {
 /* 中文环境下行高略放宽，数字场景用 tabular */
 h1, h2, h3 { letter-spacing: 0; }
 .big-timer, .idle-clock, .finish-big, .rhythm-remain { letter-spacing: -0.01em; }
+
+/* ---------- 离开（暂停）时长提示 ---------- */
+
+.away-line {
+  display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center;
+  padding: 6px 14px; border-radius: 999px;
+  background: var(--surface-2); color: var(--text-1);
+  font-size: 14px; font-variant-numeric: tabular-nums;
+}
+.away-note { color: var(--text-3); font-size: 12px; }

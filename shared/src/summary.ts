@@ -111,6 +111,12 @@ export function buildDailySummary(input: SummaryInput): DailySummary {
   if (input.activeSession && (input.activeSession.status === 'running' || input.activeSession.status === 'paused')) {
     const openSeg = input.activeSegments.find((s) => s.endedAtMs === null);
     const overlapsDay = input.activeSegments.some((seg) => clipSegment(seg, startMs, endMs, nowMs) !== null);
+    // paused 时，最后一段的结束时刻即暂停（离开）开始时刻
+    let pausedAtMs: number | null = null;
+    if (input.activeSession.status === 'paused' && input.activeSegments.length > 0) {
+      const last = input.activeSegments[input.activeSegments.length - 1];
+      if (last.endedAtMs !== null) pausedAtMs = last.endedAtMs;
+    }
     if (overlapsDay) {
       let secs = 0;
       for (const seg of input.activeSegments) {
@@ -124,6 +130,7 @@ export function buildDailySummary(input: SummaryInput): DailySummary {
         status: input.activeSession.status,
         active_seconds: secs,
         current_segment_started_at: openSeg ? toIso(openSeg.startedAtMs) : null,
+        paused_at: pausedAtMs !== null ? toIso(pausedAtMs) : null,
         intent_note: input.activeSession.intentNote,
       };
     }

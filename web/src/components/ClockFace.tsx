@@ -29,6 +29,8 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const seconds = useMonotonicSeconds(anchor);
   /** 当前开放段（本轮连续专注）已过秒数，供节奏环 */
   const segmentSecs = useMonotonicSeconds(store.segmentAnchor, 1000);
+  /** 暂停（离开）已有时长 */
+  const awaySeconds = useMonotonicSeconds(store.awayAnchor, 1000);
   const beijing = useBeijingTime(anchor ? { serverNowMs: anchor.serverNowMs, anchorPerfMs: anchor.anchorPerfMs } : null);
 
   // 空闲态北京时间（无锚点时用 Date 直接显示）
@@ -142,7 +144,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         <div className="subject-pill large" data-color={subj?.color_id}>
           <span className="pill-dot" aria-hidden />
           {subj?.display_name ?? active.subject_id}
-          <span className="pill-status">{paused ? '· 已暂停' : '· 进行中'}</span>
+          <span className="pill-status">{paused ? '· 离开中' : '· 进行中'}</span>
         </div>
 
         <div className="big-timer" data-testid="timer-seconds" aria-live="off">
@@ -150,9 +152,21 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         </div>
 
         <div className="sub-line">
-          北京时间 {paused ? beijing : beijing} · 今天累计 {formatDurationZh(state?.today_active_seconds ?? 0)}
+          北京时间 {beijing} · 今天累计 {formatDurationZh(state?.today_active_seconds ?? 0)}
         </div>
         {active.intent_note && <div className="intent-line">「{active.intent_note}」</div>}
+
+        {/* 暂停（离开）时长：中性提示，不计入学习；开节奏时附参考小憩时长 */}
+        {paused && (
+          <div className="away-line" data-testid="away-line" aria-live="off">
+            已离开 {formatHms(awaySeconds)}
+            <span className="away-note">
+              {settings.rhythm.enabled
+                ? ` · 参考小憩 ${settings.rhythm.breakMin} 分，不计学习时长`
+                : ' · 不计学习时长'}
+            </span>
+          </div>
+        )}
 
         {/* 番茄节奏参考（设置内开启后显示） */}
         {settings.rhythm.enabled && (

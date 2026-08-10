@@ -117,6 +117,8 @@ export interface RunningSessionEntry {
   /** 截至 generated_at 的暂算净秒数 */
   active_seconds: number;
   current_segment_started_at: string | null;
+  /** 暂停开始时刻（paused 时存在；= 最后一段的结束时刻） */
+  paused_at: string | null;
   intent_note: string | null;
 }
 

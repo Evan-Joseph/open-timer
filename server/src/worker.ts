@@ -3,11 +3,16 @@
  * 构建：esbuild bundle（.sql 以 text loader 内嵌）。
  */
 
-import type { ExecutionContext } from '@cloudflare/workers-types';
 import { createApp } from './app.js';
 import { D1Storage, type D1Database } from './repo/d1-storage.js';
 import type { AppConfig } from './config.js';
 import migrationSql from '../../migrations/0001_init.sql';
+
+/** Workers 运行时上下文（本地声明，不引入 workers-types 以免与 Node 类型冲突） */
+interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+  passThroughOnException(): void;
+}
 
 interface Env {
   DB: D1Database;
