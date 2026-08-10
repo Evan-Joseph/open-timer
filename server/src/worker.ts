@@ -14,6 +14,9 @@ interface Env {
   ASSETS: Fetcher;
 }
 
+/** 同一 Worker isolate 内共享：迁移完成后不再探测数据库 */
+let migrated = false;
+
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     return handle(request, env);
@@ -31,9 +34,12 @@ async function handle(request: Request, env: Env): Promise<Response> {
     version: '0.1.0',
   };
   const storage = new D1Storage(env.DB, migrationSql);
-  // 已初始化则跳过迁移（探测 schema_migrations）；未初始化则幂等执行（IF NOT EXISTS / ON CONFLICT）
-  const ready = await env.DB.prepare('SELECT COUNT(*) AS c FROM schema_migrations').first().catch(() => null);
-  if (!ready) await storage.migrate();
+  // 模块级标志：同一 isolate 内只探测/执行一次迁移，避免每请求一次 D1 查询
+  if (!migrated) {
+    const ready = await env.DB.prepare('SELECT COUNT(*) AS c FROM schema_migrations').first().catch(() => null);
+    if (!ready) await storage.migrate();
+    migrated = true;
+  }
 
   const app = createApp({ storage, config });
 

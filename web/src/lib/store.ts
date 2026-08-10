@@ -36,7 +36,8 @@ export interface ClockStore {
   setNote: (sessionId: string, note: string) => Promise<void>;
 }
 
-const POLL_MS = 10_000;
+const POLL_MS_IDLE = 15_000; // 空闲时慢轮询
+const POLL_MS_ACTIVE = 5_000; // 运行中快轮询（UI 靠单调时钟平滑，轮询只校准）
 
 export function useClockStore(): ClockStore {
   const [phase, setPhase] = useState<AuthPhase>('loading');
@@ -56,25 +57,19 @@ export function useClockStore(): ClockStore {
     setState(s);
   }, []);
 
-  const loadSessions = useCallback(async (date: string) => {
-    try {
-      const data = await apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${date}`);
-      setSessions(data.sessions);
-    } catch {
-      /* 静默：时间轴保留旧数据 */
-    }
-  }, []);
-
   const refresh = useCallback(async () => {
     try {
-      const s = await apiGet<StateApi>('/api/v1/state');
+      // state 与 sessions 并行拉取，减少串行延迟
+      const [s] = await Promise.all([
+        apiGet<StateApi>('/api/v1/state'),
+        apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${shanghaiTodayLocal()}`).then((d) => setSessions(d.sessions)).catch(() => {}),
+      ]);
       applyState(s);
       setError(null);
-      await loadSessions(s.today_date);
     } catch (e) {
       setError('暂时无法同步，正在重试');
     }
-  }, [applyState, loadSessions]);
+  }, [applyState]);
 
   // 初始鉴权探测
   useEffect(() => {
@@ -95,11 +90,13 @@ export function useClockStore(): ClockStore {
     })();
   }, []);
 
-  // ready 后启动轮询
+  // ready 后启动轮询；运行中加快频率
+  const isActive = state?.active_session != null;
   useEffect(() => {
     if (phase !== 'ready') return;
     refresh();
-    pollRef.current = window.setInterval(refresh, POLL_MS);
+    const interval = isActive ? POLL_MS_ACTIVE : POLL_MS_IDLE;
+    pollRef.current = window.setInterval(refresh, interval);
     const onVisible = () => {
       if (document.visibilityState === 'visible') refresh();
     };
@@ -110,7 +107,7 @@ export function useClockStore(): ClockStore {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onVisible);
     };
-  }, [phase, refresh]);
+  }, [phase, refresh, isActive]);
 
   // 加载 subjects（ready 后一定有凭据）
   useEffect(() => {
@@ -146,6 +143,30 @@ export function useClockStore(): ClockStore {
 
   const activeId = state?.active_session?.session_id ?? null;
 
+  /**
+   * 乐观更新活动会话状态：点击即响应，不等网络；后台 refresh 以服务端事实校正。
+   * 暂停时把确认秒数推进到当前单调时刻再冻结，避免 UI 先显示旧锚点、后被轮询"跳秒"。
+   */
+  const optimisticSetStatus = useCallback((status: 'running' | 'paused' | null) => {
+    setState((prev) => {
+      if (!prev?.active_session) return prev;
+      let seconds = prev.active_session.active_seconds;
+      if (status === 'paused' && prev.active_session.status === 'running') {
+        // 暂停：把秒数推进到当前单调时刻再冻结，避免跳回旧锚点
+        const elapsed = Math.max(0, (performance.now() - perfAtStateRef.current) / 1000);
+        seconds = prev.active_session.active_seconds + Math.floor(elapsed);
+      }
+      if (status === 'running' && prev.active_session.status === 'paused') {
+        // 继续：重锚到"现在"，否则会把暂停时长也算进 elapsed
+        perfAtStateRef.current = performance.now();
+      }
+      return {
+        ...prev,
+        active_session: status === null ? null : { ...prev.active_session, status, active_seconds: seconds },
+      };
+    });
+  }, []);
+
   const start = useCallback(
     async (subjectId: string, intentNote: string | null) => {
       setBusy(true);
@@ -166,38 +187,47 @@ export function useClockStore(): ClockStore {
 
   const pause = useCallback(async () => {
     if (!activeId) return;
+    optimisticSetStatus('paused'); // 立即反馈
     setBusy(true);
-    await apiPost(`/api/v1/sessions/${activeId}/pause`);
+    const res = await apiPost(`/api/v1/sessions/${activeId}/pause`);
     setBusy(false);
-    await refresh();
-  }, [activeId, refresh]);
+    if (!res.ok) { optimisticSetStatus('running'); return; } // 失败回滚
+    refresh();
+  }, [activeId, refresh, optimisticSetStatus]);
 
   const resume = useCallback(async () => {
     if (!activeId) return;
+    optimisticSetStatus('running');
     setBusy(true);
-    await apiPost(`/api/v1/sessions/${activeId}/resume`);
+    const res = await apiPost(`/api/v1/sessions/${activeId}/resume`);
     setBusy(false);
-    await refresh();
-  }, [activeId, refresh]);
+    if (!res.ok) { optimisticSetStatus('paused'); return; }
+    refresh();
+  }, [activeId, refresh, optimisticSetStatus]);
 
   const stop = useCallback(
     async (endNote: string | null) => {
       if (!activeId) return;
+      optimisticSetStatus(null); // 立即回到空闲/结束反馈
       setBusy(true);
-      await apiPost(`/api/v1/sessions/${activeId}/stop`, { end_note: endNote || null });
+      const res = await apiPost(`/api/v1/sessions/${activeId}/stop`, { end_note: endNote || null });
       setBusy(false);
-      await refresh();
+      refresh();
     },
-    [activeId, refresh],
+    [activeId, refresh, optimisticSetStatus],
   );
 
   const switchSubject = useCallback(
     async (subjectId: string) => {
       if (!activeId) return;
       setBusy(true);
-      await apiPost(`/api/v1/sessions/${activeId}/switch`, { subject_id: subjectId });
+      const res = await apiPost<{ started?: { session_id: string; subject_id: string; status: 'running' } }>(
+        `/api/v1/sessions/${activeId}/switch`,
+        { subject_id: subjectId },
+      );
       setBusy(false);
-      await refresh();
+      if (!res.ok) return;
+      refresh();
     },
     [activeId, refresh],
   );

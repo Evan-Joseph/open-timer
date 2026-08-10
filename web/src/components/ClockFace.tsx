@@ -1,6 +1,6 @@
 /** 时钟主区：空闲 / 运行 / 暂停 / 结束反馈四态。 */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Pause, Play, Square, Flag } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
@@ -41,27 +41,42 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   /* ---------- 结束反馈 ---------- */
   const [lastStopped, setLastStopped] = useState<{ sessionId: string; subjectId: string; seconds: number } | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
-  const [selectedSubject, setSelectedSubject] = useState<string>(subjects[0]?.subject_id ?? 'math');
+  const [selectedSubject, setSelectedSubject] = useState<string>(
+    () => localStorage.getItem('clock-last-subject') || 'math',
+  );
   const [intentDraft, setIntentDraft] = useState('');
+  /** 用户手动选过后，任何轮询/异步更新都不得再改变选择 */
+  const userPickedRef = useRef(false);
 
-  // 空闲态默认选最近科目
+  const pickSubject = useCallback((id: string) => {
+    userPickedRef.current = true;
+    setSelectedSubject(id);
+  }, []);
+
+  // 记住最近使用科目（下次进入直接默认）
   useEffect(() => {
-    const recent = store.sessions.map((s) => s.subject_id);
-    if (recent.length > 0 && selectedSubject === subjects[0]?.subject_id) {
-      setSelectedSubject(recent[0]);
+    localStorage.setItem('clock-last-subject', selectedSubject);
+  }, [selectedSubject]);
+
+  // 仅当“从未手动选过且无本地记录”时，才用当天最后一个会话的科目作默认值（只发生一次）
+  useEffect(() => {
+    if (userPickedRef.current) return;
+    if (localStorage.getItem('clock-last-subject')) return;
+    if (store.sessions.length > 0) {
+      userPickedRef.current = true; // 防止后续轮询再次改动
+      setSelectedSubject(store.sessions[store.sessions.length - 1].subject_id);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.sessions]);
 
   const subjectOf = (id: string | null | undefined) => subjects.find((s) => s.subject_id === id);
 
   const handleStop = async () => {
     const snapshot = active ? { sessionId: active.session_id, subjectId: active.subject_id, seconds } : null;
-    await store.stop(null);
     if (snapshot) {
       if (settings.finishSound) playFinishChime();
-      setLastStopped(snapshot);
+      setLastStopped(snapshot); // 立即呈现结束反馈（store.stop 内部乐观清空活动会话）
     }
+    await store.stop(null);
   };
 
   /* ---------- 结束反馈态 ---------- */
@@ -209,7 +224,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             aria-checked={selectedSubject === s.subject_id}
             className={`subject-chip ${selectedSubject === s.subject_id ? 'selected' : ''}`}
             data-color={s.color_id}
-            onClick={() => setSelectedSubject(s.subject_id)}
+            onClick={() => pickSubject(s.subject_id)}
           >
             <span className="pill-dot" aria-hidden />
             {s.display_name}

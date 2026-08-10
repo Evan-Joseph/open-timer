@@ -22,6 +22,12 @@ async function doSetup(page: Page) {
   } else {
     await page.getByRole('button', { name: '进入' }).click();
   }
+  // 清理上一个用例可能残留的活动会话，保证每个用例从空闲态开始
+  const stopBtn = page.getByRole('button', { name: '结束并保存' });
+  if ((await stopBtn.count()) > 0) {
+    await stopBtn.click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+  }
   await expect(page.getByTestId('idle-clock')).toBeVisible();
 }
 
@@ -306,5 +312,19 @@ test.describe('时间轴信标与自动滚动', () => {
     await expect(page.getByText('这一天还没有记录')).toBeVisible();
     // 刻度标签仍存在（时间感保留）
     await expect(page.locator('.tick-label').first()).toBeVisible();
+  });
+});
+
+test.describe('选科状态归属', () => {
+  test('手动选择的科目不被轮询抢回，刷新后记住', async ({ page }) => {
+    await doSetup(page);
+    await page.getByRole('radio', { name: '计算机网络' }).click();
+    await expect(page.getByRole('radio', { name: '计算机网络' })).toHaveAttribute('aria-checked', 'true');
+    // 等待覆盖多次状态更新时机，确认不被抢
+    await page.waitForTimeout(2500);
+    await expect(page.getByRole('radio', { name: '计算机网络' })).toHaveAttribute('aria-checked', 'true');
+    // 刷新后记住最近选择
+    await page.reload();
+    await expect(page.getByRole('radio', { name: '计算机网络' })).toHaveAttribute('aria-checked', 'true');
   });
 });
