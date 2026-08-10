@@ -22,8 +22,7 @@ export interface RhythmConfig {
 }
 
 export const RHYTHM_PRESETS: Record<string, RhythmConfig> = {
-  off: { enabled: false, focusMin: 25, breakMin: 5, longBreakEvery: 4, longBreakMin: 15 },
-  classic: { enabled: true, focusMin: 25, breakMin: 5, longBreakEvery: 4, longBreakMin: 15 },
+  off: { enabled: false, focusMin: 50, breakMin: 10, longBreakEvery: 2, longBreakMin: 20 },
   flow: { enabled: true, focusMin: 52, breakMin: 17, longBreakEvery: 2, longBreakMin: 30 },
   deep: { enabled: true, focusMin: 90, breakMin: 20, longBreakEvery: 2, longBreakMin: 30 },
 };
@@ -98,4 +97,46 @@ export function rhythmDots(status: RhythmStatus, cfg: RhythmConfig): Array<'done
     else dots.push('todo');
   }
   return dots;
+}
+
+/* ================= 节奏阶段推导（自动，无需用户启停休息） =================
+ * 用户只管启停"学习"；App 根据连续专注秒数自动推断当前应处于的阶段：
+ *   focus        — 专注中，未到节奏点
+ *   ready_break  — 到节奏点，可以休息了（横幅提示，不自动暂停）
+ *   break_ready  — 休息时长已够，可以重新投入（横幅提示，不自动继续）
+ * 绝不改变计时状态本身：暂停/继续永远是用户动作，这里只呈现建议。
+ */
+
+export type RhythmPhase = 'focus' | 'ready_break' | 'break_ready';
+
+export interface RhythmPhaseInfo {
+  phase: RhythmPhase;
+  /** focus 阶段：距节奏点的剩余秒数；ready_break：0；break_ready：已超出的休息秒数 */
+  seconds: number;
+  /** ready_break 时建议的休息类型 */
+  suggestedBreak: 'short' | 'long' | null;
+}
+
+/**
+ * 由"当前开放段已过秒数"与"已离开（暂停中）秒数"推导节奏阶段。
+ * @param segSecs   本轮连续专注秒数（running 中的开放段；暂停时冻结在暂停前）
+ * @param awaySecs  离开中已过的秒数（paused 才有；running 传 0/null）
+ * @param paused    是否处于暂停（离开）状态
+ */
+export function rhythmPhase(segSecs: number, awaySecs: number, paused: boolean, cfg: RhythmConfig): RhythmPhaseInfo {
+  const status = rhythmStatus(segSecs, cfg);
+  if (!paused) {
+    // 专注中：到节奏点 → ready_break；否则 focus
+    if (status.atCheckpoint) {
+      return { phase: 'ready_break', seconds: 0, suggestedBreak: status.suggestedBreak };
+    }
+    return { phase: 'focus', seconds: status.roundRemainingSec, suggestedBreak: null };
+  }
+  // 离开中：到节奏点前暂停 → 仍属 focus 内的短暂离开；到点后暂停 → 比较休息时长
+  const away = Math.max(0, Math.floor(awaySecs));
+  const target = status.suggestedBreakSec;
+  if (status.atCheckpoint && away >= target) {
+    return { phase: 'break_ready', seconds: away - target, suggestedBreak: status.suggestedBreak };
+  }
+  return { phase: 'focus', seconds: Math.max(0, target - away), suggestedBreak: status.suggestedBreak };
 }

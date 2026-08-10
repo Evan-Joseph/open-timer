@@ -682,3 +682,68 @@ h1, h2, h3 { letter-spacing: 0; }
   font-size: 14px; font-variant-numeric: tabular-nums;
 }
 .away-note { color: var(--text-3); font-size: 12px; }
+
+/* ---------- Apple Settings 式节奏选择列表 ---------- */
+
+.rhythm-list { display: flex; flex-direction: column; gap: 6px; }
+.rhythm-option {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 14px; border-radius: var(--radius);
+  background: var(--surface-1); border: 1px solid var(--border);
+  text-align: left; transition: border-color 0.15s ease, background 0.15s ease;
+}
+.rhythm-option:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.rhythm-option.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-1));
+}
+.rhythm-option-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rhythm-option-title { font-size: 14px; font-weight: 500; color: var(--text-1); }
+.rhythm-option-sub { font-size: 12px; color: var(--text-2); }
+.rhythm-option-check { color: var(--accent); flex: none; display: inline-flex; }
+
+/* ---------- 节奏阶段横幅（常驻、柔和） ---------- */
+
+.rhythm-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px; border-radius: var(--radius);
+  font-size: 13px; max-width: 480px;
+  border: 1px solid var(--border);
+  animation: nudge-in 0.3s ease;
+}
+.rhythm-banner.ready {
+  background: color-mix(in srgb, #f59e0b 10%, var(--surface-1));
+  border-color: color-mix(in srgb, #f59e0b 35%, transparent);
+  color: var(--text-1);
+}
+.rhythm-banner.go {
+  background: color-mix(in srgb, var(--success) 10%, var(--surface-1));
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
+  color: var(--text-1);
+}
+.banner-icon { display: inline-flex; color: var(--text-2); flex: none; }
+.rhythm-progress.ready { stroke: #f59e0b; }
+.rhythm-progress.go { stroke: var(--success); }
+
+/* ---------- 空闲态间隔提示 ---------- */
+
+.gap-line {
+  font-size: 13px; color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  padding: 4px 12px; border-radius: 999px;
+  background: var(--surface-2);
+}
+
+/* ---------- popover 备注编辑 ---------- */
+
+.popover-note-edit { margin-top: 2px; }
+.popover-note-input {
+  width: 100%; padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text-1); font-size: 13px; font-family: inherit;
+}
+.popover-note-input:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}

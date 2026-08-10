@@ -56,6 +56,9 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const [viewDate, setViewDate] = useState(store.todayDate);
   const [popover, setPopover] = useState<{ seg: RenderSeg; containerX: number } | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  /** popover 内编辑备注 */
+  const [noteDraft, setNoteDraft] = useState('');
+  const [noteSaving, setNoteSaving] = useState(false);
   /** 查看历史日时按日期拉取的会话数据 */
   const [historySessions, setHistorySessions] = useState<SessionApi[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -221,6 +224,8 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const openPopover = useCallback((seg: RenderSeg) => {
     const track = trackRef.current;
     const scrollEl = scrollRef.current;
+    setNoteDraft(seg.note ?? '');
+    setNoteSaving(false);
     if (!track || !scrollEl) {
       setPopover({ seg, containerX: seg.leftPx });
       return;
@@ -259,6 +264,17 @@ export default function Timeline({ store }: { store: ClockStore }) {
       historyCacheRef.current.delete(viewDateRef.current);
     }
   }, [popover, store]);
+
+  // 保存备注
+  const handleSaveNote = useCallback(async () => {
+    if (!popover || noteSaving) return;
+    setNoteSaving(true);
+    await store.setNote(popover.seg.sessionId, noteDraft.trim());
+    setNoteSaving(false);
+    // 关闭并失效历史缓存，让新备注显现
+    setPopover(null);
+    historyCacheRef.current.delete(viewDateRef.current);
+  }, [popover, noteSaving, noteDraft, store]);
 
   // 当日（viewDate）各科小计：跟随所看日期
   const overview = useMemo(() => {
@@ -362,12 +378,38 @@ export default function Timeline({ store }: { store: ClockStore }) {
             {popover.seg.startLabel} – {popover.seg.endLabel ?? '进行中'}
           </div>
           <div className="popover-line">净时长 {formatDurationZh(popover.seg.seconds)}</div>
-          {popover.seg.note && <div className="popover-note">「{popover.seg.note}」</div>}
+          {popover.seg.stopped && (
+            <div className="popover-note-edit">
+              <input
+                className="popover-note-input"
+                placeholder="备注（可选）"
+                value={noteDraft}
+                maxLength={200}
+                onChange={(e) => setNoteDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void handleSaveNote();
+                }}
+                aria-label="编辑备注"
+                data-testid="popover-note-input"
+              />
+            </div>
+          )}
+          {!popover.seg.stopped && popover.seg.note && <div className="popover-note">「{popover.seg.note}」</div>}
           <div className="popover-actions">
             {popover.seg.stopped && (
-              <button className="text-btn withdraw-btn" onClick={() => void handleWithdraw()} data-testid="withdraw-btn">
-                <Undo2 size={13} aria-hidden /> 撤回这条
-              </button>
+              <>
+                <button
+                  className="text-btn"
+                  onClick={() => void handleSaveNote()}
+                  disabled={noteSaving}
+                  data-testid="popover-save-note"
+                >
+                  {noteSaving ? '保存中…' : '保存备注'}
+                </button>
+                <button className="text-btn withdraw-btn" onClick={() => void handleWithdraw()} data-testid="withdraw-btn">
+                  <Undo2 size={13} aria-hidden /> 撤回
+                </button>
+              </>
             )}
             <button className="text-btn" onClick={() => setPopover(null)}>
               关闭

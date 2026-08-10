@@ -1,56 +1,41 @@
 /**
- * 番茄节奏环：当前轮的参考进度。
- * - SVG 圆环 + tabular 数字，随秒数平滑推进；
- * - 到达节奏点：环满 + 温和内联提示（不弹窗、不发声、不自动暂停）；
- * - 全程 prefers-reduced-motion 可用（环本身只是静态快照）。
+ * 节奏环（自动阶段版）：用户只管启停学习，节奏阶段自动推导。
+ * - focus：环随专注秒数推进；
+ * - ready_break：到节奏点，环满 + 琥珀色常驻横幅「可以休息一下了」；
+ * - break_ready：休息够了，绿色常驻横幅「休息够了，回来继续吧」。
+ * 横幅只是呈现建议：暂停/继续始终是用户动作，不自动改变计时。
  */
 
-import { useEffect, useRef, useState } from 'react';
-import { Coffee, CupSoda } from 'lucide-react';
+import { Coffee, CupSoda, Sparkles } from 'lucide-react';
 import type { RhythmConfig } from '@clock/shared';
-import { rhythmStatus, rhythmDots } from '@clock/shared';
+import { rhythmStatus, rhythmDots, rhythmPhase } from '@clock/shared';
 
 interface Props {
-  /** 当前开放段已过秒数（running 中）；paused/无段时传 null */
+  /** 本轮连续专注秒数（running 推进；paused 冻结） */
   segmentSeconds: number | null;
-  /** 会话总净秒数（含历史轮），用于累计展示 */
-  totalSeconds: number;
+  /** 离开中已过秒数（paused 推进） */
+  awaySeconds: number;
   config: RhythmConfig;
   paused: boolean;
-  /** 用户点击"休息一下"（= 主动暂停） */
-  onTakeBreak: () => void;
-  /** 用户忽略提示继续 */
-  onDismissNudge: () => void;
-  /** 是否允许显示节奏点提示 */
-  nudgeEnabled: boolean;
+  /** 是否显示阶段横幅（设置内可关） */
+  showBanners?: boolean;
 }
 
 const RADIUS = 84;
 const STROKE = 5;
 const CIRC = 2 * Math.PI * RADIUS;
 
-export default function RhythmRing({ segmentSeconds, totalSeconds, config, paused, onTakeBreak, onDismissNudge, nudgeEnabled }: Props) {
-  const [nudgeDismissedAt, setNudgeDismissedAt] = useState<number | null>(null);
-  const lastNudgeRoundRef = useRef<number>(0);
-
+export default function RhythmRing({ segmentSeconds, awaySeconds, config, paused, showBanners = true }: Props) {
   const segSecs = segmentSeconds ?? 0;
   const status = rhythmStatus(segSecs, config);
   const dots = rhythmDots(status, config);
-
-  // 新轮次开始（或段重新开始）时清除 dismissed，允许下一个节奏点再提示
-  useEffect(() => {
-    if (status.completedRounds !== lastNudgeRoundRef.current) {
-      lastNudgeRoundRef.current = status.completedRounds;
-      setNudgeDismissedAt(null);
-    }
-  }, [status.completedRounds]);
-
-  const showNudge = nudgeEnabled && status.atCheckpoint && !paused && segmentSeconds !== null && nudgeDismissedAt === null;
+  const phase = rhythmPhase(segSecs, awaySeconds, paused, config);
 
   const dashOffset = CIRC * (1 - status.progress);
+  const ringTone = phase.phase === 'ready_break' ? 'ready' : phase.phase === 'break_ready' ? 'go' : '';
 
   return (
-    <div className="rhythm" aria-label="专注节奏参考">
+    <div className="rhythm" aria-label="专注节奏">
       <div className="rhythm-ring-wrap">
         <svg className="rhythm-svg" width={180} height={180} viewBox="0 0 180 180" role="img" aria-hidden>
           <circle cx={90} cy={90} r={RADIUS} className="rhythm-track" strokeWidth={STROKE} fill="none" />
@@ -58,7 +43,7 @@ export default function RhythmRing({ segmentSeconds, totalSeconds, config, pause
             cx={90}
             cy={90}
             r={RADIUS}
-            className={`rhythm-progress ${status.atCheckpoint ? 'complete' : ''}`}
+            className={`rhythm-progress ${ringTone}`}
             strokeWidth={STROKE}
             fill="none"
             strokeLinecap="round"
@@ -70,11 +55,13 @@ export default function RhythmRing({ segmentSeconds, totalSeconds, config, pause
         <div className="rhythm-center">
           <div className="rhythm-round">第 {status.round} 轮</div>
           <div className="rhythm-remain" data-testid="rhythm-remain">
-            {paused || segmentSeconds === null
-              ? '已离开'
-              : status.atCheckpoint
-                ? '到节奏点了'
-                : formatRemain(status.roundRemainingSec)}
+            {phase.phase === 'ready_break'
+              ? '到节奏点了'
+              : phase.phase === 'break_ready'
+                ? '休息够了'
+                : paused
+                  ? '小憩中'
+                  : formatRemain(status.roundRemainingSec)}
           </div>
           <div className="rhythm-dots" aria-label={`本轮周期内已完成 ${status.completedRounds % config.longBreakEvery} 轮`}>
             {dots.map((d, i) => (
@@ -84,24 +71,31 @@ export default function RhythmRing({ segmentSeconds, totalSeconds, config, pause
         </div>
       </div>
 
-      {showNudge ? (
-        <div className="rhythm-nudge" role="status" data-testid="rhythm-nudge">
-          <span className="nudge-icon" aria-hidden>
-            {status.suggestedBreak === 'long' ? <Coffee size={15} /> : <CupSoda size={15} />}
+      {showBanners && phase.phase === 'ready_break' && (
+        <div className="rhythm-banner ready" role="status" data-testid="rhythm-banner">
+          <span className="banner-icon" aria-hidden>
+            {phase.suggestedBreak === 'long' ? <Coffee size={15} /> : <CupSoda size={15} />}
           </span>
           <span>
-            已连续专注 {formatRemain(Math.floor(segSecs))}，{status.suggestedBreak === 'long' ? '建议来个长休息' : '可以歇一会儿'}。
+            已连续专注 {Math.floor(segSecs / 60)} 分钟，
+            {phase.suggestedBreak === 'long' ? '适合来一次长休息' : '可以歇一小会儿'}
+            （约 {config.focusMin >= 90 ? config.longBreakMin : config.breakMin} 分钟）。点「暂停」即可开始休息。
           </span>
-          <button className="nudge-btn primary" onClick={onTakeBreak}>
-            休息一下
-          </button>
-          <button className="nudge-btn" onClick={() => { setNudgeDismissedAt(Date.now()); onDismissNudge(); }}>
-            继续专注
-          </button>
         </div>
-      ) : (
+      )}
+
+      {showBanners && phase.phase === 'break_ready' && (
+        <div className="rhythm-banner go" role="status" data-testid="rhythm-banner">
+          <span className="banner-icon" aria-hidden>
+            <Sparkles size={15} />
+          </span>
+          <span>休息够了，随时回来继续。点「继续」即可恢复计时。</span>
+        </div>
+      )}
+
+      {phase.phase === 'focus' && (
         <div className="rhythm-meta">
-          节奏参考 · 专注 {config.focusMin} 分 / 休息 {config.breakMin} 分 · 每 {config.longBreakEvery} 轮长休息
+          专注 {config.focusMin} 分 / 小憩 {config.breakMin} 分 · 每 {config.longBreakEvery} 轮长休息 {config.longBreakMin} 分
         </div>
       )}
     </div>

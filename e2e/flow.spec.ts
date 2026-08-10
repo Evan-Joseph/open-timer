@@ -228,35 +228,32 @@ test.describe('截图矩阵与视觉', () => {
   });
 });
 
-test.describe('番茄节奏（可选参考）', () => {
-  test('开启节奏后运行态显示节奏环，休息按钮即暂停', async ({ page }) => {
+test.describe('番茄节奏（自动阶段）', () => {
+  test('开启节奏后显示节奏环；暂停显示离开行与节奏环小憩态', async ({ page }) => {
     await doSetup(page);
 
-    // 设置里开启自定义节奏（5 分钟专注，UI 可立即验证）
+    // 设置里开启自定义节奏
     await page.getByRole('button', { name: '设置' }).click();
     await page.getByRole('radio', { name: '自定义' }).click();
-    const focusInput = page.locator('.rhythm-field input').first();
-    await focusInput.fill('5');
-    await focusInput.press('Tab');
     await page.keyboard.press('Escape');
 
     await page.getByRole('radio', { name: '数学一' }).click();
     await page.getByTestId('start-btn').click();
 
-    // 节奏环出现
+    // 节奏环出现（未到节奏点，无横幅）
     await expect(page.getByTestId('rhythm-remain')).toBeVisible();
     await expect(page.getByText('第 1 轮')).toBeVisible();
+    await expect(page.getByTestId('rhythm-banner')).toHaveCount(0);
 
-    // 到节奏点前不出现提示
-    await expect(page.getByTestId('rhythm-nudge')).toHaveCount(0);
-
-    // 暂停后显示离开时长与节奏环的离开提示
+    // 暂停后显示离开行与节奏环的小憩态
     await page.getByRole('button', { name: '暂停计时' }).click();
     await expect(page.getByTestId('away-line')).toBeVisible();
-    await expect(page.getByText('已离开').first()).toBeVisible();
+    await expect(page.getByTestId('away-line')).toContainText('已离开');
+    await expect(page.getByText('小憩中')).toBeVisible();
 
     // 继续并结束清理
     await page.getByRole('button', { name: '继续计时' }).click();
+    await expect(page.getByTestId('away-line')).toHaveCount(0);
     await page.getByRole('button', { name: '结束并保存' }).click();
     await page.getByRole('button', { name: '好，继续' }).click();
   });
@@ -399,5 +396,31 @@ test.describe('离开（暂停）时长显示', () => {
     await expect(page.getByTestId('away-line')).toHaveCount(0);
     await page.getByRole('button', { name: '结束并保存' }).click();
     await page.getByRole('button', { name: '好，继续' }).click();
+  });
+});
+
+test.describe('时间轴 popover 编辑备注', () => {
+  test('点击已停止片段可编辑并保存备注', async ({ page }) => {
+    await doSetup(page);
+    // 产生一个已停止会话
+    await page.getByRole('radio', { name: '英语一' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1200);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+    await expect(page.locator('.seg').first()).toBeVisible();
+
+    // 打开 popover → 填备注 → 保存
+    await page.locator('.seg-hit').last().click();
+    await expect(page.getByTestId('seg-popover')).toBeVisible();
+    await page.getByTestId('popover-note-input').fill('精读真题 2010 年');
+    await page.getByTestId('popover-save-note').click();
+
+    // 保存后 popover 关闭，时间轴刷新后再次打开可见备注
+    await expect(page.getByTestId('seg-popover')).toHaveCount(0);
+    await page.waitForTimeout(800);
+    await page.locator('.seg-hit').last().click();
+    await expect(page.getByTestId('popover-note-input')).toHaveValue('精读真题 2010 年');
+    await page.keyboard.press('Escape');
   });
 });

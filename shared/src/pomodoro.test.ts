@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { RHYTHM_PRESETS, rhythmStatus, rhythmDots, isValidRhythm } from '../src/pomodoro.js';
+import { RHYTHM_PRESETS, rhythmStatus, rhythmDots, rhythmPhase, isValidRhythm, type RhythmConfig } from '../src/pomodoro.js';
 
-const CLASSIC = RHYTHM_PRESETS.classic;
+const CLASSIC: RhythmConfig = { enabled: true, focusMin: 25, breakMin: 5, longBreakEvery: 4, longBreakMin: 15 };
 
 describe('番茄节奏（纯参考，不支配）', () => {
   it('段内第一轮的进度与剩余', () => {
@@ -66,5 +66,43 @@ describe('番茄节奏（纯参考，不支配）', () => {
     expect(isValidRhythm({ ...CLASSIC, breakMin: 0 })).toBe(false);
     expect(isValidRhythm(null)).toBe(false);
     expect(isValidRhythm(CLASSIC)).toBe(true);
+  });
+});
+
+describe('rhythmPhase（自动阶段推导）', () => {
+  it('未到节奏点：focus + 剩余秒数', () => {
+    const p = rhythmPhase(10 * 60, 0, false, CLASSIC);
+    expect(p.phase).toBe('focus');
+    expect(p.seconds).toBe(15 * 60);
+  });
+
+  it('到节奏点且未暂停：ready_break', () => {
+    const p = rhythmPhase(25 * 60, 0, false, CLASSIC);
+    expect(p.phase).toBe('ready_break');
+    expect(p.suggestedBreak).toBe('short');
+  });
+
+  it('到节奏点且暂停中、休息不够：focus（剩余休息参考）', () => {
+    const p = rhythmPhase(25 * 60, 60, true, CLASSIC);
+    expect(p.phase).toBe('focus');
+    expect(p.seconds).toBe(5 * 60 - 60);
+  });
+
+  it('到节奏点且暂停中、休息够了：break_ready', () => {
+    const p = rhythmPhase(25 * 60, 5 * 60, true, CLASSIC);
+    expect(p.phase).toBe('break_ready');
+    expect(p.seconds).toBe(0);
+  });
+
+  it('休息超时：break_ready 且显示超出秒数', () => {
+    const p = rhythmPhase(25 * 60, 5 * 60 + 40, true, CLASSIC);
+    expect(p.phase).toBe('break_ready');
+    expect(p.seconds).toBe(40);
+  });
+
+  it('第 4 轮后建议长休息', () => {
+    const p = rhythmPhase(4 * 25 * 60, 0, false, CLASSIC);
+    expect(p.phase).toBe('ready_break');
+    expect(p.suggestedBreak).toBe('long');
   });
 });

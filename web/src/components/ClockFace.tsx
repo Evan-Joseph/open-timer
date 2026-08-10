@@ -1,6 +1,6 @@
 /** 时钟主区：空闲 / 运行 / 暂停 / 结束反馈四态。 */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Pause, Play, Square, Flag, Undo2 } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
@@ -33,12 +33,25 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const awaySeconds = useMonotonicSeconds(store.awayAnchor, 1000);
   const beijing = useBeijingTime(anchor ? { serverNowMs: anchor.serverNowMs, anchorPerfMs: anchor.anchorPerfMs } : null);
 
-  // 空闲态北京时间（无锚点时用 Date 直接显示）
-  const [idleTime, setIdleTime] = useState(() => formatBeijingTime(Date.now()));
+  // 空闲态北京时间与"距上次专注"间隔（5s 步进，共用一个 interval）
+  const [idleNowMs, setIdleNowMs] = useState(() => Date.now());
   useEffect(() => {
-    const t = window.setInterval(() => setIdleTime(formatBeijingTime(Date.now())), 5000);
+    const t = window.setInterval(() => setIdleNowMs(Date.now()), 5000);
     return () => window.clearInterval(t);
   }, []);
+  const idleTime = formatBeijingTime(idleNowMs);
+
+  // 距上次专注：取今天最后一个已停止会话的结束时刻；中性陈述、跨日归零
+  const gapSinceLastFocusMs = useMemo(() => {
+    let lastEndMs: number | null = null;
+    for (const s of store.sessions) {
+      if (s.status !== 'stopped' || !s.ended_at) continue;
+      const endMs = Date.parse(s.ended_at);
+      if (Number.isFinite(endMs) && (lastEndMs === null || endMs > lastEndMs)) lastEndMs = endMs;
+    }
+    if (lastEndMs === null) return null;
+    return Math.max(0, idleNowMs - lastEndMs);
+  }, [store.sessions, idleNowMs]);
 
   /* ---------- 结束反馈 ---------- */
   const [lastStopped, setLastStopped] = useState<{ sessionId: string; subjectId: string; seconds: number } | null>(null);
@@ -168,16 +181,14 @@ export default function ClockFace({ store }: { store: ClockStore }) {
           </div>
         )}
 
-        {/* 番茄节奏参考（设置内开启后显示） */}
+        {/* 番茄节奏（自动阶段：到点提示休息、休息够了提示回归，均不自动改变计时） */}
         {settings.rhythm.enabled && (
           <RhythmRing
             segmentSeconds={segmentSecs}
-            totalSeconds={seconds}
+            awaySeconds={awaySeconds}
             config={settings.rhythm}
             paused={paused}
-            nudgeEnabled={settings.rhythmNudge}
-            onTakeBreak={() => void store.pause()}
-            onDismissNudge={() => {}}
+            showBanners={settings.rhythmNudge}
           />
         )}
 
@@ -241,6 +252,11 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       <div className="idle-date">
         {new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', dateStyle: 'full' }).format(new Date())}
       </div>
+      {gapSinceLastFocusMs !== null && (
+        <div className="gap-line" data-testid="gap-line">
+          距上次专注 {formatDurationZh(Math.floor(gapSinceLastFocusMs / 1000))}
+        </div>
+      )}
 
       <div className="subject-picker" role="radiogroup" aria-label="选择科目">
         {ordered.map((s) => (
