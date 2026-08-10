@@ -204,6 +204,21 @@ export default function Timeline({ store }: { store: ClockStore }) {
         </div>
       )}
 
+      <div className="today-overview">
+        {store.todayBySubject.length > 0 &&
+          store.todayBySubject
+            .sort((a, b) => b.seconds - a.seconds)
+            .map((it) => {
+              const subj = store.subjects.find((s) => s.subject_id === it.subject_id);
+              return (
+                <span key={it.subject_id} className="overview-item" data-color={subj?.color_id}>
+                  <span className="pill-dot" aria-hidden />
+                  {subj?.display_name ?? it.subject_id} <strong>{formatDurationZh(it.seconds)}</strong>
+                </span>
+              );
+            })}
+      </div>
+
       <div className="legend" aria-hidden={false}>
         {store.subjects.map((s) => (
           <span key={s.subject_id} className="legend-item" data-color={s.color_id}>

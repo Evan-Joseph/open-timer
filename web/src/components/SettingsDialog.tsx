@@ -1,4 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog';
+import { useSettings, updateSettings } from '../lib/settings.js';
+import { RHYTHM_PRESETS } from '@clock/shared';
 
 interface Props {
   open: boolean;
@@ -9,8 +11,16 @@ interface Props {
 }
 
 export default function SettingsDialog({ open, onOpenChange, theme, onThemeChange, onLogout }: Props) {
+  const settings = useSettings();
   const animationsOn = localStorage.getItem('clock-animations') !== 'off';
   const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const r = settings.rhythm;
+  const presetKey = !r.enabled
+    ? 'off'
+    : r.focusMin === 52 && r.breakMin === 17
+      ? 'flow'
+      : 'classic';
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -37,6 +47,104 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
                   {label}
                 </button>
               ))}
+            </div>
+          </div>
+
+          <div className="setting-row">
+            <span className="setting-label">专注节奏（可选参考，不会自动暂停）</span>
+            <div className="seg-control" role="radiogroup" aria-label="专注节奏">
+              {[
+                ['off', '关闭'],
+                ['classic', '经典 25/5'],
+                ['flow', '沉浸 52/17'],
+                ['custom', '自定义'],
+              ].map(([value, label]) => {
+                const active = presetKey === value || (value === 'custom' && r.enabled && presetKey === 'classic' && isCustom(r));
+                return (
+                  <button
+                    key={value}
+                    role="radio"
+                    aria-checked={active}
+                    className={`seg-item ${active ? 'active' : ''}`}
+                    onClick={() => {
+                      if (value === 'off') updateSettings({ rhythm: RHYTHM_PRESETS.off });
+                      else if (value === 'classic') updateSettings({ rhythm: RHYTHM_PRESETS.classic });
+                      else if (value === 'flow') updateSettings({ rhythm: RHYTHM_PRESETS.flow });
+                      else updateSettings({ rhythm: { ...r, enabled: true } });
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            {r.enabled && (
+              <div className="rhythm-custom">
+                <label className="rhythm-field">
+                  专注
+                  <input
+                    type="number"
+                    min={5}
+                    max={120}
+                    value={r.focusMin}
+                    onChange={(e) => updateSettings({ rhythm: { ...r, focusMin: clamp(Number(e.target.value), 5, 120) } })}
+                  />
+                  分
+                </label>
+                <label className="rhythm-field">
+                  短休
+                  <input
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={r.breakMin}
+                    onChange={(e) => updateSettings({ rhythm: { ...r, breakMin: clamp(Number(e.target.value), 1, 60) } })}
+                  />
+                  分
+                </label>
+                <label className="rhythm-field">
+                  每
+                  <input
+                    type="number"
+                    min={2}
+                    max={8}
+                    value={r.longBreakEvery}
+                    onChange={(e) => updateSettings({ rhythm: { ...r, longBreakEvery: clamp(Number(e.target.value), 2, 8) } })}
+                  />
+                  轮长休
+                  <input
+                    type="number"
+                    min={5}
+                    max={90}
+                    value={r.longBreakMin}
+                    onChange={(e) => updateSettings({ rhythm: { ...r, longBreakMin: clamp(Number(e.target.value), 5, 90) } })}
+                  />
+                  分
+                </label>
+              </div>
+            )}
+            <p className="setting-hint">到节奏点只给温和提示，你可以随时忽略继续专注。休息 = 暂停，不计学习时长。</p>
+          </div>
+
+          <div className="setting-row">
+            <span className="setting-label">提示与声音</span>
+            <div className="toggle-lines">
+              <label className="toggle-line">
+                <input
+                  type="checkbox"
+                  checked={settings.rhythmNudge}
+                  onChange={(e) => updateSettings({ rhythmNudge: e.target.checked })}
+                />
+                到节奏点时温和提示休息
+              </label>
+              <label className="toggle-line">
+                <input
+                  type="checkbox"
+                  checked={settings.finishSound}
+                  onChange={(e) => updateSettings({ finishSound: e.target.checked })}
+                />
+                结束计时时播放轻提示音
+              </label>
             </div>
           </div>
 
@@ -85,4 +193,13 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
       </Dialog.Portal>
     </Dialog.Root>
   );
+}
+
+function clamp(v: number, min: number, max: number): number {
+  if (!Number.isFinite(v)) return min;
+  return Math.max(min, Math.min(max, Math.round(v)));
+}
+
+function isCustom(r: { focusMin: number; breakMin: number }): boolean {
+  return !(r.focusMin === 25 && r.breakMin === 5) && !(r.focusMin === 52 && r.breakMin === 17);
 }

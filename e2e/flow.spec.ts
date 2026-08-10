@@ -221,3 +221,50 @@ test.describe('截图矩阵与视觉', () => {
     await page.getByRole('button', { name: '好，继续' }).click();
   });
 });
+
+test.describe('番茄节奏（可选参考）', () => {
+  test('开启节奏后运行态显示节奏环，休息按钮即暂停', async ({ page }) => {
+    await doSetup(page);
+
+    // 设置里开启自定义节奏（5 分钟专注，UI 可立即验证）
+    await page.getByRole('button', { name: '设置' }).click();
+    await page.getByRole('radio', { name: '自定义' }).click();
+    const focusInput = page.locator('.rhythm-field input').first();
+    await focusInput.fill('5');
+    await focusInput.press('Tab');
+    await page.keyboard.press('Escape');
+
+    await page.getByRole('radio', { name: '数学一' }).click();
+    await page.getByTestId('start-btn').click();
+
+    // 节奏环出现
+    await expect(page.getByTestId('rhythm-remain')).toBeVisible();
+    await expect(page.getByText('第 1 轮')).toBeVisible();
+
+    // 到节奏点前不出现提示
+    await expect(page.getByTestId('rhythm-nudge')).toHaveCount(0);
+
+    // 暂停后节奏环显示已暂停
+    await page.getByRole('button', { name: '暂停计时' }).click();
+    await expect(page.getByText('已暂停').first()).toBeVisible();
+
+    // 继续并结束清理
+    await page.getByRole('button', { name: '继续计时' }).click();
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+  });
+
+  test('节奏默认关闭，运行态不显示节奏环', async ({ page, context }) => {
+    // 先进入页面拿到 origin，再清设置与 cookie
+    await page.goto('/');
+    await page.evaluate(() => localStorage.removeItem('clock-settings-v2'));
+    await context.clearCookies();
+    await doSetup(page);
+    await page.getByRole('radio', { name: '英语一' }).click();
+    await page.getByTestId('start-btn').click();
+    await expect(page.getByTestId('timer-seconds')).toBeVisible();
+    await expect(page.locator('.rhythm-ring-wrap')).toHaveCount(0);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+  });
+});

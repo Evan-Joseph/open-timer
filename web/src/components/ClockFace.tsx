@@ -5,6 +5,9 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Pause, Play, Square, Flag } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
 import { useMonotonicSeconds, useBeijingTime, formatHms, formatDurationZh, formatBeijingTime } from '../lib/clock.js';
+import { useSettings } from '../lib/settings.js';
+import { playFinishChime } from '../lib/sound.js';
+import RhythmRing from './RhythmRing.js';
 
 const REDUCED = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const animationsEnabled = !REDUCED && localStorage.getItem('clock-animations') !== 'off';
@@ -21,8 +24,11 @@ function M({ children, ...props }: any) {
 export default function ClockFace({ store }: { store: ClockStore }) {
   const { state, subjects, anchor, busy } = store;
   const active = state?.active_session ?? null;
+  const settings = useSettings();
 
   const seconds = useMonotonicSeconds(anchor);
+  /** 当前开放段（本轮连续专注）已过秒数，供节奏环 */
+  const segmentSecs = useMonotonicSeconds(store.segmentAnchor, 1000);
   const beijing = useBeijingTime(anchor ? { serverNowMs: anchor.serverNowMs, anchorPerfMs: anchor.anchorPerfMs } : null);
 
   // 空闲态北京时间（无锚点时用 Date 直接显示）
@@ -52,7 +58,10 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const handleStop = async () => {
     const snapshot = active ? { sessionId: active.session_id, subjectId: active.subject_id, seconds } : null;
     await store.stop(null);
-    if (snapshot) setLastStopped(snapshot);
+    if (snapshot) {
+      if (settings.finishSound) playFinishChime();
+      setLastStopped(snapshot);
+    }
   };
 
   /* ---------- 结束反馈态 ---------- */
@@ -117,6 +126,19 @@ export default function ClockFace({ store }: { store: ClockStore }) {
           北京时间 {paused ? beijing : beijing} · 今天累计 {formatDurationZh(state?.today_active_seconds ?? 0)}
         </div>
         {active.intent_note && <div className="intent-line">「{active.intent_note}」</div>}
+
+        {/* 番茄节奏参考（设置内开启后显示） */}
+        {settings.rhythm.enabled && (
+          <RhythmRing
+            segmentSeconds={segmentSecs}
+            totalSeconds={seconds}
+            config={settings.rhythm}
+            paused={paused}
+            nudgeEnabled={settings.rhythmNudge}
+            onTakeBreak={() => void store.pause()}
+            onDismissNudge={() => {}}
+          />
+        )}
 
         <div className="control-row">
           {paused ? (

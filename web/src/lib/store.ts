@@ -15,6 +15,10 @@ export interface ClockStore {
   subjects: SubjectApi[];
   state: StateApi | null;
   anchor: SyncAnchor | null;
+  /** 当前开放段（本轮连续专注）的单调锚点，用于节奏环 */
+  segmentAnchor: SyncAnchor | null;
+  /** 今日各科净秒数 */
+  todayBySubject: Array<{ subject_id: string; seconds: number }>;
   sessions: SessionApi[];
   todayDate: string;
   busy: boolean;
@@ -228,11 +232,38 @@ export function useClockStore(): ClockStore {
     };
   }, [state]);
 
+  // 当前开放段锚点：段已过秒数 = server_now - current_segment_started_at
+  const segmentAnchor: SyncAnchor | null = useMemo(() => {
+    const a = state?.active_session;
+    if (!a || !a.current_segment_started_at) return null;
+    const segStartedMs = Date.parse(a.current_segment_started_at);
+    if (!Number.isFinite(segStartedMs)) return null;
+    const segSecs = a.status === 'running' ? Math.max(0, (state.server_now_ms - segStartedMs) / 1000) : 0;
+    return {
+      confirmedSeconds: Math.floor(segSecs),
+      running: a.status === 'running',
+      anchorPerfMs: perfAtStateRef.current,
+      serverNowMs: state.server_now_ms,
+    };
+  }, [state]);
+
+  // 今日各科小计（sessions 已按当日窗口裁剪，active_seconds 直接累加）
+  const todayBySubject = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const s of sessions) {
+      if (s.status === 'voided') continue;
+      map.set(s.subject_id, (map.get(s.subject_id) ?? 0) + s.active_seconds);
+    }
+    return [...map.entries()].map(([subject_id, seconds]) => ({ subject_id, seconds }));
+  }, [sessions]);
+
   return {
     phase,
     subjects,
     state,
     anchor,
+    segmentAnchor,
+    todayBySubject,
     sessions,
     todayDate,
     busy,

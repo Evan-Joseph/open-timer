@@ -442,3 +442,106 @@ button:focus-visible, input:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---------- 番茄节奏环 ---------- */
+
+.rhythm {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  margin-top: 4px;
+}
+.rhythm-ring-wrap { position: relative; width: 180px; height: 180px; }
+.rhythm-svg { position: absolute; inset: 0; }
+.rhythm-track { stroke: var(--surface-2); }
+.rhythm-progress {
+  stroke: var(--accent);
+  transition: stroke-dashoffset 0.9s linear, stroke 0.3s ease;
+}
+.rhythm-progress.complete { stroke: #30a46c; }
+[data-theme='dark'] .rhythm-progress.complete { stroke: #4ade80; }
+
+.rhythm-center {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+}
+.rhythm-round { font-size: 12px; color: var(--text-3); }
+.rhythm-remain { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.rhythm-dots { display: flex; gap: 5px; margin-top: 2px; }
+.rhythm-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--surface-2); }
+.rhythm-dot.done { background: var(--accent); }
+.rhythm-dot.current { background: var(--text-2); }
+
+.rhythm-meta { font-size: 12px; color: var(--text-3); }
+
+.rhythm-nudge {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center;
+  padding: 8px 14px; border-radius: var(--radius);
+  background: var(--surface-1); border: 1px solid var(--border); box-shadow: var(--shadow);
+  font-size: 13px; color: var(--text-1);
+  max-width: 480px;
+  animation: nudge-in 0.3s ease;
+}
+.nudge-icon { color: var(--text-2); display: inline-flex; }
+.nudge-btn {
+  padding: 4px 12px; border-radius: 6px; font-size: 12px;
+  border: 1px solid var(--border); color: var(--text-2); background: transparent;
+}
+.nudge-btn:hover { background: var(--surface-2); }
+.nudge-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.nudge-btn.primary:hover { background: var(--accent-press); }
+
+@keyframes nudge-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- 设置：节奏自定义与开关 ---------- */
+
+.rhythm-custom {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  font-size: 13px; color: var(--text-2);
+}
+.rhythm-field { display: inline-flex; align-items: center; gap: 5px; }
+.rhythm-field input {
+  width: 56px; padding: 4px 6px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text-1); font-size: 13px; text-align: center;
+}
+
+.toggle-lines { display: flex; flex-direction: column; gap: 8px; }
+.toggle-line {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--text-1); cursor: pointer;
+}
+.toggle-line input { accent-color: var(--accent); width: 15px; height: 15px; }
+
+/* ---------- 时间轴上方：今日概览 ---------- */
+
+.today-overview {
+  display: flex; flex-wrap: wrap; gap: 8px 14px; justify-content: center;
+  max-width: 960px; margin: 0 auto 10px;
+}
+.overview-item {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.overview-item strong { color: var(--text-1); font-weight: 600; }
+
+/* ---------- 结束反馈微动效（温和光晕，可关） ---------- */
+
+.finish-glow { animation: glow-breathe 2.4s ease-in-out; }
+@keyframes glow-breathe {
+  0% { opacity: 0; transform: scale(0.9); }
+  40% { opacity: 1; }
+  100% { opacity: 0.6; transform: scale(1); }
+}
+
+/* ---------- 空闲态微动效 ---------- */
+
+.subject-chip { will-change: transform; }
+.start-btn { box-shadow: var(--shadow); }
+.start-btn:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.10); }
+.control-btn { will-change: transform; }
+
+/* 按钮 press 反馈统一 */
+button:active:not(:disabled) { transform: scale(0.98); }

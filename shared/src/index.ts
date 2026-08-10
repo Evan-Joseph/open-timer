@@ -5,3 +5,4 @@ export * from './subjects.js';
 export * from './shanghai.js';
 export * from './state-machine.js';
 export * from './summary.js';
+export * from './pomodoro.js';
