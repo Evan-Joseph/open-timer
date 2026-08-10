@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { Pause, Play, Square, Flag } from 'lucide-react';
+import { Pause, Play, Square, Flag, Undo2 } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
 import { useMonotonicSeconds, useBeijingTime, formatHms, formatDurationZh, formatBeijingTime } from '../lib/clock.js';
 import { useSettings } from '../lib/settings.js';
@@ -105,6 +105,18 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             aria-label="结束备注"
           />
           <div className="finish-actions">
+            <button
+              className="ghost-btn"
+              data-testid="finish-withdraw-btn"
+              disabled={store.busy}
+              onClick={() => {
+                void store.withdraw(lastStopped.sessionId, '误记');
+                setLastStopped(null);
+                setNoteDraft('');
+              }}
+            >
+              <Undo2 size={14} aria-hidden /> 撤回这条
+            </button>
             <button
               className="primary-btn"
               onClick={() => {

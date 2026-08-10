@@ -5,12 +5,17 @@
  * - 信标随时间持续移动（30s 步进），不强制拖动视口（尊重用户手动浏览）；
  * - 初始加载 / 数据到位 / 点击「现在」/ 新会话开始：滚动使信标位于视口 60%；
  * - 切换到历史日：滚动到当日第一个片段（无片段则 08:00）；
- * - popover 用容器坐标（含 scrollLeft 换算），Esc/点击外部/关闭按钮均可关。
+ * - popover 用容器坐标（含滚动换算），Esc/点击外部/关闭按钮均可关；
+ * - 已停止片段可在 popover 内一键撤回（void，服务端保留审计）。
+ *
+ * 数据：store.sessions 是"今天"的数据；查看历史日时按日期拉取（带轻量缓存）。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, LocateFixed } from 'lucide-react';
+import { ChevronLeft, ChevronRight, LocateFixed, Undo2 } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
+import type { SessionApi } from '../lib/api.js';
+import { apiGet } from '../lib/api.js';
 import { formatBeijingTime, formatDurationZh } from '../lib/clock.js';
 
 const PX_PER_MINUTE = 4; // 与旧工作台一致：24h = 5760px
@@ -20,6 +25,7 @@ const NOW_TICK_MS = 30_000;
 
 interface RenderSeg {
   key: string;
+  sessionId: string;
   subjectId: string;
   colorId: string;
   displayName: string;
@@ -29,6 +35,8 @@ interface RenderSeg {
   endLabel: string | null;
   seconds: number;
   running: boolean;
+  /** 已停止（可撤回） */
+  stopped: boolean;
   note: string | null;
 }
 
@@ -48,12 +56,17 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const [viewDate, setViewDate] = useState(store.todayDate);
   const [popover, setPopover] = useState<{ seg: RenderSeg; containerX: number } | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  /** 查看历史日时按日期拉取的会话数据 */
+  const [historySessions, setHistorySessions] = useState<SessionApi[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const prevTodayRef = useRef(store.todayDate);
-  const hasScrolledRef = useRef(false);
+  /** 定位以 viewDateRef 为准，避免 effect 声明顺序导致的竞态 */
+  const viewDateRef = useRef(viewDate);
+  const locatedDateRef = useRef<string | null>(null);
   const activeSessionId = store.state?.active_session?.session_id ?? null;
   const prevActiveIdRef = useRef<string | null>(null);
+  const historyCacheRef = useRef<Map<string, SessionApi[]>>(new Map());
 
   // 信标持续移动（30s 步进）：不触发强制滚动
   useEffect(() => {
@@ -66,17 +79,52 @@ export default function Timeline({ store }: { store: ClockStore }) {
     if (prevTodayRef.current !== store.todayDate) {
       setViewDate((prev) => (prev === prevTodayRef.current ? store.todayDate : prev));
       prevTodayRef.current = store.todayDate;
-      hasScrolledRef.current = false; // 新的一天允许重新定位
+      locatedDateRef.current = null; // 新的一天允许重新定位
     }
   }, [store.todayDate]);
 
   const isToday = viewDate === store.todayDate;
   const { startMs, endMs } = useMemo(() => dateToRangeMs(viewDate), [viewDate]);
 
+  // 当前视图数据源：今天用 store.sessions（实时轮询），历史日按日期拉取（缓存 5 分钟由轮询天然刷新）
+  const dateSessions = useMemo(() => {
+    if (isToday) return store.sessions;
+    return historySessions;
+  }, [isToday, store.sessions, historySessions]);
+
+  // 历史日数据拉取
+  useEffect(() => {
+    if (isToday) return;
+    const cached = historyCacheRef.current.get(viewDate);
+    if (cached) {
+      setHistorySessions(cached);
+      return;
+    }
+    let cancelled = false;
+    apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${viewDate}`)
+      .then((d) => {
+        if (cancelled) return;
+        historyCacheRef.current.set(viewDate, d.sessions);
+        setHistorySessions(d.sessions);
+      })
+      .catch(() => {
+        if (!cancelled) setHistorySessions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewDate, isToday]);
+
+  // 切换日期：关闭 popover、允许重新定位（同步更新 ref，供定位 effect 读取）
+  useEffect(() => {
+    viewDateRef.current = viewDate;
+    setPopover(null);
+  }, [viewDate]);
+
   const segs: RenderSeg[] = useMemo(() => {
     const out: RenderSeg[] = [];
     const nowClamped = Math.min(nowMs, endMs);
-    for (const s of store.sessions) {
+    for (const s of dateSessions) {
       if (s.status === 'voided') continue;
       const subj = store.subjects.find((x) => x.subject_id === s.subject_id);
       for (let i = 0; i < s.segments.length; i++) {
@@ -90,6 +138,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
         const rawWidthPx = ((ce - cs) / 60000) * PX_PER_MINUTE;
         out.push({
           key: `${s.session_id}-${i}`,
+          sessionId: s.session_id,
           subjectId: s.subject_id,
           colorId: subj?.color_id ?? 'blue',
           displayName: subj?.display_name ?? s.subject_id,
@@ -99,13 +148,14 @@ export default function Timeline({ store }: { store: ClockStore }) {
           endLabel: seg.ended_at ? formatBeijingTime(ce) : null,
           seconds: Math.floor((ce - cs) / 1000),
           running: seg.ended_at === null && isToday,
+          stopped: s.status === 'stopped',
           note: s.note,
         });
       }
     }
     return out.sort((a, b) => a.leftPx - b.leftPx);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store.sessions, store.subjects, startMs, endMs, isToday, Math.floor(nowMs / NOW_TICK_MS)]);
+  }, [dateSessions, store.subjects, startMs, endMs, isToday, Math.floor(nowMs / NOW_TICK_MS)]);
 
   /** 滚动到指定轨道 px（自动钳制），behavior 可选平滑。 */
   const scrollToPx = useCallback((px: number, smooth: boolean) => {
@@ -124,13 +174,14 @@ export default function Timeline({ store }: { store: ClockStore }) {
     [startMs, endMs, scrollToPx],
   );
 
-  // 数据到位后的首次定位（修复：sessions 异步加载完成才滚动）
+  // 定位：每个日期只自动定位一次；以 viewDateRef 为准判断目标日（修复 effect 顺序竞态）
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    if (hasScrolledRef.current) return;
-    hasScrolledRef.current = true;
-    if (isToday) {
+    const targetDate = viewDateRef.current;
+    if (locatedDateRef.current === targetDate) return;
+    locatedDateRef.current = targetDate;
+    if (targetDate === store.todayDate) {
       scrollToNow(false);
     } else if (segs.length > 0) {
       scrollToPx(segs[0].leftPx, false);
@@ -138,23 +189,19 @@ export default function Timeline({ store }: { store: ClockStore }) {
       scrollToPx(8 * 60 * PX_PER_MINUTE, false); // 历史空日：定位 08:00
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewDate, store.sessions.length, isToday]);
-
-  // 切换日期后重新允许定位
-  useEffect(() => {
-    hasScrolledRef.current = false;
-    setPopover(null);
-  }, [viewDate]);
+  }, [viewDate, segs, store.todayDate]);
 
   // 新会话开始：平滑滚到信标（片段正在生长）
   useEffect(() => {
     if (activeSessionId && activeSessionId !== prevActiveIdRef.current) {
-      const t = window.setTimeout(() => scrollToNow(true), 150);
+      const t = window.setTimeout(() => {
+        if (viewDateRef.current === store.todayDate) scrollToNow(true);
+      }, 150);
       prevActiveIdRef.current = activeSessionId;
       return () => window.clearTimeout(t);
     }
     prevActiveIdRef.current = activeSessionId;
-  }, [activeSessionId, scrollToNow]);
+  }, [activeSessionId, scrollToNow, store.todayDate]);
 
   const ticks = useMemo(() => {
     const arr: Array<{ label: string; leftPx: number; major: boolean }> = [];
@@ -202,17 +249,28 @@ export default function Timeline({ store }: { store: ClockStore }) {
     };
   }, [popover]);
 
-  // 当日（viewDate）各科小计：跟随所看日期，不再永远显示今天
+  // 撤回
+  const handleWithdraw = useCallback(async () => {
+    if (!popover) return;
+    const ok = await store.withdraw(popover.seg.sessionId, '误记');
+    if (ok) {
+      setPopover(null);
+      // 历史日缓存同步失效
+      historyCacheRef.current.delete(viewDateRef.current);
+    }
+  }, [popover, store]);
+
+  // 当日（viewDate）各科小计：跟随所看日期
   const overview = useMemo(() => {
     const map = new Map<string, number>();
-    for (const s of store.sessions) {
+    for (const s of dateSessions) {
       if (s.status === 'voided') continue;
       map.set(s.subject_id, (map.get(s.subject_id) ?? 0) + s.active_seconds);
     }
     return [...map.entries()]
       .map(([subject_id, seconds]) => ({ subject_id, seconds }))
       .sort((a, b) => b.seconds - a.seconds);
-  }, [store.sessions]);
+  }, [dateSessions]);
 
   const totalSeconds = overview.reduce((a, b) => a + b.seconds, 0);
 
@@ -305,9 +363,16 @@ export default function Timeline({ store }: { store: ClockStore }) {
           </div>
           <div className="popover-line">净时长 {formatDurationZh(popover.seg.seconds)}</div>
           {popover.seg.note && <div className="popover-note">「{popover.seg.note}」</div>}
-          <button className="text-btn" onClick={() => setPopover(null)}>
-            关闭
-          </button>
+          <div className="popover-actions">
+            {popover.seg.stopped && (
+              <button className="text-btn withdraw-btn" onClick={() => void handleWithdraw()} data-testid="withdraw-btn">
+                <Undo2 size={13} aria-hidden /> 撤回这条
+              </button>
+            )}
+            <button className="text-btn" onClick={() => setPopover(null)}>
+              关闭
+            </button>
+          </div>
         </div>
       )}
 

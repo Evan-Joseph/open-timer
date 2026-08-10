@@ -1,14 +1,12 @@
 /** 应用状态：鉴权、服务端状态同步、写动作。所有秒数以服务端为准。 */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { SubjectApi, StateApi, SessionApi, ActiveSessionApi } from './api.js';
+import type { SubjectApi, StateApi, SessionApi } from './api.js';
 import { apiGet, apiPost, apiPatch } from './api.js';
 import type { SyncAnchor } from './clock.js';
 import { shanghaiTodayLocal } from './clock.js';
 
 export type AuthPhase = 'loading' | 'setup' | 'login' | 'ready';
-
-export interface SubjectWithMeta extends SubjectApi {}
 
 export interface ClockStore {
   phase: AuthPhase;
@@ -17,12 +15,12 @@ export interface ClockStore {
   anchor: SyncAnchor | null;
   /** 当前开放段（本轮连续专注）的单调锚点，用于节奏环 */
   segmentAnchor: SyncAnchor | null;
-  /** 今日各科净秒数 */
-  todayBySubject: Array<{ subject_id: string; seconds: number }>;
   sessions: SessionApi[];
   todayDate: string;
   busy: boolean;
   error: string | null;
+  /** 一次性轻提示（成功/撤销等），自动消失 */
+  toast: string | null;
   refresh: () => Promise<void>;
   setupPassword: (p: string) => Promise<boolean>;
   login: (p: string) => Promise<boolean>;
@@ -32,12 +30,15 @@ export interface ClockStore {
   resume: () => Promise<void>;
   stop: (endNote: string | null) => Promise<void>;
   switchSubject: (subjectId: string) => Promise<void>;
-  voidSession: (sessionId: string, reason: string | null) => Promise<void>;
+  /** 撤回（作废）一个已停止的会话；服务端保留审计，所有汇总自动排除 */
+  withdraw: (sessionId: string, reason?: string | null) => Promise<boolean>;
   setNote: (sessionId: string, note: string) => Promise<void>;
 }
 
 const POLL_MS_IDLE = 15_000; // 空闲时慢轮询
 const POLL_MS_ACTIVE = 5_000; // 运行中快轮询（UI 靠单调时钟平滑，轮询只校准）
+const ERROR_TTL_MS = 6_000;
+const TOAST_TTL_MS = 2_600;
 
 export function useClockStore(): ClockStore {
   const [phase, setPhase] = useState<AuthPhase>('loading');
@@ -46,7 +47,10 @@ export function useClockStore(): ClockStore {
   const [sessions, setSessions] = useState<SessionApi[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
+  const errorTimerRef = useRef<number | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
   /** 每次收到 state 响应时记录单调时刻，供锚点使用 */
   const perfAtStateRef = useRef<number>(0);
 
@@ -57,19 +61,34 @@ export function useClockStore(): ClockStore {
     setState(s);
   }, []);
 
+  /** 错误提示：自动消失，不打扰 */
+  const flashError = useCallback((msg: string) => {
+    setError(msg);
+    if (errorTimerRef.current) window.clearTimeout(errorTimerRef.current);
+    errorTimerRef.current = window.setTimeout(() => setError(null), ERROR_TTL_MS);
+  }, []);
+
+  const flashToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), TOAST_TTL_MS);
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
       // state 与 sessions 并行拉取，减少串行延迟
       const [s] = await Promise.all([
         apiGet<StateApi>('/api/v1/state'),
-        apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${shanghaiTodayLocal()}`).then((d) => setSessions(d.sessions)).catch(() => {}),
+        apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${shanghaiTodayLocal()}`)
+          .then((d) => setSessions(d.sessions))
+          .catch(() => {}),
       ]);
       applyState(s);
       setError(null);
-    } catch (e) {
-      setError('暂时无法同步，正在重试');
+    } catch {
+      flashError('暂时无法同步，正在重试');
     }
-  }, [applyState]);
+  }, [applyState, flashError]);
 
   // 初始鉴权探测
   useEffect(() => {
@@ -80,9 +99,6 @@ export function useClockStore(): ClockStore {
         else if (!me.authenticated) setPhase('login');
         else setPhase('ready');
         const subs = await apiGet<SubjectApi[]>('/api/v1/subjects').catch(() => [] as SubjectApi[]);
-        if (subs.length === 0) {
-          // subjects 需要凭据；未登录时先占位，登录后再拉
-        }
         setSubjects(subs);
       } catch {
         setPhase('login');
@@ -115,25 +131,31 @@ export function useClockStore(): ClockStore {
     apiGet<SubjectApi[]>('/api/v1/subjects').then(setSubjects).catch(() => {});
   }, [phase]);
 
-  const setupPassword = useCallback(async (p: string) => {
-    const res = await apiPost('/api/v1/auth/setup', { password: p });
-    if (res.ok) {
-      setPhase('ready');
-      return true;
-    }
-    setError('设置失败，请重试');
-    return false;
-  }, []);
+  const setupPassword = useCallback(
+    async (p: string) => {
+      const res = await apiPost('/api/v1/auth/setup', { password: p });
+      if (res.ok) {
+        setPhase('ready');
+        return true;
+      }
+      flashError('设置失败，请重试');
+      return false;
+    },
+    [flashError],
+  );
 
-  const login = useCallback(async (p: string) => {
-    const res = await apiPost('/api/v1/auth/login', { password: p });
-    if (res.ok) {
-      setPhase('ready');
-      return true;
-    }
-    setError('密码不正确');
-    return false;
-  }, []);
+  const login = useCallback(
+    async (p: string) => {
+      const res = await apiPost('/api/v1/auth/login', { password: p });
+      if (res.ok) {
+        setPhase('ready');
+        return true;
+      }
+      flashError('密码不正确');
+      return false;
+    },
+    [flashError],
+  );
 
   const logout = useCallback(async () => {
     await apiPost('/api/v1/auth/logout');
@@ -170,19 +192,42 @@ export function useClockStore(): ClockStore {
   const start = useCallback(
     async (subjectId: string, intentNote: string | null) => {
       setBusy(true);
-      const res = await apiPost<{ session_id: string }>('/api/v1/sessions', {
+      const res = await apiPost<{ session_id: string; started_at: string }>('/api/v1/sessions', {
         subject_id: subjectId,
         intent_note: intentNote || null,
       });
       setBusy(false);
       if (!res.ok) {
-        setError(res.data && (res.data as any).error === 'ACTIVE_SESSION_EXISTS' ? '已有进行中的会话' : '开始失败');
+        const errCode = res.data && (res.data as { error?: string }).error;
+        flashError(errCode === 'ACTIVE_SESSION_EXISTS' ? '已有进行中的会话' : '开始失败，请重试');
+        refresh(); // 可能别处已有活动会话，拉取真实状态
         return false;
       }
-      await refresh();
+      // 乐观进入运行态：立即渲染，不等 refresh 往返
+      const d = res.data;
+      if (d) {
+        perfAtStateRef.current = performance.now();
+        setState((prev) =>
+          prev
+            ? {
+                ...prev,
+                active_session: {
+                  session_id: d.session_id,
+                  subject_id: subjectId,
+                  started_at: d.started_at,
+                  status: 'running',
+                  active_seconds: 0,
+                  current_segment_started_at: d.started_at,
+                  intent_note: intentNote || null,
+                },
+              }
+            : prev,
+        );
+      }
+      refresh();
       return true;
     },
-    [refresh],
+    [refresh, flashError],
   );
 
   const pause = useCallback(async () => {
@@ -191,9 +236,13 @@ export function useClockStore(): ClockStore {
     setBusy(true);
     const res = await apiPost(`/api/v1/sessions/${activeId}/pause`);
     setBusy(false);
-    if (!res.ok) { optimisticSetStatus('running'); return; } // 失败回滚
+    if (!res.ok) {
+      optimisticSetStatus('running'); // 失败回滚
+      flashError('暂停失败，请重试');
+      return;
+    }
     refresh();
-  }, [activeId, refresh, optimisticSetStatus]);
+  }, [activeId, refresh, optimisticSetStatus, flashError]);
 
   const resume = useCallback(async () => {
     if (!activeId) return;
@@ -201,9 +250,13 @@ export function useClockStore(): ClockStore {
     setBusy(true);
     const res = await apiPost(`/api/v1/sessions/${activeId}/resume`);
     setBusy(false);
-    if (!res.ok) { optimisticSetStatus('paused'); return; }
+    if (!res.ok) {
+      optimisticSetStatus('paused');
+      flashError('继续失败，请重试');
+      return;
+    }
     refresh();
-  }, [activeId, refresh, optimisticSetStatus]);
+  }, [activeId, refresh, optimisticSetStatus, flashError]);
 
   const stop = useCallback(
     async (endNote: string | null) => {
@@ -212,46 +265,62 @@ export function useClockStore(): ClockStore {
       setBusy(true);
       const res = await apiPost(`/api/v1/sessions/${activeId}/stop`, { end_note: endNote || null });
       setBusy(false);
+      if (!res.ok) {
+        // 失败回滚：恢复运行态（乐观清空过头了，以服务端为准）
+        flashError('结束失败，请重试');
+        refresh();
+        return;
+      }
       refresh();
     },
-    [activeId, refresh, optimisticSetStatus],
+    [activeId, refresh, optimisticSetStatus, flashError],
   );
 
   const switchSubject = useCallback(
     async (subjectId: string) => {
       if (!activeId) return;
       setBusy(true);
-      const res = await apiPost<{ started?: { session_id: string; subject_id: string; status: 'running' } }>(
-        `/api/v1/sessions/${activeId}/switch`,
-        { subject_id: subjectId },
-      );
+      const res = await apiPost(`/api/v1/sessions/${activeId}/switch`, { subject_id: subjectId });
       setBusy(false);
-      if (!res.ok) return;
+      if (!res.ok) {
+        flashError('切换失败，请重试');
+        return;
+      }
       refresh();
     },
-    [activeId, refresh],
+    [activeId, refresh, flashError],
   );
 
-  const voidSession = useCallback(
-    async (sessionId: string, reason: string | null) => {
+  /**
+   * 撤回（作废）已停止会话。一致性保证：
+   * - 服务端 void 后，state/sessions/daily-summary/时间轴/概览全部自动排除该会话；
+   * - 原始事件链与 manual_adjustment 审计保留，不是删除历史。
+   */
+  const withdraw = useCallback(
+    async (sessionId: string, reason: string | null = '误记') => {
       setBusy(true);
-      await apiPost(`/api/v1/sessions/${sessionId}/void`, { reason });
+      const res = await apiPost(`/api/v1/sessions/${sessionId}/void`, { reason });
       setBusy(false);
-      await refresh();
+      if (!res.ok) {
+        flashError('撤回失败，请重试');
+        return false;
+      }
+      flashToast('已撤回这条记录');
+      refresh();
+      return true;
     },
-    [refresh],
+    [refresh, flashError, flashToast],
   );
 
   const setNote = useCallback(
     async (sessionId: string, note: string) => {
       await apiPatch(`/api/v1/sessions/${sessionId}/note`, { note }).catch(() => {});
-      await refresh();
+      refresh();
     },
     [refresh],
   );
 
   // 构造单调时钟锚点：随 state 身份 memo，避免每次渲染重新锚定导致秒数跳变。
-  // confirmedSeconds 是该次 state 响应中的服务端净秒数，anchorPerfMs 为收到响应的单调时刻。
   const anchor: SyncAnchor | null = useMemo(() => {
     if (!state?.active_session) return null;
     return {
@@ -277,27 +346,17 @@ export function useClockStore(): ClockStore {
     };
   }, [state]);
 
-  // 今日各科小计（sessions 已按当日窗口裁剪，active_seconds 直接累加）
-  const todayBySubject = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const s of sessions) {
-      if (s.status === 'voided') continue;
-      map.set(s.subject_id, (map.get(s.subject_id) ?? 0) + s.active_seconds);
-    }
-    return [...map.entries()].map(([subject_id, seconds]) => ({ subject_id, seconds }));
-  }, [sessions]);
-
   return {
     phase,
     subjects,
     state,
     anchor,
     segmentAnchor,
-    todayBySubject,
     sessions,
     todayDate,
     busy,
     error,
+    toast,
     refresh,
     setupPassword,
     login,
@@ -307,7 +366,7 @@ export function useClockStore(): ClockStore {
     resume,
     stop,
     switchSubject,
-    voidSession,
+    withdraw,
     setNote,
   };
 }

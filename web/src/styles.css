@@ -631,3 +631,44 @@ button:active:not(:disabled) { transform: scale(0.98); }
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* ---------- 撤回 / ghost 按钮 / popover 操作行 ---------- */
+
+.ghost-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 9px 18px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text-2); font-size: 14px;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.ghost-btn:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: color-mix(in srgb, var(--danger) 6%, transparent); }
+.finish-actions { display: flex; gap: 10px; align-items: center; }
+
+.popover-actions { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+.withdraw-btn { color: var(--danger); display: inline-flex; align-items: center; gap: 4px; }
+
+/* ---------- toast（轻提示，自动消失） ---------- */
+
+.toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  z-index: 60;
+  padding: 8px 18px; border-radius: 999px;
+  background: var(--text-1); color: var(--bg);
+  font-size: 13px; box-shadow: var(--shadow);
+  animation: toast-in 0.25s ease;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* ---------- 中文排版微调 ---------- */
+
+body {
+  letter-spacing: 0.01em;
+  font-feature-settings: 'kern';
+  text-rendering: optimizeLegibility;
+}
+/* 中文环境下行高略放宽，数字场景用 tabular */
+h1, h2, h3 { letter-spacing: 0; }
+.big-timer, .idle-clock, .finish-big, .rhythm-remain { letter-spacing: -0.01em; }

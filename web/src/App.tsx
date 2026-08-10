@@ -67,6 +67,12 @@ export default function App() {
         </div>
       )}
 
+      {store.toast && (
+        <div className="toast" role="status" aria-live="polite" data-testid="toast">
+          {store.toast}
+        </div>
+      )}
+
       <main className="main">
         <ClockFace store={store} />
       </main>

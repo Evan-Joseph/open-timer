@@ -328,3 +328,48 @@ test.describe('选科状态归属', () => {
     await expect(page.getByRole('radio', { name: '计算机网络' })).toHaveAttribute('aria-checked', 'true');
   });
 });
+
+test.describe('撤回（作废）与一致性', () => {
+  test('结束反馈处撤回：时间轴与累计同步移除', async ({ page }) => {
+    await doSetup(page);
+    // 记录基线（其他用例可能留有片段/时长）
+    const beforeSegs = await page.locator('.seg').count();
+    const beforeState = await (await page.request.get('/api/v1/state')).json();
+    const beforeSeconds = beforeState.today_active_seconds as number;
+
+    await page.getByRole('radio', { name: '操作系统' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1200);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await expect(page.getByTestId('finish-duration')).toBeVisible();
+
+    // 撤回
+    await page.getByTestId('finish-withdraw-btn').click();
+    await expect(page.getByTestId('toast')).toContainText('已撤回');
+
+    // 一致性：回到空闲态；片段数与累计时长回到基线（本次会话被完整排除）
+    await expect(page.getByTestId('idle-clock')).toBeVisible();
+    await expect(page.locator('.seg')).toHaveCount(beforeSegs);
+    const afterState = await (await page.request.get('/api/v1/state')).json();
+    expect(afterState.today_active_seconds).toBe(beforeSeconds);
+  });
+
+  test('时间轴 popover 处撤回历史片段', async ({ page }) => {
+    await doSetup(page);
+    const beforeSegs = await page.locator('.seg').count();
+    // 产生一个已停止会话
+    await page.getByRole('radio', { name: '思想政治理论' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1200);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+    await expect(page.locator('.seg')).toHaveCount(beforeSegs + 1);
+
+    // 点最后一个片段 → popover → 撤回
+    await page.locator('.seg-hit').last().click();
+    await expect(page.getByTestId('seg-popover')).toBeVisible();
+    await page.getByTestId('withdraw-btn').click();
+    await expect(page.getByTestId('toast')).toContainText('已撤回');
+    await expect(page.locator('.seg')).toHaveCount(beforeSegs);
+  });
+});
