@@ -12,13 +12,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, LocateFixed, Undo2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, LocateFixed, Undo2, ZoomIn, ZoomOut, List, GanttChart } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
 import type { SessionApi } from '../lib/api.js';
 import { apiGet } from '../lib/api.js';
 import { formatBeijingTime, formatDurationZh } from '../lib/clock.js';
 
-const PX_PER_MINUTE = 4; // 与旧工作台一致：24h = 5760px
+const BASE_PX_PER_MINUTE = 4; // 1x 缩放：24h = 5760px
+const ZOOM_LEVELS = [0.5, 1, 2, 4];
 const DAY_MINUTES = 1440;
 const MIN_SEG_PX = 3;
 const NOW_TICK_MS = 30_000;
@@ -56,6 +57,14 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const [viewDate, setViewDate] = useState(store.todayDate);
   const [popover, setPopover] = useState<{ seg: RenderSeg; containerX: number } | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  /** 缩放级别索引与轨道/流水账视图 */
+  const [zoomIdx, setZoomIdx] = useState(() => {
+    const saved = Number(localStorage.getItem('clock-timeline-zoom'));
+    const i = ZOOM_LEVELS.indexOf(saved);
+    return i >= 0 ? i : 1;
+  });
+  const [mode, setMode] = useState<'track' | 'list'>('track');
+  const pxPerMinute = BASE_PX_PER_MINUTE * ZOOM_LEVELS[zoomIdx];
   /** popover 内编辑备注 */
   const [noteDraft, setNoteDraft] = useState('');
   const [noteSaving, setNoteSaving] = useState(false);
@@ -137,8 +146,8 @@ export default function Timeline({ store }: { store: ClockStore }) {
         if (segEnd <= startMs || segStart >= endMs) continue;
         const cs = Math.max(segStart, startMs);
         const ce = Math.min(segEnd, endMs);
-        const leftPx = ((cs - startMs) / 60000) * PX_PER_MINUTE;
-        const rawWidthPx = ((ce - cs) / 60000) * PX_PER_MINUTE;
+        const leftPx = ((cs - startMs) / 60000) * pxPerMinute;
+        const rawWidthPx = ((ce - cs) / 60000) * pxPerMinute;
         out.push({
           key: `${s.session_id}-${i}`,
           sessionId: s.session_id,
@@ -158,7 +167,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
     }
     return out.sort((a, b) => a.leftPx - b.leftPx);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateSessions, store.subjects, startMs, endMs, isToday, Math.floor(nowMs / NOW_TICK_MS)]);
+  }, [dateSessions, store.subjects, startMs, endMs, isToday, pxPerMinute, Math.floor(nowMs / NOW_TICK_MS)]);
 
   /** 滚动到指定轨道 px（自动钳制），behavior 可选平滑。 */
   const scrollToPx = useCallback((px: number, smooth: boolean) => {
@@ -171,10 +180,10 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const scrollToNow = useCallback(
     (smooth: boolean) => {
       const nowClamped = Math.min(Math.max(Date.now(), startMs), endMs);
-      const px = ((nowClamped - startMs) / 60000) * PX_PER_MINUTE;
+      const px = ((nowClamped - startMs) / 60000) * pxPerMinute;
       scrollToPx(px, smooth);
     },
-    [startMs, endMs, scrollToPx],
+    [startMs, endMs, pxPerMinute, scrollToPx],
   );
 
   // 定位：每个日期只自动定位一次；以 viewDateRef 为准判断目标日（修复 effect 顺序竞态）
@@ -189,7 +198,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
     } else if (segs.length > 0) {
       scrollToPx(segs[0].leftPx, false);
     } else {
-      scrollToPx(8 * 60 * PX_PER_MINUTE, false); // 历史空日：定位 08:00
+      scrollToPx(8 * 60 * pxPerMinute, false); // 历史空日：定位 08:00
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewDate, segs, store.todayDate]);
@@ -208,17 +217,19 @@ export default function Timeline({ store }: { store: ClockStore }) {
 
   const ticks = useMemo(() => {
     const arr: Array<{ label: string; leftPx: number; major: boolean }> = [];
-    for (let m = 0; m <= DAY_MINUTES; m += 30) {
+    // 缩放越深刻度越稀（避免标签重叠）：2x 起 60 分钟，4x 起 120 分钟
+    const step = pxPerMinute >= 16 ? 120 : pxPerMinute >= 8 ? 60 : 30;
+    for (let m = 0; m <= DAY_MINUTES; m += step) {
       arr.push({
         label: `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`,
-        leftPx: m * PX_PER_MINUTE,
+        leftPx: m * pxPerMinute,
         major: m % 60 === 0,
       });
     }
     return arr;
-  }, []);
+  }, [pxPerMinute]);
 
-  const nowPx = ((Math.min(Math.max(nowMs, startMs), endMs) - startMs) / 60000) * PX_PER_MINUTE;
+  const nowPx = ((Math.min(Math.max(nowMs, startMs), endMs) - startMs) / 60000) * pxPerMinute;
 
   /** 点片段：轨道坐标 → 容器坐标（trackRect 已含滚动位移，直接相减）。 */
   const openPopover = useCallback((seg: RenderSeg) => {
@@ -298,6 +309,45 @@ export default function Timeline({ store }: { store: ClockStore }) {
           {totalSeconds > 0 && <span className="timeline-total"> · 共 {formatDurationZh(totalSeconds)}</span>}
         </h2>
         <div className="timeline-nav">
+          {mode === 'track' && (
+            <>
+              <button
+                className="icon-btn"
+                aria-label="缩小时间轴"
+                title="缩小"
+                disabled={zoomIdx <= 0}
+                onClick={() => {
+                  const next = zoomIdx - 1;
+                  setZoomIdx(next);
+                  localStorage.setItem('clock-timeline-zoom', String(ZOOM_LEVELS[next]));
+                }}
+              >
+                <ZoomOut size={15} />
+              </button>
+              <button
+                className="icon-btn"
+                aria-label="放大时间轴"
+                title="放大"
+                disabled={zoomIdx >= ZOOM_LEVELS.length - 1}
+                onClick={() => {
+                  const next = zoomIdx + 1;
+                  setZoomIdx(next);
+                  localStorage.setItem('clock-timeline-zoom', String(ZOOM_LEVELS[next]));
+                }}
+              >
+                <ZoomIn size={15} />
+              </button>
+            </>
+          )}
+          <button
+            className="icon-btn"
+            aria-label={mode === 'track' ? '切换到流水账视图' : '切换到时间轴视图'}
+            title={mode === 'track' ? '流水账' : '时间轴'}
+            onClick={() => setMode(mode === 'track' ? 'list' : 'track')}
+            data-testid="timeline-mode-btn"
+          >
+            {mode === 'track' ? <List size={15} /> : <GanttChart size={15} />}
+          </button>
           <button className="icon-btn" aria-label="前一天" onClick={() => setViewDate(shiftDate(viewDate, -1))}>
             <ChevronLeft size={16} />
           </button>
@@ -316,12 +366,36 @@ export default function Timeline({ store }: { store: ClockStore }) {
         </div>
       </div>
 
-      {/* 轨道始终渲染：空日也保留刻度与信标（时间感） */}
-      <div className="timeline-scroll" ref={scrollRef} data-testid="timeline-scroll">
-        <div className="timeline-track" ref={trackRef} style={{ width: DAY_MINUTES * PX_PER_MINUTE }}>
+      {mode === 'list' ? (
+        /* 流水账视图：按时间排序的记录行，小屏友好 */
+        <div className="timeline-list" data-testid="timeline-list">
+          {segs.length === 0 ? (
+            <div className="timeline-list-empty">这一天还没有记录</div>
+          ) : (
+            segs.map((seg) => (
+              <button
+                key={seg.key}
+                className="timeline-list-row"
+                data-color={seg.colorId}
+                onClick={() => openPopover(seg)}
+              >
+                <span className="pill-dot" aria-hidden />
+                <span className="list-subject">{seg.displayName}</span>
+                <span className="list-time">
+                  {seg.startLabel} – {seg.endLabel ?? '进行中'}
+                </span>
+                <span className="list-duration">{formatDurationZh(seg.seconds)}</span>
+              </button>
+            ))
+          )}
+        </div>
+      ) : (
+        /* 轨道始终渲染：空日也保留刻度与信标（时间感） */
+        <div className="timeline-scroll" ref={scrollRef} data-testid="timeline-scroll">
+          <div className="timeline-track" ref={trackRef} style={{ width: DAY_MINUTES * pxPerMinute }}>
           {ticks.map((t) => (
             <div key={t.leftPx} className={`tick ${t.major ? 'major' : ''}`} style={{ left: t.leftPx }}>
-              {t.major && t.leftPx < DAY_MINUTES * PX_PER_MINUTE - 40 && <span className="tick-label">{t.label}</span>}
+              {t.major && t.leftPx < DAY_MINUTES * pxPerMinute - 40 && <span className="tick-label">{t.label}</span>}
             </div>
           ))}
           {segs.map((seg, i) => {
@@ -360,8 +434,9 @@ export default function Timeline({ store }: { store: ClockStore }) {
               <span className="now-flag" aria-hidden />
             </div>
           )}
+          </div>
         </div>
-      </div>
+      )}
 
       {popover && (
         <div

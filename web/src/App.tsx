@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useClockStore } from './lib/store.js';
+import { useSettings } from './lib/settings.js';
+import { ambient } from './lib/ambient.js';
 import AuthGate from './components/AuthGate.js';
 import ClockFace from './components/ClockFace.js';
 import Timeline from './components/Timeline.js';
 import SettingsDialog from './components/SettingsDialog.js';
-import { Settings } from 'lucide-react';
+import { Settings, Maximize2 } from 'lucide-react';
 
 export default function App() {
   const store = useClockStore();
+  const settings = useSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [theme, setTheme] = useState<string>(() => localStorage.getItem('clock-theme') || 'auto');
 
   // 主题应用
@@ -38,6 +42,40 @@ export default function App() {
     }
   }, [store.state, store.subjects]);
 
+  // 环境音生命周期：设置变化时启停；页面隐藏挂起（省电）
+  useEffect(() => {
+    if (settings.ambientKind === 'none') {
+      ambient.stop();
+    } else {
+      ambient.setVolume(settings.ambientVolume);
+      if (ambient.kind() !== settings.ambientKind) ambient.start(settings.ambientKind);
+    }
+  }, [settings.ambientKind, settings.ambientVolume]);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') ambient.suspend();
+      else ambient.resume();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+
+  // 全屏状态跟踪
+  useEffect(() => {
+    const onFs = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void document.documentElement.requestFullscreen().catch(() => {});
+    }
+  };
+
   if (store.phase === 'loading') {
     return (
       <div className="boot">
@@ -56,6 +94,9 @@ export default function App() {
         <span className="topbar-title">沉浸时钟</span>
         <span className={`topbar-status-dot ${store.state?.active_session?.status === 'running' ? 'live' : ''}`} aria-hidden />
         <span className="topbar-date">{store.todayDate} · 北京时间</span>
+        <button className="icon-btn" aria-label="全屏沉浸模式" title="全屏" onClick={toggleFullscreen}>
+          <Maximize2 size={16} />
+        </button>
         <button className="icon-btn" aria-label="设置" onClick={() => setSettingsOpen(true)}>
           <Settings size={18} />
         </button>
@@ -76,6 +117,8 @@ export default function App() {
       <main className="main">
         <ClockFace store={store} />
       </main>
+
+      {isFullscreen && <div className="exit-fullscreen-hint">按 Esc 或 ⌘F 退出全屏</div>}
 
       <Timeline store={store} />
 

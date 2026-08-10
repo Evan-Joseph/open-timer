@@ -6,7 +6,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { rmSync } from 'node:fs';
 
-const PASSWORD = 'e2e-password-0000001';
+const PASSWORD = '123456';
 
 test.beforeAll(() => {
   rmSync('/tmp/clock-e2e-data', { recursive: true, force: true });
@@ -14,19 +14,32 @@ test.beforeAll(() => {
 
 async function doSetup(page: Page) {
   await page.goto('/');
-  await expect(page.getByLabel('密码')).toBeVisible();
-  await page.getByLabel('密码').fill(PASSWORD);
-  const setupBtn = page.getByRole('button', { name: '设置并进入' });
-  if ((await setupBtn.count()) > 0) {
-    await setupBtn.click();
-  } else {
-    await page.getByRole('button', { name: '进入' }).click();
+  await page.waitForTimeout(300);
+  // PIN 键盘：物理键盘输入 6 位数字（window keydown 监听）
+  const enterPin = async () => {
+    await page.keyboard.type(PASSWORD);
+    await page.waitForTimeout(500); // 满 6 位后自动提交的延迟
+  };
+  const setupDots = page.locator('.pin-dots');
+  await expect(setupDots).toBeVisible();
+  await enterPin();
+  // setup 需要二次确认；login 一次即可。出现「再输入一次」说明是 setup 流程
+  const confirmTitle = page.getByText('再输入一次以确认');
+  if ((await confirmTitle.count()) > 0) {
+    await enterPin();
   }
   // 清理上一个用例可能残留的活动会话，保证每个用例从空闲态开始
   const stopBtn = page.getByRole('button', { name: '结束并保存' });
   if ((await stopBtn.count()) > 0) {
     await stopBtn.click();
-    await page.getByRole('button', { name: '好，继续' }).click();
+    // 结束反馈卡：先撤回本条（不污染用例数据），若已消失则点「好，继续」
+    const withdrawBtn = page.getByTestId('finish-withdraw-btn');
+    if ((await withdrawBtn.count()) > 0) {
+      await withdrawBtn.click();
+    } else {
+      const continueBtn = page.getByRole('button', { name: '好，继续' });
+      if ((await continueBtn.count()) > 0) await continueBtn.click();
+    }
   }
   await expect(page.getByTestId('idle-clock')).toBeVisible();
 }
@@ -422,5 +435,59 @@ test.describe('时间轴 popover 编辑备注', () => {
     await page.locator('.seg-hit').last().click();
     await expect(page.getByTestId('popover-note-input')).toHaveValue('精读真题 2010 年');
     await page.keyboard.press('Escape');
+  });
+});
+
+test.describe('时间轴缩放与流水账视图', () => {
+  test('缩放改变轨道宽度，流水账视图可切换回', async ({ page }) => {
+    await doSetup(page);
+    // 产生一个会话
+    await page.getByRole('radio', { name: '数学一' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1200);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+
+    const track = page.locator('.timeline-track');
+    await expect(track).toBeVisible();
+    const baseWidth = (await track.boundingBox())!.width;
+
+    // 放大后轨道变宽
+    await page.getByRole('button', { name: '放大时间轴' }).click();
+    const zoomedWidth = (await track.boundingBox())!.width;
+    expect(zoomedWidth).toBeGreaterThan(baseWidth);
+
+    // 缩小回原宽
+    await page.getByRole('button', { name: '缩小时间轴' }).click();
+    const backWidth = (await track.boundingBox())!.width;
+    expect(backWidth).toBeCloseTo(baseWidth, 0);
+
+    // 切换流水账视图
+    await page.getByTestId('timeline-mode-btn').click();
+    await expect(page.getByTestId('timeline-list')).toBeVisible();
+    await expect(track).toHaveCount(0);
+
+    // 切回轨道
+    await page.getByTestId('timeline-mode-btn').click();
+    await expect(track).toBeVisible();
+  });
+});
+
+test.describe('全屏沉浸模式', () => {
+  test('全屏按钮存在；进入全屏后时间轴与顶栏隐藏', async ({ page }) => {
+    await doSetup(page);
+    const btn = page.getByRole('button', { name: '全屏沉浸模式' });
+    await expect(btn).toBeVisible();
+    // headless 环境可能不支持 Fullscreen API；仅在真实进入全屏时验证隐藏行为
+    await btn.click().catch(() => {});
+    await page.waitForTimeout(600);
+    const fs = await page.evaluate(() => Boolean(document.fullscreenElement));
+    if (fs) {
+      await expect(page.locator('.timeline')).toHaveCount(0);
+      await expect(page.locator('.topbar')).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(400);
+    }
+    await expect(page.locator('.topbar')).toBeVisible();
   });
 });

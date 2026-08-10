@@ -189,6 +189,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             config={settings.rhythm}
             paused={paused}
             showBanners={settings.rhythmNudge}
+            chimeEnabled={settings.rhythmChime}
           />
         )}
 

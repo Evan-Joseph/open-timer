@@ -747,3 +747,115 @@ h1, h2, h3 { letter-spacing: 0; }
   outline: none; border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
+
+/* ---------- 对齐修正（按钮背景与图标/圆点严格居中） ---------- */
+
+.icon-btn {
+  display: inline-grid; place-items: center;
+  width: 32px; height: 32px; padding: 0;
+}
+.subject-chip, .switch-btn, .seg-item, .nudge-btn, .ghost-btn, .primary-btn,
+.timeline-list-row, .rhythm-option, .overview-item, .legend-item {
+  display: inline-flex; align-items: center;
+}
+.pill-dot { flex: none; display: inline-block; vertical-align: middle; }
+
+/* ---------- 时间轴缩放与流水账 ---------- */
+
+.timeline-list {
+  max-width: 960px; margin: 0 auto;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.timeline-list-empty { padding: 18px 0; color: var(--text-2); font-size: 13px; }
+.timeline-list-row {
+  display: grid; grid-template-columns: auto 1fr auto auto;
+  align-items: center; gap: 10px;
+  width: 100%; padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: transparent; border: none; text-align: left;
+  font-size: 13px; color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.timeline-list-row:hover { background: var(--surface-2); }
+.list-subject { font-weight: 500; }
+.list-time { color: var(--text-2); }
+.list-duration { color: var(--text-1); font-weight: 600; }
+
+/* ---------- 全屏沉浸模式 ---------- */
+
+.app:fullscreen { background: var(--bg); }
+.app:fullscreen .topbar { display: none; }
+.app:fullscreen .timeline { display: none; }
+.app:fullscreen .main { padding: 0 16px; }
+.app:fullscreen .big-timer { font-size: min(18vw, 160px); min-height: 1.2em; }
+.app:fullscreen .idle-clock { font-size: min(14vw, 120px); }
+.app:fullscreen .subject-pill.large { font-size: 22px; padding: 10px 26px; }
+.app:fullscreen .exit-fullscreen-hint {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  font-size: 12px; color: var(--text-3);
+  animation: fade-rise 0.4s ease 2s both;
+}
+
+/* ---------- 环境音设置 ---------- */
+
+.ambient-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.ambient-item {
+  padding: 6px 14px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface-1);
+  font-size: 13px; color: var(--text-2);
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.ambient-item:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.ambient-item.active {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.ambient-volume {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13px; color: var(--text-2);
+}
+.ambient-volume input[type='range'] {
+  flex: 1; accent-color: var(--accent); max-width: 220px;
+}
+
+/* ---------- PIN 锁屏（iOS 式） ---------- */
+
+.pin-card { align-items: center; max-width: 320px; }
+.pin-dots { display: flex; gap: 14px; margin: 8px 0 4px; }
+.pin-dots.shake { animation: pin-shake 0.4s ease; }
+.pin-dot {
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 1.5px solid var(--text-2);
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+}
+.pin-dot.filled { background: var(--text-1); border-color: var(--text-1); transform: scale(1.08); }
+@keyframes pin-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-8px); }
+  40% { transform: translateX(8px); }
+  60% { transform: translateX(-5px); }
+  80% { transform: translateX(5px); }
+}
+
+.pin-pad {
+  display: grid; grid-template-columns: repeat(3, 72px);
+  gap: 14px; margin-top: 14px; justify-content: center;
+}
+.pin-key {
+  width: 72px; height: 72px; border-radius: 50%;
+  display: inline-grid; place-items: center;
+  font-size: 26px; font-weight: 400; font-variant-numeric: tabular-nums;
+  color: var(--text-1); background: var(--surface-2);
+  transition: background 0.12s ease, transform 0.1s ease;
+  user-select: none;
+}
+.pin-key:hover { background: color-mix(in srgb, var(--surface-2) 70%, var(--accent) 8%); }
+.pin-key:active:not(:disabled) { transform: scale(0.94); background: var(--surface-1); }
+.pin-key:disabled { opacity: 0.4; }
+.pin-key.placeholder { visibility: hidden; }
+.pin-key.icon-key { background: transparent; color: var(--text-2); }
+.pin-key.icon-key:hover { color: var(--text-1); background: var(--surface-2); }
+
+@media (max-width: 560px) {
+  .pin-pad { grid-template-columns: repeat(3, 64px); gap: 12px; }
+  .pin-key { width: 64px; height: 64px; font-size: 24px; }
+}

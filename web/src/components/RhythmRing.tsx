@@ -6,9 +6,11 @@
  * 横幅只是呈现建议：暂停/继续始终是用户动作，不自动改变计时。
  */
 
+import { useEffect, useRef } from 'react';
 import { Coffee, CupSoda, Sparkles } from 'lucide-react';
 import type { RhythmConfig } from '@clock/shared';
 import { rhythmStatus, rhythmDots, rhythmPhase } from '@clock/shared';
+import { ambient } from '../lib/ambient.js';
 
 interface Props {
   /** 本轮连续专注秒数（running 推进；paused 冻结） */
@@ -19,17 +21,28 @@ interface Props {
   paused: boolean;
   /** 是否显示阶段横幅（设置内可关） */
   showBanners?: boolean;
+  /** 阶段切换时播放柔和铃声 */
+  chimeEnabled?: boolean;
 }
 
 const RADIUS = 84;
 const STROKE = 5;
 const CIRC = 2 * Math.PI * RADIUS;
 
-export default function RhythmRing({ segmentSeconds, awaySeconds, config, paused, showBanners = true }: Props) {
+export default function RhythmRing({ segmentSeconds, awaySeconds, config, paused, showBanners = true, chimeEnabled = false }: Props) {
   const segSecs = segmentSeconds ?? 0;
   const status = rhythmStatus(segSecs, config);
   const dots = rhythmDots(status, config);
   const phase = rhythmPhase(segSecs, awaySeconds, paused, config);
+
+  // 阶段切换铃声：仅在 ready_break / break_ready 出现的那一刻响一次
+  const prevPhaseRef = useRef(phase.phase);
+  useEffect(() => {
+    if (phase.phase !== prevPhaseRef.current) {
+      if (chimeEnabled && phase.phase !== 'focus') ambient.chime(phase.suggestedBreak === 'long');
+      prevPhaseRef.current = phase.phase;
+    }
+  }, [phase.phase, phase.suggestedBreak, chimeEnabled]);
 
   const dashOffset = CIRC * (1 - status.progress);
   const ringTone = phase.phase === 'ready_break' ? 'ready' : phase.phase === 'break_ready' ? 'go' : '';

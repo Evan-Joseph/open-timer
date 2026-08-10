@@ -126,13 +126,15 @@ export function createApp(deps: AppDeps): Hono {
     c.json({ status: 'ok', server_time: toIso(now()), version: config.version }),
   );
 
-  /* ---------- owner 认证 ---------- */
+  /* ---------- owner 认证（6 位纯数字 PIN，iOS 锁屏式） ---------- */
 
-  const SetupSchema = z.object({ password: z.string().min(12).max(200) });
+  const PinSchema = z
+    .object({ password: z.string().regex(/^\d{6}$/, 'PIN must be exactly 6 digits') })
+    .transform((v) => v);
 
   app.post('/api/v1/auth/setup', async (c) => {
     if ((await storage.getOwnerPasswordHash()) !== null) return c.json({ error: 'ALREADY_SETUP' }, 409);
-    const body = SetupSchema.safeParse(await c.req.json().catch(() => null));
+    const body = PinSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ error: 'INVALID_BODY' }, 400);
     const passwordHash = await hashPassword(body.data.password);
     await storage.setOwnerPasswordHash(passwordHash);
@@ -140,7 +142,7 @@ export function createApp(deps: AppDeps): Hono {
     return loginAndSetCookie(c);
   });
 
-  const LoginSchema = z.object({ password: z.string().min(1).max(200) });
+  const LoginSchema = z.object({ password: z.string().min(1).max(64) });
 
   app.post('/api/v1/auth/login', async (c) => {
     const ip = c.req.header('x-forwarded-for') ?? 'local';

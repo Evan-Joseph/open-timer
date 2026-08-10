@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { RhythmConfig } from '@clock/shared';
 import { RHYTHM_PRESETS, isValidRhythm } from '@clock/shared';
+import type { AmbientKind } from './ambient.js';
 
 const KEY = 'clock-settings-v2';
 
@@ -12,12 +13,21 @@ export interface LocalSettings {
   rhythmNudge: boolean;
   /** 结束时轻音效（默认关） */
   finishSound: boolean;
+  /** 节奏阶段切换铃声（默认关） */
+  rhythmChime: boolean;
+  /** 环境音类型（默认 none） */
+  ambientKind: AmbientKind;
+  /** 环境音音量 0..1 */
+  ambientVolume: number;
 }
 
 const DEFAULTS: LocalSettings = {
   rhythm: RHYTHM_PRESETS.off,
   rhythmNudge: true,
   finishSound: false,
+  rhythmChime: false,
+  ambientKind: 'none',
+  ambientVolume: 0.35,
 };
 
 function load(): LocalSettings {
@@ -29,6 +39,9 @@ function load(): LocalSettings {
       rhythm: isValidRhythm(parsed.rhythm) ? parsed.rhythm : DEFAULTS.rhythm,
       rhythmNudge: typeof parsed.rhythmNudge === 'boolean' ? parsed.rhythmNudge : true,
       finishSound: typeof parsed.finishSound === 'boolean' ? parsed.finishSound : false,
+      rhythmChime: typeof parsed.rhythmChime === 'boolean' ? parsed.rhythmChime : false,
+      ambientKind: typeof parsed.ambientKind === 'string' ? parsed.ambientKind : 'none',
+      ambientVolume: typeof parsed.ambientVolume === 'number' ? parsed.ambientVolume : DEFAULTS.ambientVolume,
     };
   } catch {
     return DEFAULTS;

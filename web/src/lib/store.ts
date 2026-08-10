@@ -55,12 +55,39 @@ export function useClockStore(): ClockStore {
   const toastTimerRef = useRef<number | null>(null);
   /** 每次收到 state 响应时记录单调时刻，供锚点使用 */
   const perfAtStateRef = useRef<number>(0);
+  /** 写操作进行中：期间轮询响应不得覆盖乐观状态（防止"结束反馈反复横跳"） */
+  const writeLockedRef = useRef(false);
+  /** 锚点纪律：保留上一个锚点，偏差小时不重锚（防计时抖动） */
+  const anchorRef = useRef<SyncAnchor | null>(null);
+  const segmentAnchorRef = useRef<SyncAnchor | null>(null);
+  const awayAnchorRef = useRef<SyncAnchor | null>(null);
+  /** 最新已应用的 state（用于丢弃滞后轮询响应） */
+  const stateRef = useRef<StateApi | null>(null);
 
   const todayDate = state?.today_date ?? shanghaiTodayLocal();
 
   const applyState = useCallback((s: StateApi) => {
+    // 写操作进行中：服务端返回的可能是写完成前的旧状态，不得覆盖乐观 UI
+    if (writeLockedRef.current) return;
+    // 丢弃滞后的轮询响应（以服务端时间戳为准），防止旧状态回跳
+    if (stateRef.current && s.server_now_ms <= stateRef.current.server_now_ms) return;
     perfAtStateRef.current = performance.now();
+    stateRef.current = s;
     setState(s);
+  }, []);
+
+  const applySessions = useCallback((list: SessionApi[]) => {
+    if (writeLockedRef.current) return;
+    setSessions(list);
+  }, []);
+
+  /**
+   * 解锁写状态：等一个 RTT 让锁期间“在途”的轮询响应落完，
+   * 再开放状态应用，防止旧响应在解锁后把乐观状态冲掉。
+   */
+  const releaseWriteLock = useCallback(async () => {
+    await new Promise((r) => window.setTimeout(r, 600));
+    writeLockedRef.current = false;
   }, []);
 
   /** 错误提示：自动消失，不打扰 */
@@ -82,15 +109,15 @@ export function useClockStore(): ClockStore {
       const [s] = await Promise.all([
         apiGet<StateApi>('/api/v1/state'),
         apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${shanghaiTodayLocal()}`)
-          .then((d) => setSessions(d.sessions))
+          .then((d) => applySessions(d.sessions))
           .catch(() => {}),
       ]);
       applyState(s);
-      setError(null);
+      if (!writeLockedRef.current) setError(null);
     } catch {
       flashError('暂时无法同步，正在重试');
     }
-  }, [applyState, flashError]);
+  }, [applyState, applySessions, flashError]);
 
   // 初始鉴权探测
   useEffect(() => {
@@ -195,12 +222,14 @@ export function useClockStore(): ClockStore {
 
   const start = useCallback(
     async (subjectId: string, intentNote: string | null) => {
+      writeLockedRef.current = true;
       setBusy(true);
       const res = await apiPost<{ session_id: string; started_at: string }>('/api/v1/sessions', {
         subject_id: subjectId,
         intent_note: intentNote || null,
       });
       setBusy(false);
+      await releaseWriteLock();
       if (!res.ok) {
         const errCode = res.data && (res.data as { error?: string }).error;
         flashError(errCode === 'ACTIVE_SESSION_EXISTS' ? '已有进行中的会话' : '开始失败，请重试');
@@ -237,13 +266,16 @@ export function useClockStore(): ClockStore {
 
   const pause = useCallback(async () => {
     if (!activeId) return;
+    writeLockedRef.current = true; // 锁定：轮询不得覆盖乐观状态
     optimisticSetStatus('paused'); // 立即反馈
     setBusy(true);
     const res = await apiPost(`/api/v1/sessions/${activeId}/pause`);
     setBusy(false);
+    await releaseWriteLock();
     if (!res.ok) {
       optimisticSetStatus('running'); // 失败回滚
       flashError('暂停失败，请重试');
+      refresh();
       return;
     }
     refresh();
@@ -251,13 +283,16 @@ export function useClockStore(): ClockStore {
 
   const resume = useCallback(async () => {
     if (!activeId) return;
+    writeLockedRef.current = true;
     optimisticSetStatus('running');
     setBusy(true);
     const res = await apiPost(`/api/v1/sessions/${activeId}/resume`);
     setBusy(false);
+    await releaseWriteLock();
     if (!res.ok) {
       optimisticSetStatus('paused');
       flashError('继续失败，请重试');
+      refresh();
       return;
     }
     refresh();
@@ -266,10 +301,12 @@ export function useClockStore(): ClockStore {
   const stop = useCallback(
     async (endNote: string | null) => {
       if (!activeId) return;
+      writeLockedRef.current = true;
       optimisticSetStatus(null); // 立即回到空闲/结束反馈
       setBusy(true);
       const res = await apiPost(`/api/v1/sessions/${activeId}/stop`, { end_note: endNote || null });
       setBusy(false);
+      await releaseWriteLock();
       if (!res.ok) {
         // 失败回滚：恢复运行态（乐观清空过头了，以服务端为准）
         flashError('结束失败，请重试');
@@ -284,11 +321,14 @@ export function useClockStore(): ClockStore {
   const switchSubject = useCallback(
     async (subjectId: string) => {
       if (!activeId) return;
+      writeLockedRef.current = true;
       setBusy(true);
       const res = await apiPost(`/api/v1/sessions/${activeId}/switch`, { subject_id: subjectId });
       setBusy(false);
+      await releaseWriteLock();
       if (!res.ok) {
         flashError('切换失败，请重试');
+        refresh();
         return;
       }
       refresh();
@@ -303,11 +343,14 @@ export function useClockStore(): ClockStore {
    */
   const withdraw = useCallback(
     async (sessionId: string, reason: string | null = '误记') => {
+      writeLockedRef.current = true;
       setBusy(true);
       const res = await apiPost(`/api/v1/sessions/${sessionId}/void`, { reason });
       setBusy(false);
+      await releaseWriteLock();
       if (!res.ok) {
         flashError('撤回失败，请重试');
+        refresh();
         return false;
       }
       flashToast('已撤回这条记录');
@@ -326,43 +369,85 @@ export function useClockStore(): ClockStore {
   );
 
   // 构造单调时钟锚点：随 state 身份 memo，避免每次渲染重新锚定导致秒数跳变。
+  // 防拖锚点纪律（NTP 式）：偏差 ≤1.2s 时保持旧锚继续平滑，只有大偏差才重锚。
   const anchor: SyncAnchor | null = useMemo(() => {
-    if (!state?.active_session) return null;
-    return {
+    if (!state?.active_session) {
+      anchorRef.current = null;
+      return null;
+    }
+    const next: SyncAnchor = {
       confirmedSeconds: state.active_session.active_seconds,
       running: state.active_session.status === 'running',
       anchorPerfMs: perfAtStateRef.current,
       serverNowMs: state.server_now_ms,
     };
+    const prev = anchorRef.current;
+    if (prev && prev.running === next.running && prev.confirmedSeconds === next.confirmedSeconds) {
+      // 服务端确认值未变：保持旧锚，避免重锚引起的小拖
+      return prev;
+    }
+    if (prev && prev.running === next.running) {
+      // 偏差 = 旧锚外推值 - 新确认值；小于阈值则视为本地单调时钟更平滑，不重锚
+      const driftSec = Math.abs(prev.confirmedSeconds + (performance.now() - prev.anchorPerfMs) / 1000 - next.confirmedSeconds);
+      if (driftSec <= 1.2) return prev;
+    }
+    anchorRef.current = next;
+    return next;
   }, [state]);
 
-  // 当前开放段锚点：段已过秒数 = server_now - current_segment_started_at
+  // 当前开放段锚点：段已过秒数 = server_now - current_segment_started_at（同样防抖重锚）
   const segmentAnchor: SyncAnchor | null = useMemo(() => {
     const a = state?.active_session;
-    if (!a || !a.current_segment_started_at) return null;
+    if (!a || !a.current_segment_started_at) {
+      segmentAnchorRef.current = null;
+      return null;
+    }
     const segStartedMs = Date.parse(a.current_segment_started_at);
-    if (!Number.isFinite(segStartedMs)) return null;
+    if (!Number.isFinite(segStartedMs)) {
+      segmentAnchorRef.current = null;
+      return null;
+    }
     const segSecs = a.status === 'running' ? Math.max(0, (state.server_now_ms - segStartedMs) / 1000) : 0;
-    return {
+    const next: SyncAnchor = {
       confirmedSeconds: Math.floor(segSecs),
       running: a.status === 'running',
       anchorPerfMs: perfAtStateRef.current,
       serverNowMs: state.server_now_ms,
     };
+    const prev = segmentAnchorRef.current;
+    if (prev && prev.running === next.running) {
+      const driftSec = Math.abs(prev.confirmedSeconds + (performance.now() - prev.anchorPerfMs) / 1000 - next.confirmedSeconds);
+      if (driftSec <= 1.2) return prev;
+    }
+    segmentAnchorRef.current = next;
+    return next;
   }, [state]);
 
-  // 暂停（离开）计时锚点：now - paused_at
+  // 暂停（离开）计时锚点：now - paused_at（同样防抖重锚）
   const awayAnchor: SyncAnchor | null = useMemo(() => {
     const a = state?.active_session;
-    if (!a || a.status !== 'paused' || !a.paused_at) return null;
+    if (!a || a.status !== 'paused' || !a.paused_at) {
+      awayAnchorRef.current = null;
+      return null;
+    }
     const pausedMs = Date.parse(a.paused_at);
-    if (!Number.isFinite(pausedMs)) return null;
-    return {
+    if (!Number.isFinite(pausedMs)) {
+      awayAnchorRef.current = null;
+      return null;
+    }
+    const next: SyncAnchor = {
       confirmedSeconds: Math.max(0, Math.floor((state.server_now_ms - pausedMs) / 1000)),
       running: true,
       anchorPerfMs: perfAtStateRef.current,
       serverNowMs: state.server_now_ms,
     };
+    const prev = awayAnchorRef.current;
+    if (prev && prev.running) {
+      const driftSec = Math.abs(prev.confirmedSeconds + (performance.now() - prev.anchorPerfMs) / 1000 - next.confirmedSeconds);
+      if (driftSec <= 1.2) return prev;
+    }
+    awayAnchorRef.current = next;
+    return next;
   }, [state]);
 
   return {

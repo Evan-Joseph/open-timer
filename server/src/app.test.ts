@@ -6,7 +6,7 @@ import { createApp } from '../src/app.js';
 import type { AppConfig } from '../src/config.js';
 import { SqliteStorage } from '../src/repo/sqlite-storage.js';
 
-const PASSWORD = 'test-password-12345';
+const PASSWORD = '246813';
 
 interface Ctx {
   storage: SqliteStorage;

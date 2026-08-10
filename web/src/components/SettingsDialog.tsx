@@ -3,6 +3,7 @@ import * as Switch from '@radix-ui/react-switch';
 import { X, Check } from 'lucide-react';
 import { useSettings, updateSettings } from '../lib/settings.js';
 import { RHYTHM_PRESETS, type RhythmConfig } from '@clock/shared';
+import { AMBIENT_LABELS } from '../lib/ambient.js';
 
 interface Props {
   open: boolean;
@@ -193,7 +194,47 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
                   <Switch.Thumb className="switch-thumb" />
                 </Switch.Root>
               </label>
+              <label className="switch-row">
+                <span>节奏切换铃声（柔和两音）</span>
+                <Switch.Root
+                  className="switch-root"
+                  checked={settings.rhythmChime}
+                  onCheckedChange={(v) => updateSettings({ rhythmChime: v })}
+                  aria-label="节奏切换铃声"
+                >
+                  <Switch.Thumb className="switch-thumb" />
+                </Switch.Root>
+              </label>
             </div>
+          </div>
+
+          <div className="setting-row">
+            <span className="setting-label">环境音（默认关闭）</span>
+            <div className="ambient-list" role="radiogroup" aria-label="环境音">
+              {(['none', 'rain', 'wind', 'waves', 'fire', 'cafe', 'tick'] as const).map((k) => (
+                <button
+                  key={k}
+                  role="radio"
+                  aria-checked={settings.ambientKind === k}
+                  className={`ambient-item ${settings.ambientKind === k ? 'active' : ''}`}
+                  onClick={() => updateSettings({ ambientKind: k })}
+                >
+                  {k === 'none' ? '关闭' : AMBIENT_LABELS[k]}
+                </button>
+              ))}
+            </div>
+            <label className="ambient-volume">
+              音量
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(settings.ambientVolume * 100)}
+                onChange={(e) => updateSettings({ ambientVolume: Number(e.target.value) / 100 })}
+                aria-label="环境音音量"
+              />
+            </label>
+            <p className="setting-hint">全部由浏览器实时合成，无外部资源。页面切到后台会自动暂停以省电。</p>
           </div>
 
           <div className="setting-row">
