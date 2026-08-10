@@ -54,6 +54,7 @@ export default function App() {
     <div className="app">
       <header className="topbar material">
         <span className="topbar-title">沉浸时钟</span>
+        <span className={`topbar-status-dot ${store.state?.active_session?.status === 'running' ? 'live' : ''}`} aria-hidden />
         <span className="topbar-date">{store.todayDate} · 北京时间</span>
         <button className="icon-btn" aria-label="设置" onClick={() => setSettingsOpen(true)}>
           <Settings size={18} />

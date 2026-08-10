@@ -268,3 +268,43 @@ test.describe('番茄节奏（可选参考）', () => {
     await page.getByRole('button', { name: '好，继续' }).click();
   });
 });
+
+test.describe('时间轴信标与自动滚动', () => {
+  test('开始会话后时间轴自动定位，「现在」按钮可滚回信标', async ({ page }) => {
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数学一' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(800);
+
+    // 信标存在
+    await expect(page.getByTestId('now-line')).toBeVisible();
+
+    // 手动滚到远端（模拟用户浏览历史时段）
+    const scroll = page.getByTestId('timeline-scroll');
+    await scroll.evaluate((el) => { el.scrollLeft = 4000; });
+    await page.waitForTimeout(100);
+
+    // 点击「现在」平滑滚回信标
+    await page.getByTestId('scroll-now-btn').click();
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector('[data-testid="timeline-scroll"]');
+        return el ? el.scrollLeft < 4000 : false;
+      },
+      { timeout: 3000 },
+    );
+
+    // 清理
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+  });
+
+  test('空日时间轴仍显示刻度与空提示', async ({ page }) => {
+    await doSetup(page);
+    // 翻到 30 天内的历史空日
+    await page.getByRole('button', { name: '前一天' }).click();
+    await expect(page.getByText('这一天还没有记录')).toBeVisible();
+    // 刻度标签仍存在（时间感保留）
+    await expect(page.locator('.tick-label').first()).toBeVisible();
+  });
+});

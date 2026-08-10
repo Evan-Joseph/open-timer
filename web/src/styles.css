@@ -545,3 +545,48 @@ button:focus-visible, input:focus-visible {
 
 /* 按钮 press 反馈统一 */
 button:active:not(:disabled) { transform: scale(0.98); }
+
+/* ---------- 时间轴细节打磨（第二轮） ---------- */
+
+.timeline-head { min-height: 24px; }
+.timeline-total { color: var(--text-3); font-weight: 400; }
+.now-btn { display: inline-flex; align-items: center; gap: 4px; }
+
+.timeline-track { min-width: 100%; }
+.now-line { z-index: 3; transition: left 0.9s linear; }
+.now-flag { animation: flag-breathe 2.8s ease-in-out infinite; }
+@keyframes flag-breathe {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.85); }
+}
+
+.timeline-empty-inline {
+  position: absolute; left: 8px; top: 60px;
+  font-size: 12px; color: var(--text-3);
+}
+
+/* 顶栏状态指示点 */
+.topbar-status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-3); margin-left: 6px;
+  display: inline-block; vertical-align: middle;
+}
+.topbar-status-dot.live {
+  background: #30a46c;
+  animation: flag-breathe 2.4s ease-in-out infinite;
+}
+[data-theme='dark'] .topbar-status-dot.live { background: #4ade80; }
+
+/* 结束反馈卡片入场（温和、可关由 reduced-motion 兜底） */
+.finish-card { animation: card-in 0.28s ease; }
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* 空闲态入场微动效 */
+.clockface.idle { animation: fade-rise 0.3s ease; }
+@keyframes fade-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
