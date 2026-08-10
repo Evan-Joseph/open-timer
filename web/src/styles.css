@@ -783,19 +783,6 @@ h1, h2, h3 { letter-spacing: 0; }
 
 /* ---------- 全屏沉浸模式 ---------- */
 
-.app:fullscreen { background: var(--bg); }
-.app:fullscreen .topbar { display: none; }
-.app:fullscreen .timeline { display: none; }
-.app:fullscreen .main { padding: 0 16px; }
-.app:fullscreen .big-timer { font-size: min(18vw, 160px); min-height: 1.2em; }
-.app:fullscreen .idle-clock { font-size: min(14vw, 120px); }
-.app:fullscreen .subject-pill.large { font-size: 22px; padding: 10px 26px; }
-.app:fullscreen .exit-fullscreen-hint {
-  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-  font-size: 12px; color: var(--text-3);
-  animation: fade-rise 0.4s ease 2s both;
-}
-
 /* ---------- 环境音设置 ---------- */
 
 .ambient-list { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -858,4 +845,17 @@ h1, h2, h3 { letter-spacing: 0; }
 @media (max-width: 560px) {
   .pin-pad { grid-template-columns: repeat(3, 64px); gap: 12px; }
   .pin-key { width: 64px; height: 64px; font-size: 24px; }
+}
+
+/* 全屏沉浸模式（React state 驱动 class） */
+.app.fullscreen-mode .topbar { display: none; }
+.app.fullscreen-mode .timeline { display: none; }
+.app.fullscreen-mode .main { padding: 0 16px; }
+.app.fullscreen-mode .big-timer { font-size: min(18vw, 160px); min-height: 1.2em; }
+.app.fullscreen-mode .idle-clock { font-size: min(14vw, 120px); }
+.app.fullscreen-mode .subject-pill.large { font-size: 22px; padding: 10px 26px; }
+.exit-fullscreen-hint {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  font-size: 12px; color: var(--text-3);
+  animation: fade-rise 0.4s ease 2s both;
 }
