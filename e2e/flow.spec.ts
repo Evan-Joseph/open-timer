@@ -504,3 +504,28 @@ test.describe('全屏沉浸模式', () => {
     }
   });
 });
+
+test.describe('全屏时间轴开关', () => {
+  test('全屏下默认隐藏时间轴，可通过控制条展开与收起', async ({ page }) => {
+    await doSetup(page);
+    await page.getByRole('button', { name: '全屏沉浸模式' }).click();
+    await page.waitForTimeout(600);
+    const fs = await page.evaluate(() => Boolean(document.fullscreenElement));
+    if (!fs) return; // headless 不支持全屏则跳过断言
+
+    // 默认隐藏时间轴，显示控制条
+    await expect(page.locator('.timeline')).not.toBeVisible();
+    await expect(page.getByRole('button', { name: '展开时间轴' })).toBeVisible();
+
+    // 展开
+    await page.getByRole('button', { name: '展开时间轴' }).click();
+    await expect(page.locator('.timeline')).toBeVisible();
+
+    // 收起
+    await page.getByRole('button', { name: '收起时间轴' }).click();
+    await expect(page.locator('.timeline')).not.toBeVisible();
+
+    await page.evaluate(() => document.exitFullscreen().catch(() => {}));
+    await page.waitForTimeout(400);
+  });
+});

@@ -6,13 +6,15 @@ import AuthGate from './components/AuthGate.js';
 import ClockFace from './components/ClockFace.js';
 import Timeline from './components/Timeline.js';
 import SettingsDialog from './components/SettingsDialog.js';
-import { Settings, Maximize2 } from 'lucide-react';
+import { Settings, Maximize2, GanttChart, List } from 'lucide-react';
 
 export default function App() {
   const store = useClockStore();
   const settings = useSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  /** 全屏模式下时间轴是否展开 */
+  const [fsShowTimeline, setFsShowTimeline] = useState(false);
   const [theme, setTheme] = useState<string>(() => localStorage.getItem('clock-theme') || 'auto');
 
   // 主题应用
@@ -42,7 +44,7 @@ export default function App() {
     }
   }, [store.state, store.subjects]);
 
-  // 环境音生命周期：设置变化时启停；页面隐藏挂起（省电）
+  // 环境音生命周期：设置变化时启停；后台标签页保持播放（不打断沉浸听感）
   useEffect(() => {
     if (settings.ambientKind === 'none') {
       ambient.stop();
@@ -51,15 +53,6 @@ export default function App() {
       if (ambient.kind() !== settings.ambientKind) ambient.start(settings.ambientKind);
     }
   }, [settings.ambientKind, settings.ambientVolume]);
-
-  useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState === 'hidden') ambient.suspend();
-      else ambient.resume();
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
-  }, []);
 
   // 全屏状态跟踪
   useEffect(() => {
@@ -75,6 +68,11 @@ export default function App() {
       void document.documentElement.requestFullscreen().catch(() => {});
     }
   };
+
+  // 退出全屏时恢复时间轴显示状态
+  useEffect(() => {
+    if (!isFullscreen) setFsShowTimeline(false);
+  }, [isFullscreen]);
 
   if (store.phase === 'loading') {
     return (
@@ -118,9 +116,22 @@ export default function App() {
         <ClockFace store={store} />
       </main>
 
-      {isFullscreen && <div className="exit-fullscreen-hint">按 Esc 或 ⌘F 退出全屏</div>}
+      {isFullscreen && (
+        <div className="fs-controls">
+          <button
+            className="fs-control-btn"
+            onClick={() => setFsShowTimeline((v) => !v)}
+            aria-label={fsShowTimeline ? '收起时间轴' : '展开时间轴'}
+            title={fsShowTimeline ? '收起时间轴' : '展开时间轴'}
+          >
+            {fsShowTimeline ? <List size={15} /> : <GanttChart size={15} />}
+            <span>{fsShowTimeline ? '收起时间轴' : '展开时间轴'}</span>
+          </button>
+          <span className="fs-hint">按 Esc 退出全屏</span>
+        </div>
+      )}
 
-      <Timeline store={store} />
+      {(!isFullscreen || fsShowTimeline) && <Timeline store={store} />}
 
       <SettingsDialog
         open={settingsOpen}

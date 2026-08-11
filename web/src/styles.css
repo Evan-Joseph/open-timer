@@ -849,13 +849,27 @@ h1, h2, h3 { letter-spacing: 0; }
 
 /* 全屏沉浸模式（React state 驱动 class） */
 .app.fullscreen-mode .topbar { display: none; }
-.app.fullscreen-mode .timeline { display: none; }
 .app.fullscreen-mode .main { padding: 0 16px; }
 .app.fullscreen-mode .big-timer { font-size: min(18vw, 160px); min-height: 1.2em; }
 .app.fullscreen-mode .idle-clock { font-size: min(14vw, 120px); }
 .app.fullscreen-mode .subject-pill.large { font-size: 22px; padding: 10px 26px; }
-.exit-fullscreen-hint {
-  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-  font-size: 12px; color: var(--text-3);
-  animation: fade-rise 0.4s ease 2s both;
+
+/* 全屏浮动控制条：时间轴开关 + 退出提示 */
+.fs-controls {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  z-index: 30;
+  display: flex; align-items: center; gap: 14px;
+  padding: 8px 16px; border-radius: 999px;
+  background: var(--material);
+  backdrop-filter: blur(20px) saturate(1.8);
+  -webkit-backdrop-filter: blur(20px) saturate(1.8);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
 }
+.fs-control-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--text-1);
+  padding: 4px 10px; border-radius: var(--radius-sm);
+}
+.fs-control-btn:hover { background: var(--surface-2); }
+.fs-hint { font-size: 12px; color: var(--text-3); }
