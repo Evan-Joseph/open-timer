@@ -54,6 +54,23 @@ export default function App() {
     }
   }, [settings.ambientKind, settings.ambientVolume]);
 
+  // 浏览器 autoplay 策略：刷新后无手势时 AudioContext 保持 suspended（静音）。
+  // 注册一次性手势监听，首次任意点击/按键时恢复；成功后自动移除，避免反复挂监听。
+  useEffect(() => {
+    if (settings.ambientKind === 'none') return;
+    const unlock = () => {
+      ambient.ensureAudible();
+      window.removeEventListener('pointerdown', unlock, true);
+      window.removeEventListener('keydown', unlock, true);
+    };
+    window.addEventListener('pointerdown', unlock, true);
+    window.addEventListener('keydown', unlock, true);
+    return () => {
+      window.removeEventListener('pointerdown', unlock, true);
+      window.removeEventListener('keydown', unlock, true);
+    };
+  }, [settings.ambientKind]);
+
   // 全屏状态跟踪
   useEffect(() => {
     const onFs = () => setIsFullscreen(Boolean(document.fullscreenElement));

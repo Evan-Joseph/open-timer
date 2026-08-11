@@ -203,8 +203,9 @@ button:focus-visible, input:focus-visible {
 }
 .fs-control-btn:hover { background: var(--surface-2); }
 
-/* 分段控件项（主题/动画切换）：单一定义，含 hover/active */
-.seg-item {
+/* 分段控件项 / 环境音项（同一视觉语言：灰底容器 + 白块选中 + 阴影） */
+.seg-item,
+.ambient-item {
   display: inline-flex; align-items: center; justify-content: center;
   min-height: 32px; padding: 0 14px;
   font-size: 13px; color: var(--text-2);
@@ -212,27 +213,15 @@ button:focus-visible, input:focus-visible {
   border-radius: var(--radius-sm);
   transition: background 0.15s ease, color 0.15s ease;
 }
-.seg-item:hover:not(.active) { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
-.seg-item:active:not(:disabled):not(.active) { opacity: 0.6; }
-.seg-item.active {
+.seg-item:hover:not(.active),
+.ambient-item:hover:not(.active) { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+.seg-item:active:not(:disabled):not(.active),
+.ambient-item:active:not(:disabled):not(.active) { opacity: 0.6; }
+.seg-item.active,
+.ambient-item.active {
   background: var(--surface-1); color: var(--text-1);
   font-weight: 600; box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
 }
-
-/* 环境音选择胶囊 */
-.ambient-item {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-height: 32px; padding: 0 14px;
-  border-radius: 999px;
-  border: 1px solid var(--border); background: var(--surface-1);
-  font-size: 13px; color: var(--text-2);
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.1s ease;
-}
-.ambient-item:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-.ambient-item.active {
-  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500;
-}
-.ambient-item:active:not(:disabled) { transform: scale(0.96); }
 
 /* 科目选择胶囊 / 换科按钮 */
 .subject-chip, .switch-btn {
@@ -701,8 +690,16 @@ button:focus-visible, input:focus-visible {
 /* label 与 Switch 以 htmlFor/id 关联：文本可点，结构合法（label 不嵌套 button） */
 .switch-label { color: var(--text-1); font-size: 13px; cursor: pointer; }
 
-/* 环境音 */
-.ambient-list { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 环境音：容器与分段控件同一视觉语言（灰底 + 白块选中） */
+.ambient-list {
+  display: flex; flex-wrap: wrap; gap: 2px; padding: 2px;
+  background: color-mix(in srgb, var(--surface-2) 100%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius); width: fit-content; max-width: 100%;
+}
+[data-theme='dark'] .ambient-list {
+  background: color-mix(in srgb, var(--surface-2) 88%, white 12%);
+}
 .ambient-volume {
   display: flex; align-items: center; gap: 10px;
   font-size: 13px; color: var(--text-2);

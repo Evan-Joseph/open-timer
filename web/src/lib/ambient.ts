@@ -342,6 +342,16 @@ class AmbientEngine {
     else if (kind === 'cafe') this.startCafe(ctx, out);
   }
 
+  /** 恢复被浏览器 autoplay 策略静音的上下文：刷新后无手势时 ctx 保持
+   *  suspended（节点已调度但全程静音）。必须在用户手势回调内调用，
+   *  resume 的 promise 在手势栈外会被拒绝。已 running 的 ctx 调用
+   *  resume 是 no-op，安全可重复。 */
+  ensureAudible(): void {
+    if (this.ctx && this.ctx.state === 'suspended' && this.current !== 'none') {
+      void this.ctx.resume().catch(() => {});
+    }
+  }
+
   stop(): void {
     this.current = 'none';
     this.teardown();

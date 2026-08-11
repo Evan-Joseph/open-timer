@@ -91,7 +91,9 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
                 aria-label="环境音音量"
               />
             </label>
-            <p className="setting-hint">全部由浏览器实时合成，无外部资源；切换标签页后声音持续播放，不打断沉浸。</p>
+            <p className="setting-hint">
+              全部由浏览器实时合成，无外部资源；切换标签页后声音持续播放，不打断沉浸。刷新后任意点击一下页面，声音会自动恢复（浏览器自动播放限制）。
+            </p>
           </div>
 
           <div className="setting-row">
