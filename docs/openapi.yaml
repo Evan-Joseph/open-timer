@@ -10,21 +10,17 @@ servers:
   - url: /api/v1
 
 security:
-  - api-key: []
   - owner-cookie: []
 
 components:
   securitySchemes:
-    api-key:
-      type: apiKey
-      in: header
-      name: X-API-Key
-      description: 总控只读凭据（sha256 存储，可轮换/撤销）。只允许 GET。
     owner-cookie:
       type: apiKey
       in: cookie
       name: clock_session
-      description: owner 登录后下发的 HttpOnly 会话 cookie。
+      description: owner 登录后下发的 HttpOnly 会话 cookie；仅写操作需要。
+    # 注意：只读端点（GET subjects/state/sessions/daily-summary）完全公开，无需任何凭据，
+    # 各端点处显式标注 security: []。
 
   schemas:
     SubjectEntry:
@@ -137,7 +133,8 @@ paths:
 
   /subjects:
     get:
-      summary: 7 科目固定表
+      summary: 7 科目固定表（公开只读，无需认证）
+      security: []
       responses:
         '200':
           description: 科目列表
@@ -146,11 +143,31 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/SubjectEntry' }
-        '401': { description: 凭据缺失或已撤销 }
+
+  /state:
+    get:
+      summary: 当前实时状态（公开只读）：是否在计时、今日累计、本段秒数
+      security: []
+      responses:
+        '200':
+          description: 状态快照
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  server_now_ms: { type: integer }
+                  server_now_iso: { type: string, format: date-time }
+                  active_session:
+                    oneOf: [{ $ref: '#/components/schemas/RunningSessionEntry' }, { type: 'null' }]
+                  today_active_seconds: { type: integer }
+                  today_date: { type: string }
+                required: [server_now_ms, server_now_iso, active_session, today_active_seconds, today_date]
 
   /daily-summary:
     get:
-      summary: 北京时间某日学习时长汇总（总控每晚约 22:30 调用）
+      summary: 北京时间某日学习时长汇总（公开只读；Agent 每晚约 22:30 调用）
+      security: []
       parameters:
         - name: date
           in: query
@@ -173,11 +190,11 @@ paths:
               schema: { $ref: '#/components/schemas/DailySummary' }
         '304': { description: revision 未变化 }
         '400': { description: date 或 timezone 非法 }
-        '401': { description: 凭据缺失或已撤销 }
 
   /sessions:
     get:
-      summary: 某日会话明细（含 segment）
+      summary: 某日会话明细（含 segment；公开只读）
+      security: []
       parameters:
         - name: date
           in: query
@@ -186,7 +203,6 @@ paths:
       responses:
         '200': { description: 会话列表 }
         '400': { description: date 非法 }
-        '401': { description: 未鉴权 }
 
   /sessions/{id}/pause:
     post:

@@ -3,7 +3,7 @@
  * 领域规则全部来自 @clock/shared；持久化通过 Storage 接口（全异步）。
  */
 
-import { Hono, type Context } from 'hono';
+import { Hono, type Context, type Next } from 'hono';
 import { z } from 'zod';
 import type { Storage } from './repo/storage.js';
 import type { AppConfig } from './config.js';
@@ -12,7 +12,6 @@ import {
   generateToken,
   getApiAuth,
   getOwnerAuth,
-  requireAnyRead,
   requireOwner,
   serializeCookie,
   sha256hex,
@@ -183,9 +182,19 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ authenticated, setup_done: setupDone });
   });
 
-  /* ---------- 只读数据（任一凭据） ---------- */
+  /* ---------- 公开只读（供其他 Agent / 自动化读取学习数据，无需认证） ----------
+   * 写操作（start/pause/stop/…）仍要求 owner 登录（cookie）。
+   * 注意：公开端点在公网上任何人可读，勿在其中暴露敏感信息。
+   */
 
-  app.get('/api/v1/subjects', requireAnyRead(storage), (c) =>
+  /** 跨域可读：浏览器端 Agent/页面也能直接 fetch。 */
+  const publicCors = async (c: Context, next: Next) => {
+    c.header('Access-Control-Allow-Origin', '*');
+    c.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    await next();
+  };
+
+  app.get('/api/v1/subjects', publicCors, (c) =>
     c.json(
       SUBJECTS.map((s) => ({
         subject_id: s.id,
@@ -197,9 +206,9 @@ export function createApp(deps: AppDeps): Hono {
     ),
   );
 
-  /* ---------- state（前端恢复用） ---------- */
+  /* ---------- state（前端恢复用；公开只读） ---------- */
 
-  app.get('/api/v1/state', requireOwner(storage), async (c) => {
+  app.get('/api/v1/state', publicCors, async (c) => {
     const nowMs = now();
     const active = await storage.getActiveSession('owner');
     const today = shanghaiToday(nowMs);
@@ -413,9 +422,9 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(sessionResponse((await storage.getSession(id))!));
   });
 
-  /* ---------- 查询 ---------- */
+  /* ---------- 查询（公开只读） ---------- */
 
-  app.get('/api/v1/sessions', requireAnyRead(storage), async (c) => {
+  app.get('/api/v1/sessions', publicCors, async (c) => {
     const date = c.req.query('date');
     if (!date || !isValidShanghaiDate(date)) return c.json({ error: 'INVALID_DATE' }, 400);
     const { startMs, endMs } = shanghaiDayRangeUtc(date);
@@ -453,9 +462,9 @@ export function createApp(deps: AppDeps): Hono {
     return c.json({ date, timezone: TIMEZONE, sessions: entries });
   });
 
-  /* ---------- 总控只读 daily-summary ---------- */
+  /* ---------- daily-summary（公开只读，带 ETag） ---------- */
 
-  app.get('/api/v1/daily-summary', requireAnyRead(storage), async (c) => {
+  app.get('/api/v1/daily-summary', publicCors, async (c) => {
     const date = c.req.query('date');
     const tz = c.req.query('timezone');
     if (!date || !isValidShanghaiDate(date)) return c.json({ error: 'INVALID_DATE' }, 400);

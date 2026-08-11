@@ -78,15 +78,30 @@ describe('API 集成', () => {
     expect(body.version).toBe('test');
   });
 
-  it('subjects 需要凭据；返回 7 科目', async () => {
+  it('公开只读：subjects / state / sessions / daily-summary 无凭据可读', async () => {
+    // subjects：无需任何凭据（公开只读 API，供其他 Agent 读取）
     const noauth = await ctx.app.request('/api/v1/subjects');
-    expect(noauth.status).toBe(401);
-
-    const res = await ctx.app.request('/api/v1/subjects', { headers: { 'x-api-key': ctx.token } });
-    expect(res.status).toBe(200);
-    const subjects = await res.json();
+    expect(noauth.status).toBe(200);
+    const subjects = await noauth.json();
     expect(subjects).toHaveLength(7);
     expect(subjects.map((s: { subject_id: string }) => s.subject_id)).toContain('data-structures');
+    // CORS：跨域可读
+    expect(noauth.headers.get('access-control-allow-origin')).toBe('*');
+
+    // state：无凭据可读（空库 → active_session null）
+    const st = await ctx.app.request('/api/v1/state');
+    expect(st.status).toBe(200);
+    expect((await st.json()).active_session).toBeNull();
+
+    // sessions?date：无凭据可读
+    const sess = await ctx.app.request('/api/v1/sessions?date=2026-01-01');
+    expect(sess.status).toBe(200);
+    expect((await sess.json()).sessions).toEqual([]);
+
+    // daily-summary：无凭据可读
+    const ds = await ctx.app.request('/api/v1/daily-summary?date=2026-01-01&timezone=Asia/Shanghai');
+    expect(ds.status).toBe(200);
+    expect((await ds.json()).total_active_seconds).toBe(0);
   });
 
   it('start → pause → resume → stop 全流程，净时长正确', async () => {
@@ -285,18 +300,23 @@ describe('API 集成', () => {
     expect(badTz.status).toBe(400);
   });
 
-  it('撤销后的 token 立即失效', async () => {
+  it('凭据生命周期：创建后可见，吊销后 revoked=true', async () => {
     const create = await ctx.app.request('/api/v1/credentials', {
       method: 'POST',
       headers: { 'content-type': 'application/json', cookie: ctx.cookie },
       body: JSON.stringify({ name: 'temp' }),
     });
-    const { id, token } = await create.json();
-    const ok = await ctx.app.request('/api/v1/subjects', { headers: { 'x-api-key': token } });
-    expect(ok.status).toBe(200);
+    expect(create.status).toBe(201);
+    const { id } = await create.json();
+    // 创建后列表中可见且未吊销
+    const listed = await (await ctx.app.request('/api/v1/credentials', { headers: { cookie: ctx.cookie } })).json();
+    const cred = listed.find((c: { id: string }) => c.id === id);
+    expect(cred).toBeTruthy();
+    expect(cred.revoked).toBe(false);
+    // 吊销后状态翻转
     await ctx.app.request(`/api/v1/credentials/${id}/revoke`, { method: 'POST', headers: { cookie: ctx.cookie } });
-    const denied = await ctx.app.request('/api/v1/subjects', { headers: { 'x-api-key': token } });
-    expect(denied.status).toBe(401);
+    const listed2 = await (await ctx.app.request('/api/v1/credentials', { headers: { cookie: ctx.cookie } })).json();
+    expect(listed2.find((c: { id: string }) => c.id === id).revoked).toBe(true);
   });
 
   it('CSRF：跨源 Origin 的写请求被拒绝', async () => {
