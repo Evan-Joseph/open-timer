@@ -106,3 +106,91 @@ describe('rhythmPhase（自动阶段推导）', () => {
     expect(p.suggestedBreak).toBe('long');
   });
 });
+
+import { dayRhythm } from '../src/pomodoro.js';
+
+const CFG90: RhythmConfig = { enabled: true, focusMin: 90, breakMin: 20, longBreakEvery: 2, longBreakMin: 30 };
+
+describe('dayRhythm（跨科目/跨会话节奏）', () => {
+  const T0 = Date.UTC(2026, 7, 10, 1, 0, 0); // 北京时间 09:00
+
+  it('没有会话 → fresh', () => {
+    const r = dayRhythm([], T0, CFG90);
+    expect(r.phase).toBe('fresh');
+    expect(r.focusRemainingSec).toBe(90 * 60);
+  });
+
+  it('背单词 85 分钟（未达整轮）后结束 → resting + 短休息 + 预计回归时间', () => {
+    const stamps = [{ startedAtMs: T0, endedAtMs: T0 + 85 * 60000, activeSeconds: 85 * 60 }];
+    const r = dayRhythm(stamps, T0 + 92 * 60000, CFG90); // 结束后 7 分钟
+    expect(r.phase).toBe('resting');
+    expect(r.focusAccumSec).toBe(85 * 60);
+    expect(r.suggestedBreakSec).toBe(20 * 60); // 未达整轮也给短休息
+    expect(r.restElapsedSec).toBe(7 * 60);
+    expect(r.restRemainingSec).toBe(13 * 60);
+    expect(r.projectedResumeMs).toBe(T0 + 85 * 60000 + 20 * 60000);
+    expect(r.roundsDone).toBe(0);
+  });
+
+  it('专注达 90 分钟 → 长休息（每 2 轮）判断正确', () => {
+    const stamps = [
+      { startedAtMs: T0, endedAtMs: T0 + 90 * 60000, activeSeconds: 90 * 60 },
+    ];
+    const r = dayRhythm(stamps, T0 + 95 * 60000, CFG90);
+    expect(r.roundsDone).toBe(1);
+    expect(r.isLongBreak).toBe(false); // 第 1 轮后是短休息
+    expect(r.suggestedBreakSec).toBe(20 * 60);
+  });
+
+  it('第 2 轮后 → 长休息 30 分', () => {
+    const stamps = [
+      { startedAtMs: T0, endedAtMs: T0 + 90 * 60000, activeSeconds: 90 * 60 },
+      { startedAtMs: T0 + 110 * 60000, endedAtMs: T0 + 200 * 60000, activeSeconds: 90 * 60 },
+    ];
+    const r = dayRhythm(stamps, T0 + 205 * 60000, CFG90);
+    expect(r.roundsDone).toBe(2);
+    expect(r.isLongBreak).toBe(true);
+    expect(r.suggestedBreakSec).toBe(30 * 60);
+  });
+
+  it('休息够了 → break_ready', () => {
+    const stamps = [{ startedAtMs: T0, endedAtMs: T0 + 90 * 60000, activeSeconds: 90 * 60 }];
+    const r = dayRhythm(stamps, T0 + 115 * 60000, CFG90); // 25 分钟后
+    expect(r.phase).toBe('break_ready');
+    expect(r.restRemainingSec).toBe(0);
+    expect(r.projectedResumeMs).toBeNull();
+  });
+
+  it('换科目不打断节奏：两个会话的专注累计', () => {
+    const stamps = [
+      { startedAtMs: T0, endedAtMs: T0 + 50 * 60000, activeSeconds: 50 * 60 },
+      { startedAtMs: T0 + 52 * 60000, endedAtMs: T0 + 92 * 60000, activeSeconds: 40 * 60 },
+    ];
+    const r = dayRhythm(stamps, T0 + 95 * 60000, CFG90);
+    expect(r.focusAccumSec).toBe(90 * 60); // 50+40 累计达标
+    expect(r.roundsDone).toBe(1);
+    expect(r.phase).toBe('resting');
+  });
+
+  it('足够长的休息（≥2×长休息）开启新专注块', () => {
+    const stamps = [
+      { startedAtMs: T0, endedAtMs: T0 + 90 * 60000, activeSeconds: 90 * 60 },
+      // 休息 65 分钟（≥60=2×30）→ 新块
+      { startedAtMs: T0 + 155 * 60000, endedAtMs: T0 + 185 * 60000, activeSeconds: 30 * 60 },
+    ];
+    const r = dayRhythm(stamps, T0 + 190 * 60000, CFG90);
+    expect(r.focusAccumSec).toBe(30 * 60); // 只算新块
+    expect(r.roundsDone).toBe(0);
+  });
+
+  it('轮间正常休息（短/长休）不切分节奏', () => {
+    const stamps = [
+      { startedAtMs: T0, endedAtMs: T0 + 90 * 60000, activeSeconds: 90 * 60 },
+      // 休息 25 分钟 → 仍在节奏内，累计 120 分 = 超过 1 轮
+      { startedAtMs: T0 + 115 * 60000, endedAtMs: T0 + 145 * 60000, activeSeconds: 30 * 60 },
+    ];
+    const r = dayRhythm(stamps, T0 + 150 * 60000, CFG90);
+    expect(r.focusAccumSec).toBe(120 * 60); // 90+30 累计
+    expect(r.roundsDone).toBe(1);
+  });
+});

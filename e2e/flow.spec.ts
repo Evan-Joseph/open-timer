@@ -529,3 +529,27 @@ test.describe('全屏时间轴开关', () => {
     await page.waitForTimeout(400);
   });
 });
+
+test.describe('跨科目节奏提示（空闲态）', () => {
+  test('结束会话后空闲态显示休息建议与预计回归时间', async ({ page }) => {
+    await doSetup(page);
+    // 开启节奏（默认 flow 52/17）
+    await page.getByRole('button', { name: '设置' }).click();
+    await page.getByRole('radio', { name: '平衡 · 52 分专注 / 17 分小憩' }).click();
+    await page.keyboard.press('Escape');
+
+    // 模拟"背单词后结束"：短会话 → 结束 → 空闲
+    await page.getByRole('radio', { name: '英语一' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1200);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+
+    // 空闲态出现节奏提示：休息中 + 预计回归时间
+    const resting = page.getByTestId('rhythm-idle-resting');
+    await expect(resting).toBeVisible();
+    await expect(resting).toContainText('建议休息');
+    await expect(resting).toContainText('预计');
+    await expect(resting).toContainText('重新投入');
+  });
+});

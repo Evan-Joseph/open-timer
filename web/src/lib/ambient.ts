@@ -25,6 +25,8 @@ const BUFFER_SECONDS = 4;
 class AmbientEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  /** 主链 compressor：统一响度、防止任一类型的瞬时峰值过响 */
+  private limiter: DynamicsCompressorNode | null = null;
   private nodes: Array<{ stop?: () => void; disconnect?: () => void }> = [];
   private tickScheduler: number | null = null;
   private nextTickTime = 0;
@@ -38,7 +40,14 @@ class AmbientEngine {
         this.ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
         this.master = this.ctx.createGain();
         this.master.gain.value = this.volume;
-        this.master.connect(this.ctx.destination);
+        // 温和压缩：把各声音类型的响度拉平，峰值不炸
+        this.limiter = this.ctx.createDynamicsCompressor();
+        this.limiter.threshold.value = -20;
+        this.limiter.knee.value = 12;
+        this.limiter.ratio.value = 2.5;
+        this.limiter.attack.value = 0.01;
+        this.limiter.release.value = 0.3;
+        this.master.connect(this.limiter).connect(this.ctx.destination);
       }
       if (this.ctx.state === 'suspended') void this.ctx.resume();
       return this.ctx;
@@ -143,7 +152,7 @@ class AmbientEngine {
   private startRain(ctx: AudioContext, out: GainNode): void {
     // 雨底（密集低频）：白噪声 → 低通 1100Hz
     const bed = ctx.createGain();
-    bed.gain.value = 0.5;
+    bed.gain.value = 0.45;
     const bedLp = this.makeFilter(ctx, 'lowpass', 1100);
     this.stereoNoise(ctx, 'white', bedLp);
     bedLp.connect(bed).connect(out);
@@ -172,7 +181,7 @@ class AmbientEngine {
     const lp = this.makeFilter(ctx, 'lowpass', 260, 0.8);
     this.stereoNoise(ctx, 'brown', lp);
     const g = ctx.createGain();
-    g.gain.value = 1.25;
+    g.gain.value = 0.55;
     const lfo1 = ctx.createOscillator();
     lfo1.frequency.value = 0.09;
     const lfo1Gain = ctx.createGain();
@@ -201,9 +210,9 @@ class AmbientEngine {
     const lp = this.makeFilter(ctx, 'lowpass', 900);
     this.stereoNoise(ctx, 'pink', lp);
     const wave = ctx.createGain();
-    wave.gain.value = 0.35;
+    wave.gain.value = 0.4;
     const base = ctx.createConstantSource();
-    base.offset.value = 0.35;
+    base.offset.value = 0.4;
     base.connect(wave.gain);
     const lfo1 = ctx.createOscillator();
     lfo1.frequency.value = 1 / 7;
@@ -227,7 +236,7 @@ class AmbientEngine {
     const bedLp = this.makeFilter(ctx, 'lowpass', 1500);
     this.stereoNoise(ctx, 'brown', bedLp);
     const bed = ctx.createGain();
-    bed.gain.value = 0.6;
+    bed.gain.value = 0.5;
     bedLp.connect(bed).connect(out);
     this.track(bedLp, bed);
 
@@ -257,7 +266,7 @@ class AmbientEngine {
     const murmurBp = this.makeFilter(ctx, 'bandpass', 420, 0.5);
     this.stereoNoise(ctx, 'brown', murmurBp);
     const murmur = ctx.createGain();
-    murmur.gain.value = 0.5;
+    murmur.gain.value = 0.45;
     murmurBp.connect(murmur).connect(out);
     this.track(murmurBp, murmur);
 

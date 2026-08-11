@@ -140,3 +140,110 @@ export function rhythmPhase(segSecs: number, awaySecs: number, paused: boolean, 
   }
   return { phase: 'focus', seconds: Math.max(0, target - away), suggestedBreak: status.suggestedBreak };
 }
+
+/* ================= 跨科目/跨会话的当日节奏 =================
+ * 节奏周期按"当日累计专注"计算，不随科目或会话重置：
+ * 换科目、结束会话都不打断节奏；只有"足够长的休息"才开启新的专注块。
+ * 用于空闲态给出"建议休息 X 分 · 预计 HH:MM 重新投入"的提示。
+ */
+
+export interface SessionStamp {
+  startedAtMs: number;
+  endedAtMs: number;
+  activeSeconds: number;
+}
+
+export interface DayRhythmInfo {
+  /** fresh=今天还没专注过；resting=在休息；break_ready=休息够了可重新投入 */
+  phase: 'fresh' | 'resting' | 'break_ready';
+  /** 当前专注块已累计专注秒数（跨科目） */
+  focusAccumSec: number;
+  /** 本专注块完成的完整轮数 */
+  roundsDone: number;
+  /** 当前建议休息秒数 */
+  suggestedBreakSec: number;
+  /** 已休息秒数 */
+  restElapsedSec: number;
+  /** 剩余建议休息秒数（resting 时 > 0） */
+  restRemainingSec: number;
+  /** 预计重新投入的 epoch ms（resting 时非 null） */
+  projectedResumeMs: number | null;
+  /** 距下一个节奏点还需要的专注秒数 */
+  focusRemainingSec: number;
+  isLongBreak: boolean;
+}
+
+/**
+ * 由当天已结束会话序列推导空闲态节奏。
+ * @param stamps  当天已结束的会话（startedAtMs/endedAtMs/activeSeconds）
+ * @param nowMs   当前时刻
+ */
+export function dayRhythm(stamps: SessionStamp[], nowMs: number, cfg: RhythmConfig): DayRhythmInfo {
+  const focusSec = cfg.focusMin * 60;
+  const shortBreakSec = cfg.breakMin * 60;
+  const longBreakSec = cfg.longBreakMin * 60;
+
+  const sorted = stamps
+    .filter((s) => s.endedAtMs > s.startedAtMs && s.activeSeconds > 0)
+    .sort((a, b) => a.startedAtMs - b.startedAtMs);
+
+  // 从后往前找最近一次"超长休息"的分界（gap ≥ 2×最长休息，如 90/20 下为 60 分），
+  // 其后的专注为当前专注块；轮间正常休息（短/长休）不切分节奏。
+  const blockGapSec = Math.max(shortBreakSec, longBreakSec) * 2;
+  let blockStartIdx = 0;
+  for (let i = sorted.length - 1; i >= 1; i--) {
+    const gap = sorted[i].startedAtMs - sorted[i - 1].endedAtMs;
+    if (gap >= blockGapSec * 1000) {
+      blockStartIdx = i;
+      break;
+    }
+  }
+
+  let focusAccum = 0;
+  for (let i = blockStartIdx; i < sorted.length; i++) focusAccum += sorted[i].activeSeconds;
+  const roundsDone = Math.floor(focusAccum / focusSec);
+  const isLongBreak = roundsDone > 0 && roundsDone % cfg.longBreakEvery === 0;
+  const lastEndMs = sorted.length ? sorted[sorted.length - 1].endedAtMs : 0;
+
+  const fresh: DayRhythmInfo = {
+    phase: 'fresh',
+    focusAccumSec: 0,
+    roundsDone: 0,
+    suggestedBreakSec: shortBreakSec,
+    restElapsedSec: 0,
+    restRemainingSec: 0,
+    projectedResumeMs: null,
+    focusRemainingSec: focusSec,
+    isLongBreak: false,
+  };
+  if (focusAccum <= 0 || lastEndMs <= 0) return fresh;
+
+  const idleSec = Math.max(0, Math.floor((nowMs - lastEndMs) / 1000));
+  // 达到整轮 → 对应休息（长/短）；未达整轮（如 85/90）→ 也给一次短休息
+  const suggested = focusAccum >= focusSec ? (isLongBreak ? longBreakSec : shortBreakSec) : shortBreakSec;
+
+  if (idleSec >= suggested) {
+    return {
+      phase: 'break_ready',
+      focusAccumSec: focusAccum,
+      roundsDone,
+      suggestedBreakSec: suggested,
+      restElapsedSec: idleSec,
+      restRemainingSec: 0,
+      projectedResumeMs: null,
+      focusRemainingSec: Math.max(0, focusSec - focusAccum),
+      isLongBreak,
+    };
+  }
+  return {
+    phase: 'resting',
+    focusAccumSec: focusAccum,
+    roundsDone,
+    suggestedBreakSec: suggested,
+    restElapsedSec: idleSec,
+    restRemainingSec: suggested - idleSec,
+    projectedResumeMs: lastEndMs + suggested * 1000,
+    focusRemainingSec: Math.max(0, focusSec - focusAccum),
+    isLongBreak,
+  };
+}

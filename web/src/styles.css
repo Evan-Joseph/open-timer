@@ -81,30 +81,156 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+
+/* ==========================================================================
+   统一按钮系统（单一来源，token 化尺寸，严格居中）
+   尺寸刻度：32(icon) / 36(sm) / 40(md) / 48(lg) / 56(xl 控制)
+   ========================================================================== */
+
 button {
   font-family: inherit;
   cursor: pointer;
   border: none;
   background: none;
   color: inherit;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
-button:disabled { opacity: 0.45; cursor: default; }
+button:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
 button:focus-visible, input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-/* Press 反馈分级（Apple 式）：实心按钮缩放，透明/文字按钮降透明；
-   不在全局 button 上定义，避免热区/片段等交互元素意外变形 */
-.primary-btn:active:not(:disabled),
-.start-btn:active:not(:disabled) { transform: scale(0.98); }
+/* 实心主按钮（accent 底）：start / primary / nudge.primary / resume */
+.start-btn,
+.primary-btn,
+.nudge-btn.primary,
+.control-btn.resume {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 40px; padding: 0 24px;
+  border-radius: var(--radius);
+  background: var(--accent); color: #fff;
+  font-size: 15px; font-weight: 600;
+  transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+.start-btn { min-height: 48px; padding: 0 40px; font-size: 17px; border-radius: 12px; box-shadow: var(--shadow); }
+.nudge-btn.primary { min-height: 32px; padding: 0 14px; font-size: 13px; border-radius: var(--radius-sm); }
+.control-btn.resume { min-height: 0; width: 56px; height: 56px; padding: 0; border-radius: 50%; }
+.start-btn:hover, .primary-btn:hover, .nudge-btn.primary:hover, .control-btn.resume:hover { background: var(--accent-press); }
+.start-btn:active:not(:disabled), .primary-btn:active:not(:disabled),
+.nudge-btn.primary:active:not(:disabled), .control-btn.resume:active:not(:disabled) { transform: scale(0.97); }
+.start-btn:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+
+/* 次要按钮（描边透明底）：ghost / nudge / danger */
+.ghost-btn,
+.nudge-btn:not(.primary),
+.danger-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 36px; padding: 0 16px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border); background: transparent;
+  color: var(--text-2); font-size: 14px;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+.nudge-btn:not(.primary) { min-height: 30px; padding: 0 12px; font-size: 12px; border-radius: var(--radius-sm); }
+.ghost-btn:hover, .nudge-btn:not(.primary):hover { color: var(--text-1); background: var(--surface-2); }
+.ghost-btn:active:not(:disabled), .nudge-btn:not(.primary):active:not(:disabled) { transform: scale(0.97); }
+/* danger 变体：撤回/退出（hover 转危险色提示破坏性） */
+.danger-btn { border-color: color-mix(in srgb, var(--danger) 35%, transparent); color: var(--danger); }
+.danger-btn:hover { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
+
+/* 圆形控制按钮（暂停/结束）：56px，surface 底 */
+.control-btn {
+  width: 56px; height: 56px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border); background: var(--surface-1);
+  color: var(--text-1);
+  box-shadow: var(--shadow);
+  transition: transform 0.1s ease, background 0.15s ease;
+}
+.control-btn:hover { background: var(--surface-2); }
 .control-btn:active:not(:disabled) { transform: scale(0.96); }
-.icon-btn:active:not(:disabled),
-.text-btn:active:not(:disabled),
-.nudge-btn:active:not(:disabled),
-.switch-btn:active:not(:disabled),
-.subject-chip:active:not(:disabled),
-.seg-item:active:not(:disabled) { opacity: 0.65; }
+.control-btn.stop { color: var(--danger); }
+
+/* 图标按钮：32px 正方形，place-items 严格居中 */
+.icon-btn {
+  width: 32px; height: 32px; padding: 0;
+  display: inline-grid; place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-2); background: transparent;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.icon-btn:hover { background: var(--surface-2); color: var(--text-1); }
+.icon-btn:active:not(:disabled) { opacity: 0.6; }
+
+/* 文字按钮：无背景，accent 色 */
+.text-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  min-height: 30px; padding: 0 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 500; color: var(--accent);
+  transition: background 0.15s ease;
+}
+.text-btn:hover { background: var(--surface-2); }
+.text-btn:active:not(:disabled) { opacity: 0.6; }
+.text-btn.withdraw-btn { color: var(--danger); }
+
+/* 全屏控制条按钮 */
+.fs-control-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 32px; padding: 0 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px; color: var(--text-1);
+  transition: background 0.15s ease;
+}
+.fs-control-btn:hover { background: var(--surface-2); }
+
+/* 分段控件项（主题/节奏档位切换） */
+.seg-item {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 32px; padding: 0 14px;
+  font-size: 13px; color: var(--text-2);
+  background: transparent; border: none;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.seg-item:hover:not(.active) { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+.seg-item:active:not(:disabled):not(.active) { opacity: 0.6; }
+.seg-item.active {
+  background: var(--surface-1); color: var(--text-1);
+  font-weight: 600; box-shadow: var(--shadow-sm);
+}
+
+/* 环境音选择胶囊 */
+.ambient-item {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 32px; padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface-1);
+  font-size: 13px; color: var(--text-2);
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+.ambient-item:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.ambient-item.active {
+  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500;
+}
+.ambient-item:active:not(:disabled) { transform: scale(0.96); }
+
+/* 科目选择胶囊 / 换科按钮 */
+.subject-chip, .switch-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+.subject-chip:active:not(:disabled), .switch-btn:active:not(:disabled) { transform: scale(0.97); }
+
+/* 含图标/圆点的行容器统一对齐 */
+.rhythm-option, .timeline-list-row, .overview-item, .legend-item, .pin-dot {
+  display: inline-flex; align-items: center;
+}
+.pill-dot { flex: none; }
+
 
 .material {
   background: var(--material);
@@ -189,15 +315,6 @@ button:focus-visible, input:focus-visible {
 }
 .intent-input::placeholder, .finish-note::placeholder, .auth-input::placeholder { color: var(--text-3); }
 
-.start-btn {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 12px 40px; border-radius: var(--radius);
-  background: var(--accent); color: #fff;
-  font-size: 17px; font-weight: 600;
-  transition: background 0.15s ease;
-}
-.start-btn:hover { background: var(--accent-press); }
-.start-btn:active { transform: scale(0.98); }
 
 .today-hint { color: var(--text-2); font-size: 13px; }
 
@@ -224,18 +341,6 @@ button:focus-visible, input:focus-visible {
 .intent-line { color: var(--text-3); font-size: 13px; max-width: 400px; }
 
 .control-row { display: flex; gap: 16px; margin-top: 8px; }
-.control-btn {
-  width: 56px; height: 56px; border-radius: 50%;
-  display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid var(--border); background: var(--surface-1);
-  color: var(--text-1);
-  box-shadow: var(--shadow);
-  transition: transform 0.12s ease, background 0.15s ease;
-}
-.control-btn:hover { background: var(--surface-2); }
-.control-btn:active { transform: scale(0.96); }
-.control-btn.stop { color: var(--danger); }
-.control-btn.resume { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 .switch-subject { margin-top: 12px; }
 .switch-subject summary {
@@ -269,12 +374,6 @@ button:focus-visible, input:focus-visible {
 .finish-big { font-size: 34px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .finish-line { color: var(--text-2); font-size: 14px; margin: 0; }
 .finish-actions { margin-top: 4px; }
-.primary-btn {
-  padding: 9px 28px; border-radius: var(--radius);
-  background: var(--accent); color: #fff; font-size: 15px; font-weight: 600;
-}
-.primary-btn:hover { background: var(--accent-press); }
-.primary-btn:active { transform: scale(0.98); }
 
 /* ---------- 时间轴 ---------- */
 
@@ -425,23 +524,7 @@ button:focus-visible, input:focus-visible {
   font-weight: 600; box-shadow: var(--shadow-sm);
 }
 
-.icon-btn {
-  width: 32px; height: 32px; border-radius: var(--radius);
-  display: inline-flex; align-items: center; justify-content: center;
-  color: var(--text-2); background: transparent;
-}
-.icon-btn:hover { background: var(--surface-2); }
-.icon-btn:active { transform: scale(0.96); }
 
-.text-btn { font-size: 13px; color: var(--accent); padding: 4px 8px; border-radius: var(--radius-sm); }
-.text-btn:hover { background: var(--surface-2); }
-
-.danger-btn {
-  padding: 8px 20px; border-radius: var(--radius);
-  border: 1px solid var(--danger); color: var(--danger);
-  font-size: 14px; background: transparent; width: fit-content;
-}
-.danger-btn:hover { background: color-mix(in srgb, var(--danger) 8%, transparent); }
 
 /* ---------- 响应式 ---------- */
 
@@ -498,13 +581,6 @@ button:focus-visible, input:focus-visible {
   animation: nudge-in 0.3s ease;
 }
 .nudge-icon { color: var(--text-2); display: inline-flex; }
-.nudge-btn {
-  padding: 4px 12px; border-radius: var(--radius-sm); font-size: 12px;
-  border: 1px solid var(--border); color: var(--text-2); background: transparent;
-}
-.nudge-btn:hover { background: var(--surface-2); }
-.nudge-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.nudge-btn.primary:hover { background: var(--accent-press); }
 
 @keyframes nudge-in {
   from { opacity: 0; transform: translateY(4px); }
@@ -548,9 +624,6 @@ button:focus-visible, input:focus-visible {
 }
 
 /* ---------- 空闲态微动效 ---------- */
-
-.start-btn { box-shadow: var(--shadow); }
-.start-btn:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.10); }
 
 /* ---------- 三态切换空间连续性 ---------- */
 
@@ -634,14 +707,6 @@ button:active:not(:disabled) { transform: scale(0.98); }
 
 /* ---------- 撤回 / ghost 按钮 / popover 操作行 ---------- */
 
-.ghost-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 9px 18px; border-radius: var(--radius);
-  border: 1px solid var(--border); background: transparent;
-  color: var(--text-2); font-size: 14px;
-  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-}
-.ghost-btn:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: color-mix(in srgb, var(--danger) 6%, transparent); }
 .finish-actions { display: flex; gap: 10px; align-items: center; }
 
 .popover-actions { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
@@ -750,15 +815,6 @@ h1, h2, h3 { letter-spacing: 0; }
 
 /* ---------- 对齐修正（按钮背景与图标/圆点严格居中） ---------- */
 
-.icon-btn {
-  display: inline-grid; place-items: center;
-  width: 32px; height: 32px; padding: 0;
-}
-.subject-chip, .switch-btn, .seg-item, .nudge-btn, .ghost-btn, .primary-btn,
-.timeline-list-row, .rhythm-option, .overview-item, .legend-item {
-  display: inline-flex; align-items: center;
-}
-.pill-dot { flex: none; display: inline-block; vertical-align: middle; }
 
 /* ---------- 时间轴缩放与流水账 ---------- */
 
@@ -866,10 +922,21 @@ h1, h2, h3 { letter-spacing: 0; }
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
 }
-.fs-control-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 13px; color: var(--text-1);
-  padding: 4px 10px; border-radius: var(--radius-sm);
-}
-.fs-control-btn:hover { background: var(--surface-2); }
 .fs-hint { font-size: 12px; color: var(--text-3); }
+
+/* ---------- 空闲态节奏提示行 ---------- */
+
+.rhythm-idle-line {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 16px; border-radius: 999px;
+  font-size: 13px; font-variant-numeric: tabular-nums;
+  animation: fade-rise 0.3s ease;
+}
+.rhythm-idle-line.resting {
+  background: color-mix(in srgb, #f59e0b 9%, var(--surface-2));
+  color: var(--text-1);
+}
+.rhythm-idle-line.ready {
+  background: color-mix(in srgb, var(--success) 10%, var(--surface-2));
+  color: var(--text-1);
+}

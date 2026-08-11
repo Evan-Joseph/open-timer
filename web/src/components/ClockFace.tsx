@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { Pause, Play, Square, Flag, Undo2 } from 'lucide-react';
+import { Pause, Play, Square, Flag, Undo2, Coffee, Sparkles } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
 import { useMonotonicSeconds, useBeijingTime, formatHms, formatDurationZh, formatBeijingTime } from '../lib/clock.js';
 import { useSettings } from '../lib/settings.js';
 import { playFinishChime } from '../lib/sound.js';
+import { dayRhythm, type SessionStamp } from '@clock/shared';
 import RhythmRing from './RhythmRing.js';
 
 const REDUCED = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -41,17 +42,20 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   }, []);
   const idleTime = formatBeijingTime(idleNowMs);
 
-  // 距上次专注：取今天最后一个已停止会话的结束时刻；中性陈述、跨日归零
-  const gapSinceLastFocusMs = useMemo(() => {
-    let lastEndMs: number | null = null;
+  // 跨科目/跨会话的当日节奏（空闲态提示：休息中/该回归了/预计回归时间）
+  const dayRhythmInfo = useMemo(() => {
+    if (!settings.rhythm.enabled) return null;
+    const stamps: SessionStamp[] = [];
     for (const s of store.sessions) {
       if (s.status !== 'stopped' || !s.ended_at) continue;
+      const startMs = Date.parse(s.started_at);
       const endMs = Date.parse(s.ended_at);
-      if (Number.isFinite(endMs) && (lastEndMs === null || endMs > lastEndMs)) lastEndMs = endMs;
+      if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
+        stamps.push({ startedAtMs: startMs, endedAtMs: endMs, activeSeconds: s.active_seconds });
+      }
     }
-    if (lastEndMs === null) return null;
-    return Math.max(0, idleNowMs - lastEndMs);
-  }, [store.sessions, idleNowMs]);
+    return dayRhythm(stamps, idleNowMs, settings.rhythm);
+  }, [store.sessions, idleNowMs, settings.rhythm]);
 
   /* ---------- 结束反馈 ---------- */
   const [lastStopped, setLastStopped] = useState<{ sessionId: string; subjectId: string; seconds: number } | null>(null);
@@ -253,9 +257,21 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       <div className="idle-date">
         {new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', dateStyle: 'full' }).format(new Date())}
       </div>
-      {gapSinceLastFocusMs !== null && (
-        <div className="gap-line" data-testid="gap-line">
-          距上次专注 {formatDurationZh(Math.floor(gapSinceLastFocusMs / 1000))}
+      {/* 跨科目节奏提示：休息中 → 显示剩余休息与预计回归时间；休息够了 → 提示回归 */}
+      {dayRhythmInfo?.phase === 'resting' && dayRhythmInfo.projectedResumeMs && (
+        <div className="rhythm-idle-line resting" data-testid="rhythm-idle-resting">
+          <Coffee size={14} aria-hidden />
+          <span>
+            已专注 {formatDurationZh(dayRhythmInfo.focusAccumSec)}，建议休息 {formatDurationZh(dayRhythmInfo.suggestedBreakSec)}
+            {' · '}还剩 {formatDurationZh(dayRhythmInfo.restRemainingSec)}
+            {' · '}预计 {formatBeijingTime(dayRhythmInfo.projectedResumeMs)} 重新投入
+          </span>
+        </div>
+      )}
+      {dayRhythmInfo?.phase === 'break_ready' && (
+        <div className="rhythm-idle-line ready" data-testid="rhythm-idle-ready">
+          <Sparkles size={14} aria-hidden />
+          <span>休息够了，随时开始下一段专注</span>
         </div>
       )}
 
