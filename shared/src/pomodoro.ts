@@ -127,8 +127,8 @@ export interface RhythmPhaseInfo {
 /**
  * Flowtime 比例制：根据已专注时长推算匹配的休息时长。
  * - 达到整轮 → 长/短休息（经典番茄）；
- * - 未达整轮 → 专注时长 × (短休/专注) 比例，至少 60 秒，至多不超过短休息时长。
- * 例：90/20 下专注 25 分 → 25×(20/90) ≈ 5.5 分休息；专注 85 分 → ≈19 分。
+ * - 未达整轮 → 专注时长 × (短休/专注) 比例，按分钟取整，至少 1 分钟，至多不超过短休息时长。
+ * 例：90/20 下专注 25 分 → 6 分休息；专注 85 分 → 19 分；满 90 分 → 20 分。
  */
 export function proportionalBreakSecs(focusSecs: number, cfg: RhythmConfig): number {
   const focusSec = cfg.focusMin * 60;
@@ -139,7 +139,8 @@ export function proportionalBreakSecs(focusSecs: number, cfg: RhythmConfig): num
     return isLong ? cfg.longBreakMin * 60 : shortBreakSec;
   }
   const ratio = shortBreakSec / focusSec;
-  return Math.max(60, Math.min(shortBreakSec, Math.round(focusSecs * ratio)));
+  const proportionalMin = Math.round((focusSecs * ratio) / 60);
+  return Math.max(60, Math.min(shortBreakSec, proportionalMin * 60));
 }
 export function rhythmPhase(segSecs: number, awaySecs: number, paused: boolean, cfg: RhythmConfig): RhythmPhaseInfo {
   const status = rhythmStatus(segSecs, cfg);
@@ -150,10 +151,10 @@ export function rhythmPhase(segSecs: number, awaySecs: number, paused: boolean, 
     }
     return { phase: 'focus', seconds: status.roundRemainingSec, suggestedBreak: null };
   }
-  // 离开中：到节奏点前暂停 → 仍属 focus 内的短暂离开；到点后暂停 → 比较休息时长
   const away = Math.max(0, Math.floor(awaySecs));
-  const target = status.suggestedBreakSec;
-  if (status.atCheckpoint && away >= target) {
+  // Flowtime 比例制：休息目标匹配本段专注量（中途暂停→比例小憩；节奏点暂停→满短/长休）
+  const target = proportionalBreakSecs(segSecs, cfg);
+  if (away >= target) {
     return { phase: 'break_ready', seconds: away - target, suggestedBreak: status.suggestedBreak };
   }
   return { phase: 'focus', seconds: Math.max(0, target - away), suggestedBreak: status.suggestedBreak };

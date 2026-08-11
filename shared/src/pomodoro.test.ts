@@ -107,6 +107,28 @@ describe('rhythmPhase（自动阶段推导）', () => {
   });
 });
 
+describe('rhythmPhase 中途暂停（Flowtime 比例制，25/5 配置）', () => {
+  it('专注 10 分钟后暂停 1 分钟：休息目标按比例 = 2 分钟，剩余 60 秒', () => {
+    // 10 × (5/25) = 2 分钟目标
+    const p = rhythmPhase(10 * 60, 60, true, CLASSIC);
+    expect(p.phase).toBe('focus'); // 仍在建议休息窗口内
+    expect(p.seconds).toBe(60); // 2 分钟目标 - 已休 1 分钟
+  });
+
+  it('专注 10 分钟后暂停 3 分钟：超过比例目标 → break_ready', () => {
+    const p = rhythmPhase(10 * 60, 3 * 60, true, CLASSIC);
+    expect(p.phase).toBe('break_ready');
+    expect(p.seconds).toBe(60); // 已超 1 分钟
+  });
+
+  it('专注 20 分钟后暂停：休息目标 = 4 分钟（而非满 5 分钟）', () => {
+    const p = rhythmPhase(20 * 60, 3 * 60, true, CLASSIC);
+    // 20 × (5/25) = 4 分钟目标，已休 3 分钟 → 剩余 60 秒
+    expect(p.phase).toBe('focus');
+    expect(p.seconds).toBe(60);
+  });
+});
+
 import { dayRhythm } from '../src/pomodoro.js';
 
 const CFG90: RhythmConfig = { enabled: true, focusMin: 90, breakMin: 20, longBreakEvery: 2, longBreakMin: 30 };
@@ -125,8 +147,8 @@ describe('dayRhythm（跨科目/跨会话节奏）', () => {
     const r = dayRhythm(stamps, T0 + 92 * 60000, CFG90); // 结束后 7 分钟
     expect(r.phase).toBe('resting');
     expect(r.focusAccumSec).toBe(85 * 60);
-    // 90/20 比例制：85 × (20/90) ≈ 1133 秒 ≈ 19 分钟
-    expect(r.suggestedBreakSec).toBe(Math.round(85 * 60 * (20 / 90)));
+    // 90/20 比例制：85 × (20/90) ≈ 18.9 分 → 按分钟取整 = 19 分钟 = 1140 秒
+    expect(r.suggestedBreakSec).toBe(19 * 60);
     expect(r.restElapsedSec).toBe(7 * 60);
     expect(r.restRemainingSec).toBe(r.suggestedBreakSec - 7 * 60);
     expect(r.projectedResumeMs).toBe(T0 + 85 * 60000 + r.suggestedBreakSec * 1000);
@@ -136,8 +158,8 @@ describe('dayRhythm（跨科目/跨会话节奏）', () => {
   it('专注 25 分钟就去休息 → 比例休息约 5 分钟（而非满 20 分钟）', () => {
     const stamps = [{ startedAtMs: T0, endedAtMs: T0 + 25 * 60000, activeSeconds: 25 * 60 }];
     const r = dayRhythm(stamps, T0 + 26 * 60000, CFG90);
-    // 25 × (20/90) ≈ 333 秒 ≈ 5.5 分钟
-    expect(r.suggestedBreakSec).toBe(Math.round(25 * 60 * (20 / 90)));
+    // 25 × (20/90) ≈ 5.6 分 → 按分钟取整 = 6 分钟
+    expect(r.suggestedBreakSec).toBe(6 * 60);
     expect(r.suggestedBreakSec).toBeLessThan(10 * 60); // 远小于满 20 分钟
   });
 

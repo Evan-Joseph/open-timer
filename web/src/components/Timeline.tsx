@@ -17,6 +17,7 @@ import type { ClockStore } from '../lib/store.js';
 import type { SessionApi } from '../lib/api.js';
 import { apiGet } from '../lib/api.js';
 import { formatBeijingTime, formatDurationZh } from '../lib/clock.js';
+import { shanghaiDayRangeUtc } from '@clock/shared';
 
 const BASE_PX_PER_MINUTE = 4; // 1x 缩放：24h = 5760px
 const ZOOM_LEVELS = [0.5, 1, 2, 4];
@@ -39,12 +40,6 @@ interface RenderSeg {
   /** 已停止（可撤回） */
   stopped: boolean;
   note: string | null;
-}
-
-function dateToRangeMs(date: string): { startMs: number; endMs: number } {
-  const [y, m, d] = date.split('-').map(Number);
-  const startMs = Date.UTC(y, m - 1, d) - 8 * 3600 * 1000;
-  return { startMs, endMs: startMs + 86_400_000 };
 }
 
 function shiftDate(date: string, delta: number): string {
@@ -96,7 +91,8 @@ export default function Timeline({ store }: { store: ClockStore }) {
   }, [store.todayDate]);
 
   const isToday = viewDate === store.todayDate;
-  const { startMs, endMs } = useMemo(() => dateToRangeMs(viewDate), [viewDate]);
+  // 时间逻辑单一来源：shared/shanghai.ts（与服务端日切同一实现）
+  const { startMs, endMs } = useMemo(() => shanghaiDayRangeUtc(viewDate), [viewDate]);
 
   // 当前视图数据源：今天用 store.sessions（实时轮询），历史日按日期拉取（缓存 5 分钟由轮询天然刷新）
   const dateSessions = useMemo(() => {
