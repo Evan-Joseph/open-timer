@@ -480,6 +480,10 @@ test.describe('全屏时间轴开关', () => {
     await page.getByRole('button', { name: '展开时间轴' }).click();
     await expect(page.locator('.timeline')).toBeVisible();
 
+    // 展开后控制条移到顶部（top:16px），不再遮挡时间轴内容
+    const ctrlTop = await page.locator('.fs-controls').evaluate((el) => getComputedStyle(el).top);
+    expect(ctrlTop).toBe('16px');
+
     // 收起
     await page.getByRole('button', { name: '收起时间轴' }).click();
     await expect(page.locator('.timeline')).not.toBeVisible();

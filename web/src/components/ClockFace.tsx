@@ -221,7 +221,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
 
   return (
     <section className="clockface idle">
-      <div className="idle-clock" data-testid="idle-clock">
+      <div className="idle-clock" data-testid="idle-clock" key={idleTime}>
         {idleTime}
       </div>
       <div className="idle-date">

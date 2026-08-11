@@ -109,7 +109,7 @@ export default function App() {
   }
 
   return (
-    <div className={`app ${isFullscreen ? 'fullscreen-mode' : ''}`}>
+    <div className={`app ${isFullscreen ? 'fullscreen-mode' : ''} ${fsShowTimeline ? 'fs-timeline-open' : ''}`}>
       <header className="topbar material">
         <span className="topbar-title">沉浸时钟</span>
         <span className={`topbar-status-dot ${store.state?.active_session?.status === 'running' ? 'live' : ''}`} aria-hidden />

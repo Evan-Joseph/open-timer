@@ -4,7 +4,28 @@
    - 浅色/深色语义 token；圆角档位 sm6/md10/lg12/xl14；8pt 间距节奏
    - 动效：press 0.1s / hover 0.15s / enter 0.2–0.3s，尊重 prefers-reduced-motion
    - 材质（毛玻璃）只用于顶栏与浮层；数字场景 tabular-nums
+   - 字体：中文走 Noto Sans SC（OFL 1.1，scripts/font-subset.py 子集化）；
+     数字/时间走 --font-num（系统 SF，保 tabular 对齐）
    ========================================================================== */
+
+/* 项目子集化的 Noto Sans SC（OFL 1.1；GB2312 一级 + UI 文案，自由文本缺字回退系统黑体）。
+   400/700 两档：500 匹配 400、600 匹配 700。由 scripts/font-subset.py 生成。 */
+@font-face {
+  font-family: 'Noto Sans SC';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/noto-sans-sc-400.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+2000-206F, U+3000-303F, U+FF00-FFEF, U+4E00-9FFF;
+}
+@font-face {
+  font-family: 'Noto Sans SC';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/noto-sans-sc-700.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+2000-206F, U+3000-303F, U+FF00-FFEF, U+4E00-9FFF;
+}
 
 :root {
   /* 浅色 */
@@ -31,6 +52,10 @@
   --radius-lg: 12px;
   --radius-xl: 14px;
 
+  /* 中文优先 Noto Sans SC（跨平台一致）；数字/时间用 --font-num 保持系统 SF + tabular */
+  --font: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', sans-serif;
+  --font-num: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+
   /* 科目色：浅/深两套；色相分散，避免蓝紫扎堆 */
   --c-amber: #b45309;      --c-amber-bg: #fef3c7;
   --c-teal: #0f766e;       --c-teal-bg: #ccfbf1;
@@ -39,8 +64,6 @@
   --c-violet: #7c3aed;     --c-violet-bg: #ede9fe;
   --c-cyan: #0e7490;       --c-cyan-bg: #cffafe;
   --c-coral: #be123c;      --c-coral-bg: #ffe4e6;
-
-  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', sans-serif;
 }
 
 [data-theme='dark'] {
@@ -138,7 +161,7 @@ button:focus-visible, input:focus-visible {
 .start-btn:hover, .primary-btn:hover, .control-btn.resume:hover { background: var(--accent-press); }
 .start-btn:active:not(:disabled), .primary-btn:active:not(:disabled),
 .control-btn.resume:active:not(:disabled) { transform: scale(0.97); }
-.start-btn:hover { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12); }
+.start-btn:hover { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12), 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent); }
 
 /* 次要按钮（描边透明底）：ghost / danger */
 .ghost-btn,
@@ -253,7 +276,7 @@ button:focus-visible, input:focus-visible {
   border-bottom: 1px solid var(--border);
 }
 .topbar-title { font-weight: 600; font-size: 15px; }
-.topbar-date { color: var(--text-2); font-size: 13px; flex: 1; text-align: right; margin-right: 4px; }
+.topbar-date { color: var(--text-2); font-size: 13px; flex: 1; text-align: right; margin-right: 4px; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 
 /* 顶栏状态指示点：运行中为 success 色呼吸 */
 .topbar-status-dot {
@@ -292,11 +315,22 @@ button:focus-visible, input:focus-visible {
 
 /* 空闲态 */
 .idle-clock {
+  font-family: var(--font-num);
   font-size: 56px; font-weight: 300;
   font-variant-numeric: tabular-nums;
   color: var(--text-1);
+  line-height: 1.15; /* 收紧行高，替代原先日期处的负 margin hack */
 }
-.idle-date { color: var(--text-2); font-size: 15px; margin-top: -8px; }
+/* 5s 数字跳变：轻淡入上滑（animations-off / reduced-motion 由全局归零） */
+.clockface.idle > .idle-clock { animation: clock-tick 0.45s ease both; }
+@keyframes clock-tick {
+  from { opacity: 0.3; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.idle-date {
+  color: var(--text-2); font-size: 16px; letter-spacing: 0.02em;
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+}
 
 .subject-picker {
   display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;
@@ -306,6 +340,7 @@ button:focus-visible, input:focus-visible {
   padding: 8px 14px; border-radius: 999px;
   background: var(--surface-1); border: 1px solid var(--border);
   font-size: 14px; color: var(--text-1);
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.1s ease;
 }
 .subject-chip:hover { border-color: var(--sc); }
 .subject-chip.selected {
@@ -327,7 +362,7 @@ button:focus-visible, input:focus-visible {
 }
 .intent-input::placeholder, .finish-note::placeholder { color: var(--text-3); }
 
-.today-hint { color: var(--text-2); font-size: 13px; }
+.today-hint { color: var(--text-2); font-size: 13px; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 
 /* 运行/暂停态 */
 .subject-pill {
@@ -340,6 +375,7 @@ button:focus-visible, input:focus-visible {
 .pill-status { font-weight: 400; opacity: 0.8; }
 
 .big-timer {
+  font-family: var(--font-num);
   font-size: 72px; font-weight: 200;
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
@@ -348,14 +384,14 @@ button:focus-visible, input:focus-visible {
   white-space: nowrap;
 }
 /* 前段累计（次级）+ 本段（主视觉）：前段淡色缩小，突出最近一段时长 */
-.timer-prev { color: var(--text-3); font-size: 0.55em; font-weight: 300; }
-.timer-plus { color: var(--text-3); font-size: 0.55em; }
-.timer-seg { color: var(--text-1); font-weight: 500; }
+.timer-prev { font-family: var(--font-num); color: var(--text-3); font-size: 0.55em; font-weight: 300; }
+.timer-plus { font-family: var(--font-num); color: var(--text-3); font-size: 0.55em; }
+.timer-seg { font-family: var(--font-num); color: var(--text-1); font-weight: 500; }
 .clockface.is-paused .big-timer { color: var(--text-2); }
 .clockface.is-paused .timer-seg { color: var(--text-2); }
 .clockface.is-paused .timer-prev, .clockface.is-paused .timer-plus { color: var(--text-3); }
 
-.sub-line { color: var(--text-2); font-size: 14px; font-variant-numeric: tabular-nums; }
+.sub-line { font-family: var(--font-num); color: var(--text-2); font-size: 14px; font-variant-numeric: tabular-nums; }
 .intent-line { color: var(--text-3); font-size: 13px; max-width: 400px; }
 
 .control-row { display: flex; gap: 16px; margin-top: 8px; }
@@ -380,7 +416,7 @@ button:focus-visible, input:focus-visible {
   display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center;
   padding: 6px 14px; border-radius: 999px;
   background: var(--surface-2); color: var(--text-1);
-  font-size: 14px; font-variant-numeric: tabular-nums;
+  font-family: var(--font-num); font-size: 14px; font-variant-numeric: tabular-nums;
 }
 .away-note { color: var(--text-3); font-size: 12px; }
 
@@ -399,7 +435,7 @@ button:focus-visible, input:focus-visible {
   pointer-events: none;
   animation: glow-breathe 2.4s ease-in-out;
 }
-.finish-big { font-size: 34px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.finish-big { font-family: var(--font-num); font-size: 34px; font-weight: 400; font-variant-numeric: tabular-nums; }
 .finish-line { color: var(--text-2); font-size: 14px; margin: 0; }
 .finish-actions { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
 
@@ -741,6 +777,11 @@ button:focus-visible, input:focus-visible {
 .app.fullscreen-mode .big-timer { font-size: min(18vw, 160px); min-height: 1.2em; }
 .app.fullscreen-mode .idle-clock { font-size: min(14vw, 120px); }
 .app.fullscreen-mode .subject-pill.large { font-size: 22px; padding: 10px 26px; }
+/* 全屏空闲态：日期/胶囊/提示随主视觉放大，保持层级比例 */
+.app.fullscreen-mode .idle-date { font-size: 22px; }
+.app.fullscreen-mode .subject-chip { padding: 10px 18px; font-size: 15px; }
+.app.fullscreen-mode .subject-picker { gap: 12px; margin-top: 12px; }
+.app.fullscreen-mode .today-hint { font-size: 15px; }
 
 .fs-controls {
   position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
@@ -752,8 +793,12 @@ button:focus-visible, input:focus-visible {
   -webkit-backdrop-filter: blur(20px) saturate(1.8);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
+  transition: top 0.25s ease, bottom 0.25s ease, opacity 0.25s ease;
 }
 .fs-hint { font-size: 12px; color: var(--text-3); }
+
+/* 时间轴展开时控制条移到顶部：抽屉占满底部 45vh，避免按钮遮挡时间轴内容 */
+.app.fullscreen-mode.fs-timeline-open .fs-controls { bottom: auto; top: 16px; }
 
 /* 全屏时间轴抽屉：底部滑出，收起时隐藏（visibility 同步，保证可访问性树一致） */
 .timeline-drawer {
