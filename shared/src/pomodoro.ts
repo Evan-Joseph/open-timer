@@ -123,6 +123,24 @@ export interface RhythmPhaseInfo {
  * @param awaySecs  离开中已过的秒数（paused 才有；running 传 0/null）
  * @param paused    是否处于暂停（离开）状态
  */
+
+/**
+ * Flowtime 比例制：根据已专注时长推算匹配的休息时长。
+ * - 达到整轮 → 长/短休息（经典番茄）；
+ * - 未达整轮 → 专注时长 × (短休/专注) 比例，至少 60 秒，至多不超过短休息时长。
+ * 例：90/20 下专注 25 分 → 25×(20/90) ≈ 5.5 分休息；专注 85 分 → ≈19 分。
+ */
+export function proportionalBreakSecs(focusSecs: number, cfg: RhythmConfig): number {
+  const focusSec = cfg.focusMin * 60;
+  const shortBreakSec = cfg.breakMin * 60;
+  if (focusSecs >= focusSec) {
+    const roundsDone = Math.floor(focusSecs / focusSec);
+    const isLong = roundsDone > 0 && roundsDone % cfg.longBreakEvery === 0;
+    return isLong ? cfg.longBreakMin * 60 : shortBreakSec;
+  }
+  const ratio = shortBreakSec / focusSec;
+  return Math.max(60, Math.min(shortBreakSec, Math.round(focusSecs * ratio)));
+}
 export function rhythmPhase(segSecs: number, awaySecs: number, paused: boolean, cfg: RhythmConfig): RhythmPhaseInfo {
   const status = rhythmStatus(segSecs, cfg);
   if (!paused) {
@@ -219,8 +237,8 @@ export function dayRhythm(stamps: SessionStamp[], nowMs: number, cfg: RhythmConf
   if (focusAccum <= 0 || lastEndMs <= 0) return fresh;
 
   const idleSec = Math.max(0, Math.floor((nowMs - lastEndMs) / 1000));
-  // 达到整轮 → 对应休息（长/短）；未达整轮（如 85/90）→ 也给一次短休息
-  const suggested = focusAccum >= focusSec ? (isLongBreak ? longBreakSec : shortBreakSec) : shortBreakSec;
+  // 休息时长匹配最近的专注量（Flowtime 比例制）
+  const suggested = proportionalBreakSecs(focusAccum, cfg);
 
   if (idleSec >= suggested) {
     return {

@@ -7,7 +7,7 @@ import type { ClockStore } from '../lib/store.js';
 import { useMonotonicSeconds, useBeijingTime, formatHms, formatDurationZh, formatBeijingTime } from '../lib/clock.js';
 import { useSettings } from '../lib/settings.js';
 import { playFinishChime } from '../lib/sound.js';
-import { dayRhythm, type SessionStamp } from '@clock/shared';
+import { dayRhythm, proportionalBreakSecs, type SessionStamp } from '@clock/shared';
 import RhythmRing from './RhythmRing.js';
 
 const REDUCED = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -173,13 +173,13 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         </div>
         {active.intent_note && <div className="intent-line">「{active.intent_note}」</div>}
 
-        {/* 暂停（离开）时长：中性提示，不计入学习；开节奏时附参考小憩时长 */}
+        {/* 暂停（离开）时长：中性提示，不计入学习；开节奏时附比例参考小憩时长 */}
         {paused && (
           <div className="away-line" data-testid="away-line" aria-live="off">
             已离开 {formatHms(awaySeconds)}
             <span className="away-note">
               {settings.rhythm.enabled
-                ? ` · 参考小憩 ${settings.rhythm.breakMin} 分，不计学习时长`
+                ? ` · 参考小憩 ${formatDurationZh(proportionalBreakSecs(segmentSecs, settings.rhythm))}，不计学习时长`
                 : ' · 不计学习时长'}
             </span>
           </div>

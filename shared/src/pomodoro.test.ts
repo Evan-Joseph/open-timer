@@ -120,16 +120,32 @@ describe('dayRhythm（跨科目/跨会话节奏）', () => {
     expect(r.focusRemainingSec).toBe(90 * 60);
   });
 
-  it('背单词 85 分钟（未达整轮）后结束 → resting + 短休息 + 预计回归时间', () => {
+  it('背单词 85 分钟（未达整轮）后结束 → resting + 比例休息 + 预计回归时间', () => {
     const stamps = [{ startedAtMs: T0, endedAtMs: T0 + 85 * 60000, activeSeconds: 85 * 60 }];
     const r = dayRhythm(stamps, T0 + 92 * 60000, CFG90); // 结束后 7 分钟
     expect(r.phase).toBe('resting');
     expect(r.focusAccumSec).toBe(85 * 60);
-    expect(r.suggestedBreakSec).toBe(20 * 60); // 未达整轮也给短休息
+    // 90/20 比例制：85 × (20/90) ≈ 1133 秒 ≈ 19 分钟
+    expect(r.suggestedBreakSec).toBe(Math.round(85 * 60 * (20 / 90)));
     expect(r.restElapsedSec).toBe(7 * 60);
-    expect(r.restRemainingSec).toBe(13 * 60);
-    expect(r.projectedResumeMs).toBe(T0 + 85 * 60000 + 20 * 60000);
+    expect(r.restRemainingSec).toBe(r.suggestedBreakSec - 7 * 60);
+    expect(r.projectedResumeMs).toBe(T0 + 85 * 60000 + r.suggestedBreakSec * 1000);
     expect(r.roundsDone).toBe(0);
+  });
+
+  it('专注 25 分钟就去休息 → 比例休息约 5 分钟（而非满 20 分钟）', () => {
+    const stamps = [{ startedAtMs: T0, endedAtMs: T0 + 25 * 60000, activeSeconds: 25 * 60 }];
+    const r = dayRhythm(stamps, T0 + 26 * 60000, CFG90);
+    // 25 × (20/90) ≈ 333 秒 ≈ 5.5 分钟
+    expect(r.suggestedBreakSec).toBe(Math.round(25 * 60 * (20 / 90)));
+    expect(r.suggestedBreakSec).toBeLessThan(10 * 60); // 远小于满 20 分钟
+  });
+
+  it('极短专注（5 分钟）→ 休息至少 60 秒', () => {
+    const stamps = [{ startedAtMs: T0, endedAtMs: T0 + 5 * 60000, activeSeconds: 5 * 60 }];
+    const r = dayRhythm(stamps, T0 + 6 * 60000, CFG90);
+    expect(r.suggestedBreakSec).toBeGreaterThanOrEqual(60);
+    expect(r.suggestedBreakSec).toBeLessThanOrEqual(20 * 60);
   });
 
   it('专注达 90 分钟 → 长休息（每 2 轮）判断正确', () => {
