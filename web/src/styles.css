@@ -665,30 +665,6 @@ button:focus-visible, input:focus-visible {
   background: color-mix(in srgb, var(--surface-2) 88%, white 12%);
 }
 
-/* iOS 风格开关（Radix Switch）：51×31，轨道圆角 16 */
-.switch-root {
-  width: 51px; height: 31px; border-radius: 16px;
-  background: var(--surface-2); border: 1px solid var(--border);
-  position: relative; flex: none;
-  transition: background 0.2s ease;
-}
-.switch-root[data-state='checked'] { background: var(--success); border-color: var(--success); }
-.switch-thumb {
-  display: block; width: 27px; height: 27px; border-radius: 50%;
-  background: #fff; box-shadow: var(--shadow-sm);
-  transform: translateX(1px);
-  transition: transform 0.2s ease;
-}
-.switch-thumb[data-state='checked'] { transform: translateX(21px); }
-
-.switch-row {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  font-size: 13px; color: var(--text-1);
-}
-.switch-row + .switch-row { margin-top: 10px; }
-.toggle-lines { display: flex; flex-direction: column; gap: 2px; }
-/* label 与 Switch 以 htmlFor/id 关联：文本可点，结构合法（label 不嵌套 button） */
-.switch-label { color: var(--text-1); font-size: 13px; cursor: pointer; }
 
 /* 环境音：容器与分段控件同一视觉语言（灰底 + 白块选中） */
 .ambient-list {

@@ -1,5 +1,4 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import * as Switch from '@radix-ui/react-switch';
 import { X } from 'lucide-react';
 import { useSettings, updateSettings } from '../lib/settings.js';
 import { AMBIENT_LABELS } from '../lib/ambient.js';
@@ -46,22 +45,22 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
           </div>
 
           <div className="setting-row">
-            <span className="setting-label">声音</span>
-            <div className="toggle-lines">
-              {/* 结构注意：label 与 Switch 用 htmlFor/id 关联，而非互相嵌套（label 不能包裹 button） */}
-              <div className="switch-row">
-                <label htmlFor="switch-finish-sound" className="switch-label">
-                  结束计时时播放轻提示音
-                </label>
-                <Switch.Root
-                  id="switch-finish-sound"
-                  className="switch-root"
-                  checked={settings.finishSound}
-                  onCheckedChange={(v) => updateSettings({ finishSound: v })}
+            <span className="setting-label">结束提示音</span>
+            <div className="seg-control" role="radiogroup" aria-label="结束计时提示音">
+              {[
+                ['off', '关闭'],
+                ['on', '开启'],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  role="radio"
+                  aria-checked={settings.finishSound === (value === 'on')}
+                  className={`seg-item ${settings.finishSound === (value === 'on') ? 'active' : ''}`}
+                  onClick={() => updateSettings({ finishSound: value === 'on' })}
                 >
-                  <Switch.Thumb className="switch-thumb" />
-                </Switch.Root>
-              </div>
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
 

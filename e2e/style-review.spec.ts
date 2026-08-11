@@ -77,13 +77,11 @@ test('视觉审计样式断言', async ({ page }) => {
   console.log('dialog:', JSON.stringify(dialog));
   expect(dialog.radius).toBe('14px');
 
-  const sw = await page.locator('.switch-root').first().evaluate((el) => {
-    const s = getComputedStyle(el);
-    return { w: s.width, h: s.height, radius: s.borderRadius };
-  });
-  console.log('switch:', JSON.stringify(sw));
-  expect(sw.w).toBe('51px');
-  expect(sw.h).toBe('31px');
+  // 6b. 结束提示音已与全系统统一为分段控件（无独立 iOS Switch 异类）
+  const segCount = await page.locator('.seg-control').count();
+  console.log('seg-control count:', segCount);
+  expect(segCount).toBe(3); // 外观 / 结束提示音 / 动画
+  expect(await page.locator('.switch-root').count()).toBe(0);
 
   const seg = await page.locator('.seg-control').first().evaluate((el) => {
     const s = getComputedStyle(el);
