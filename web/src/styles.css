@@ -230,9 +230,9 @@ button:focus-visible, input:focus-visible {
 }
 .subject-chip:active:not(:disabled), .switch-btn:active:not(:disabled) { transform: scale(0.97); }
 
-/* 含图标/圆点的行容器统一对齐 */
-.timeline-list-row, .overview-item, .legend-item {
-  display: inline-flex; align-items: center;
+/* 含图标/圆点的行容器统一对齐（list-row 是 grid，单独定义） */
+.overview-item, .legend-item {
+  display: inline-flex; align-items: center; gap: 6px;
 }
 .pill-dot {
   width: 8px; height: 8px; border-radius: 50%;
@@ -344,8 +344,16 @@ button:focus-visible, input:focus-visible {
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
   min-height: 80px; /* 防布局跳动 */
+  display: inline-flex; align-items: baseline; justify-content: center; gap: 2px;
+  white-space: nowrap;
 }
+/* 前段累计（次级）+ 本段（主视觉）：前段淡色缩小，突出最近一段时长 */
+.timer-prev { color: var(--text-3); font-size: 0.55em; font-weight: 300; }
+.timer-plus { color: var(--text-3); font-size: 0.55em; }
+.timer-seg { color: var(--text-1); font-weight: 500; }
 .clockface.is-paused .big-timer { color: var(--text-2); }
+.clockface.is-paused .timer-seg { color: var(--text-2); }
+.clockface.is-paused .timer-prev, .clockface.is-paused .timer-plus { color: var(--text-3); }
 
 .sub-line { color: var(--text-2); font-size: 14px; font-variant-numeric: tabular-nums; }
 .intent-line { color: var(--text-3); font-size: 13px; max-width: 400px; }
@@ -511,23 +519,45 @@ button:focus-visible, input:focus-visible {
 .list-subject { font-weight: 500; }
 .list-time { color: var(--text-2); }
 .list-duration { color: var(--text-1); font-weight: 600; }
+.list-badge {
+  margin-left: 6px; font-size: 11px; color: var(--text-2);
+  background: var(--surface-2); border-radius: 999px; padding: 1px 8px;
+  font-weight: 500;
+}
 
-/* 片段 popover */
+/* 会话 popover（固定宽 + 头部 X 关闭 + 双按钮动作区） */
 .seg-popover {
   position: absolute; bottom: calc(100% + 4px); z-index: 20;
-  padding: 12px 14px; border-radius: var(--radius-lg);
+  width: 320px; max-width: calc(100vw - 24px);
+  padding: 14px 16px; border-radius: var(--radius-lg);
   border: 1px solid var(--border); box-shadow: var(--shadow);
-  display: flex; flex-direction: column; gap: 6px;
-  font-size: 13px; min-width: 180px;
-  max-width: min(320px, calc(100vw - 32px));
+  display: flex; flex-direction: column; gap: 10px;
+  font-size: 13px;
 }
-.popover-subject { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--sc); }
-.popover-line { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.popover-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.popover-subject {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-weight: 600; font-size: 15px; color: var(--sc);
+}
+.popover-body { display: flex; flex-direction: column; gap: 4px; }
+.popover-row {
+  display: flex; align-items: baseline; gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.popover-label { color: var(--text-3); font-size: 12px; flex: none; width: 40px; }
+.popover-value { color: var(--text-1); }
+.popover-value strong { font-weight: 600; font-size: 14px; }
+.popover-badge {
+  margin-left: 8px; font-size: 11px; color: var(--text-2);
+  background: var(--surface-2); border-radius: 999px; padding: 1px 8px;
+}
 .popover-note { color: var(--text-3); }
-.popover-note-edit { margin-top: 2px; }
+.popover-note-edit { margin-top: -2px; }
 .popover-note-input {
-  width: 100%; padding: 6px 10px;
-  border-radius: var(--radius-sm);
+  width: 100%; padding: 8px 12px;
+  border-radius: var(--radius);
   border: 1px solid var(--border); background: var(--surface-2);
   color: var(--text-1); font-size: 13px; font-family: inherit;
 }
@@ -535,7 +565,8 @@ button:focus-visible, input:focus-visible {
   outline: none; border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
-.popover-actions { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+.popover-actions { display: flex; gap: 8px; }
+.popover-save { flex: 1; }
 
 /* 今日概览 + 图例 */
 .today-overview {
@@ -724,6 +755,20 @@ button:focus-visible, input:focus-visible {
 }
 .fs-hint { font-size: 12px; color: var(--text-3); }
 
+/* 全屏时间轴抽屉：底部滑出，收起时隐藏（visibility 同步，保证可访问性树一致） */
+.timeline-drawer {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 15;
+  max-height: 45vh; overflow-y: auto;
+  background: var(--surface-1);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.08);
+  visibility: hidden; opacity: 0; transform: translateY(16px);
+  transition: transform 0.25s ease, opacity 0.25s ease, visibility 0.25s;
+}
+.timeline-drawer[data-open='true'] {
+  visibility: visible; opacity: 1; transform: translateY(0);
+}
+
 /* ==========================================================================
    动效
    ========================================================================== */
@@ -771,4 +816,11 @@ button:active:not(:disabled) { transform: scale(0.98); }
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* 应用内动画开关（设置 → 动画）：CSS 层同样归零，与组件层 motion 跳过并存 */
+html.animations-off *, html.animations-off *::before, html.animations-off *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
 }

@@ -130,6 +130,19 @@ export function buildDailySummary(input: SummaryInput): DailySummary {
         status: input.activeSession.status,
         active_seconds: secs,
         current_segment_started_at: openSeg ? toIso(openSeg.startedAtMs) : null,
+        // 本段秒数（不按日裁剪）：running 时 open 段累计；paused 时末段净秒冻结
+        current_segment_active_seconds: openSeg
+          ? Math.max(0, Math.floor((nowMs - openSeg.startedAtMs) / 1000))
+          : input.activeSegments.length > 0
+            ? Math.max(
+                0,
+                Math.floor(
+                  ((input.activeSegments[input.activeSegments.length - 1].endedAtMs ?? nowMs) -
+                    input.activeSegments[input.activeSegments.length - 1].startedAtMs) /
+                    1000,
+                ),
+              )
+            : null,
         paused_at: pausedAtMs !== null ? toIso(pausedAtMs) : null,
         intent_note: input.activeSession.intentNote,
       };

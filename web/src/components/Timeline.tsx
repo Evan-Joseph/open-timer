@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Clock, LocateFixed, Undo2, ZoomIn, ZoomOut, List, GanttChart } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, LocateFixed, Undo2, X, ZoomIn, ZoomOut, List, GanttChart } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
 import type { SessionApi } from '../lib/api.js';
 import { apiGet } from '../lib/api.js';
@@ -42,6 +42,25 @@ interface RenderSeg {
   note: string | null;
 }
 
+/** 会话级行（弹窗/流水账共用）：一个 session 的所有段合并为一行 */
+interface SessionRow {
+  key: string;
+  sessionId: string;
+  subjectId: string;
+  colorId: string;
+  displayName: string;
+  startLabel: string;
+  endLabel: string | null;
+  /** 当日净时长（各段裁剪后之和） */
+  seconds: number;
+  /** 当日段数（含休息拆分） */
+  segCount: number;
+  /** 会话仍进行中（今日含未结束段） */
+  running: boolean;
+  stopped: boolean;
+  note: string | null;
+}
+
 function shiftDate(date: string, delta: number): string {
   const [y, m, d] = date.split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d + delta));
@@ -50,7 +69,7 @@ function shiftDate(date: string, delta: number): string {
 
 export default function Timeline({ store }: { store: ClockStore }) {
   const [viewDate, setViewDate] = useState(store.todayDate);
-  const [popover, setPopover] = useState<{ seg: RenderSeg; containerX: number } | null>(null);
+  const [popover, setPopover] = useState<{ row: SessionRow; containerX: number } | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   /** 缩放级别索引与轨道/流水账视图 */
   const [zoomIdx, setZoomIdx] = useState(() => {
@@ -165,6 +184,51 @@ export default function Timeline({ store }: { store: ClockStore }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateSessions, store.subjects, startMs, endMs, isToday, pxPerMinute, Math.floor(nowMs / NOW_TICK_MS)]);
 
+  /** 会话级分组：一个 session 的所有段合并为一行（弹窗/流水账共用数据源）。 */
+  const sessionRows: SessionRow[] = useMemo(() => {
+    const out: SessionRow[] = [];
+    const nowClamped = Math.min(Date.now(), endMs);
+    for (const s of dateSessions) {
+      if (s.status === 'voided') continue;
+      const subj = store.subjects.find((x) => x.subject_id === s.subject_id);
+      // 当日可见段（按日裁剪）
+      const parts: Array<{ cs: number; ce: number; open: boolean }> = [];
+      for (const seg of s.segments) {
+        const segStart = Date.parse(seg.started_at);
+        const segEnd = seg.ended_at ? Date.parse(seg.ended_at) : nowClamped;
+        if (segEnd <= startMs || segStart >= endMs) continue;
+        parts.push({
+          cs: Math.max(segStart, startMs),
+          ce: Math.min(segEnd, endMs),
+          open: seg.ended_at === null && isToday,
+        });
+      }
+      if (parts.length === 0) continue;
+      parts.sort((a, b) => a.cs - b.cs);
+      const seconds = parts.reduce((acc, p) => acc + Math.max(0, p.ce - p.cs), 0) / 1000;
+      const running = parts[parts.length - 1].open;
+      out.push({
+        key: s.session_id,
+        sessionId: s.session_id,
+        subjectId: s.subject_id,
+        colorId: subj?.color_id ?? 'blue',
+        displayName: subj?.display_name ?? s.subject_id,
+        startLabel: formatBeijingTime(parts[0].cs),
+        endLabel: running ? null : formatBeijingTime(parts[parts.length - 1].ce),
+        seconds: Math.floor(seconds),
+        segCount: parts.length,
+        running,
+        stopped: s.status === 'stopped',
+        note: s.note,
+      });
+    }
+    return out.sort((a, b) => a.startLabel.localeCompare(b.startLabel));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateSessions, store.subjects, startMs, endMs, isToday, Math.floor(nowMs / NOW_TICK_MS)]);
+  /** render 期同步，供 openPopover 等 useCallback 读取最新分组 */
+  const sessionRowsRef = useRef<SessionRow[]>([]);
+  sessionRowsRef.current = sessionRows;
+
   /** 滚动到指定轨道 px（自动钳制），behavior 可选平滑。 */
   const scrollToPx = useCallback((px: number, smooth: boolean) => {
     const el = scrollRef.current;
@@ -227,20 +291,36 @@ export default function Timeline({ store }: { store: ClockStore }) {
 
   const nowPx = ((Math.min(Math.max(nowMs, startMs), endMs) - startMs) / 60000) * pxPerMinute;
 
-  /** 点片段：轨道坐标 → 容器坐标（trackRect 已含滚动位移，直接相减）。 */
+  /** 点片段：轨道坐标 → 容器坐标（trackRect 已含滚动位移，直接相减）；数据提升到会话级。 */
   const openPopover = useCallback((seg: RenderSeg) => {
-    const track = trackRef.current;
-    const scrollEl = scrollRef.current;
+    const row = sessionRowsRef.current.find((r) => r.sessionId === seg.sessionId);
+    if (!row) return;
     setNoteDraft(seg.note ?? '');
     setNoteSaving(false);
+    const track = trackRef.current;
+    const scrollEl = scrollRef.current;
     if (!track || !scrollEl) {
-      setPopover({ seg, containerX: seg.leftPx });
+      setPopover({ row, containerX: seg.leftPx });
       return;
     }
     const trackRect = track.getBoundingClientRect();
     const containerRect = scrollEl.getBoundingClientRect();
     const xInContainer = trackRect.left - containerRect.left + seg.leftPx + seg.widthPx / 2;
-    setPopover({ seg, containerX: xInContainer });
+    setPopover({ row, containerX: xInContainer });
+  }, []);
+
+  /** 流水账整行点击：以行元素在 .timeline 容器中的水平中心定位弹窗。 */
+  const openRowPopover = useCallback((row: SessionRow, anchor: HTMLElement) => {
+    setNoteDraft(row.note ?? '');
+    setNoteSaving(false);
+    const container = anchor.closest('.timeline') as HTMLElement | null;
+    if (!container) {
+      setPopover({ row, containerX: 0 });
+      return;
+    }
+    const cr = container.getBoundingClientRect();
+    const ar = anchor.getBoundingClientRect();
+    setPopover({ row, containerX: ar.left - cr.left + ar.width / 2 });
   }, []);
 
   // Esc / 点击外部关闭 popover
@@ -264,7 +344,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
   // 撤回
   const handleWithdraw = useCallback(async () => {
     if (!popover) return;
-    const ok = await store.withdraw(popover.seg.sessionId, '误记');
+    const ok = await store.withdraw(popover.row.sessionId, '误记');
     if (ok) {
       setPopover(null);
       // 历史日缓存同步失效
@@ -276,7 +356,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const handleSaveNote = useCallback(async () => {
     if (!popover || noteSaving) return;
     setNoteSaving(true);
-    await store.setNote(popover.seg.sessionId, noteDraft.trim());
+    await store.setNote(popover.row.sessionId, noteDraft.trim());
     setNoteSaving(false);
     // 关闭并失效历史缓存，让新备注显现
     setPopover(null);
@@ -379,19 +459,23 @@ export default function Timeline({ store }: { store: ClockStore }) {
               )}
             </div>
           ) : (
-            segs.map((seg) => (
+            sessionRows.map((row) => (
               <button
-                key={seg.key}
+                key={row.key}
                 className="timeline-list-row"
-                data-color={seg.colorId}
-                onClick={() => openPopover(seg)}
+                data-color={row.colorId}
+                data-testid="timeline-list-row"
+                onClick={(e) => openRowPopover(row, e.currentTarget)}
               >
                 <span className="pill-dot" aria-hidden />
-                <span className="list-subject">{seg.displayName}</span>
+                <span className="list-subject">{row.displayName}</span>
                 <span className="list-time">
-                  {seg.startLabel} – {seg.endLabel ?? '进行中'}
+                  {row.startLabel} – {row.endLabel ?? '进行中'}
                 </span>
-                <span className="list-duration">{formatDurationZh(seg.seconds)}</span>
+                <span className="list-duration">
+                  {formatDurationZh(row.seconds)}
+                  {row.segCount > 1 && <span className="list-badge">{row.segCount} 段</span>}
+                </span>
               </button>
             ))
           )}
@@ -449,18 +533,34 @@ export default function Timeline({ store }: { store: ClockStore }) {
         <div
           className="seg-popover material"
           role="dialog"
-          aria-label="片段详情"
+          aria-label="会话详情"
           data-testid="seg-popover"
-          style={{ left: `clamp(8px, ${popover.containerX}px, calc(100% - 200px))` }}
+          style={{ left: `clamp(8px, ${popover.containerX}px, calc(100% - 344px))` }}
         >
-          <div className="popover-subject" data-color={popover.seg.colorId}>
-            <span className="pill-dot" aria-hidden /> {popover.seg.displayName}
+          <div className="popover-head">
+            <span className="popover-subject" data-color={popover.row.colorId}>
+              <span className="pill-dot" aria-hidden /> {popover.row.displayName}
+            </span>
+            <button className="icon-btn" aria-label="关闭" onClick={() => setPopover(null)}>
+              <X size={16} />
+            </button>
           </div>
-          <div className="popover-line">
-            {popover.seg.startLabel} – {popover.seg.endLabel ?? '进行中'}
+          <div className="popover-body">
+            <div className="popover-row">
+              <span className="popover-label">时间</span>
+              <span className="popover-value">
+                {popover.row.startLabel} – {popover.row.endLabel ?? '进行中'}
+              </span>
+            </div>
+            <div className="popover-row">
+              <span className="popover-label">净时长</span>
+              <span className="popover-value">
+                <strong>{formatDurationZh(popover.row.seconds)}</strong>
+                {popover.row.segCount > 1 && <span className="popover-badge">{popover.row.segCount} 段</span>}
+              </span>
+            </div>
           </div>
-          <div className="popover-line">净时长 {formatDurationZh(popover.seg.seconds)}</div>
-          {popover.seg.stopped && (
+          {popover.row.stopped && (
             <div className="popover-note-edit">
               <input
                 className="popover-note-input"
@@ -476,27 +576,22 @@ export default function Timeline({ store }: { store: ClockStore }) {
               />
             </div>
           )}
-          {!popover.seg.stopped && popover.seg.note && <div className="popover-note">「{popover.seg.note}」</div>}
-          <div className="popover-actions">
-            {popover.seg.stopped && (
-              <>
-                <button
-                  className="text-btn"
-                  onClick={() => void handleSaveNote()}
-                  disabled={noteSaving}
-                  data-testid="popover-save-note"
-                >
-                  {noteSaving ? '保存中…' : '保存备注'}
-                </button>
-                <button className="text-btn withdraw-btn" onClick={() => void handleWithdraw()} data-testid="withdraw-btn">
-                  <Undo2 size={14} aria-hidden /> 撤回
-                </button>
-              </>
-            )}
-            <button className="text-btn" onClick={() => setPopover(null)}>
-              关闭
-            </button>
-          </div>
+          {!popover.row.stopped && popover.row.note && <div className="popover-note">「{popover.row.note}」</div>}
+          {popover.row.stopped && (
+            <div className="popover-actions">
+              <button
+                className="primary-btn popover-save"
+                onClick={() => void handleSaveNote()}
+                disabled={noteSaving}
+                data-testid="popover-save-note"
+              >
+                {noteSaving ? '保存中…' : '保存备注'}
+              </button>
+              <button className="ghost-btn danger-btn" onClick={() => void handleWithdraw()} data-testid="withdraw-btn">
+                <Undo2 size={14} aria-hidden /> 撤回
+              </button>
+            </div>
+          )}
         </div>
       )}
 

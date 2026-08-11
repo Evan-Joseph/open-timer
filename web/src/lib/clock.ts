@@ -67,6 +67,15 @@ export function formatHms(totalSeconds: number): string {
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
+/** 短格式：不足 1 小时省略小时（本段时长用，如 06:01）；≥1 小时回退 HH:MM:SS。 */
+export function formatHmsShort(totalSeconds: number): string {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return h > 0 ? formatHms(totalSeconds) : `${pad(m)}:${pad(s)}`;
+}
+
 export function formatDurationZh(totalSeconds: number): string {
   const h = Math.floor(totalSeconds / 3600);
   const m = Math.floor((totalSeconds % 3600) / 60);

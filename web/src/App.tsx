@@ -30,6 +30,11 @@ export default function App() {
     return () => mq.removeEventListener('change', apply);
   }, [theme]);
 
+  // 动画开关：off 时给 <html> 挂 class，CSS 层全局归零（与组件层 motion 跳过并存）
+  useEffect(() => {
+    document.documentElement.classList.toggle('animations-off', localStorage.getItem('clock-animations') === 'off');
+  }, []);
+
   // 标签页标题反映运行状态
   useEffect(() => {
     const base = '11408 沉浸时钟';
@@ -148,7 +153,13 @@ export default function App() {
         </div>
       )}
 
-      {(!isFullscreen || fsShowTimeline) && <Timeline store={store} />}
+      {isFullscreen ? (
+        <div className="timeline-drawer" data-open={fsShowTimeline} aria-hidden={!fsShowTimeline}>
+          <Timeline store={store} />
+        </div>
+      ) : (
+        <Timeline store={store} />
+      )}
 
       <SettingsDialog
         open={settingsOpen}

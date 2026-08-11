@@ -251,6 +251,7 @@ export function useClockStore(): ClockStore {
                   status: 'running',
                   active_seconds: 0,
                   current_segment_started_at: d.started_at,
+                  current_segment_active_seconds: 0,
                   paused_at: null,
                   intent_note: intentNote || null,
                 },
@@ -395,21 +396,15 @@ export function useClockStore(): ClockStore {
     return next;
   }, [state]);
 
-  // 当前开放段锚点：段已过秒数 = server_now - current_segment_started_at（同样防抖重锚）
+  // 当前开放段锚点：本段活跃秒数来自服务端（running 增长 / paused 冻结为末段净秒）
   const segmentAnchor: SyncAnchor | null = useMemo(() => {
     const a = state?.active_session;
-    if (!a || !a.current_segment_started_at) {
+    if (!a || a.current_segment_active_seconds == null) {
       segmentAnchorRef.current = null;
       return null;
     }
-    const segStartedMs = Date.parse(a.current_segment_started_at);
-    if (!Number.isFinite(segStartedMs)) {
-      segmentAnchorRef.current = null;
-      return null;
-    }
-    const segSecs = a.status === 'running' ? Math.max(0, (state.server_now_ms - segStartedMs) / 1000) : 0;
     const next: SyncAnchor = {
-      confirmedSeconds: Math.floor(segSecs),
+      confirmedSeconds: Math.max(0, Math.floor(a.current_segment_active_seconds)),
       running: a.status === 'running',
       anchorPerfMs: perfAtStateRef.current,
       serverNowMs: state.server_now_ms,

@@ -8,6 +8,15 @@ import { rmSync } from 'node:fs';
 
 const PASSWORD = '123456';
 
+/** 从 timer aria-label（累计 HH:MM:SS，本段 MM:SS）解析累计秒数 */
+async function timerTotalSeconds(page: Page): Promise<number> {
+  const label = await page.getByTestId('timer-seconds').getAttribute('aria-label');
+  expect(label).not.toBeNull();
+  const m = label!.match(/累计 (\d{2}):(\d{2}):(\d{2})/);
+  expect(m).not.toBeNull();
+  return Number(m![1]) * 3600 + Number(m![2]) * 60 + Number(m![3]);
+}
+
 test.beforeAll(() => {
   rmSync('/tmp/clock-e2e-data', { recursive: true, force: true });
 });
@@ -57,11 +66,9 @@ test.describe('核心流程', () => {
     await expect(page.getByTestId('timer-seconds')).toBeVisible();
     await expect(page.getByText('· 进行中')).toBeVisible();
 
-    // 等 3 秒，做独立时间差校验：UI 秒数 vs 服务端暂算秒数
+    // 等 3 秒，做独立时间差校验：UI 累计秒 vs 服务端暂算秒数
     await page.waitForTimeout(3000);
-    const uiText = await page.getByTestId('timer-seconds').innerText();
-    const [h, m, s] = uiText.split(':').map(Number);
-    const uiSeconds = h * 3600 + m * 60 + s;
+    const uiSeconds = await timerTotalSeconds(page);
     const stateRes = await page.request.get('/api/v1/state');
     expect(stateRes.ok()).toBeTruthy();
     const stateBody = await stateRes.json();
@@ -120,7 +127,7 @@ test.describe('核心流程', () => {
     expect(box!.width).toBeGreaterThanOrEqual(3);
 
     await seg.click();
-    await expect(page.getByRole('dialog', { name: '片段详情' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: '会话详情' })).toBeVisible();
     await expect(page.getByText('净时长')).toBeVisible();
     await page.getByRole('button', { name: '关闭' }).click();
   });
@@ -147,18 +154,15 @@ test.describe('核心流程', () => {
     await page.getByTestId('start-btn').click();
     await page.waitForTimeout(2000);
 
-    const before = await page.getByTestId('timer-seconds').innerText();
+    const before = await timerTotalSeconds(page);
     await page.reload();
 
     await expect(page.getByTestId('timer-seconds')).toBeVisible();
     await expect(page.getByText('· 进行中')).toBeVisible();
     // 恢复后秒数与刷新前接近（±10s，含刷新耗时）
-    const [bh, bm, bs] = before.split(':').map(Number);
-    const beforeSecs = bh * 3600 + bm * 60 + bs;
+    const beforeSecs = before;
     await page.waitForTimeout(1000);
-    const afterText = await page.getByTestId('timer-seconds').innerText();
-    const [ah, am, as] = afterText.split(':').map(Number);
-    const afterSecs = ah * 3600 + am * 60 + as;
+    const afterSecs = await timerTotalSeconds(page);
     expect(Math.abs(afterSecs - beforeSecs)).toBeLessThanOrEqual(10);
 
     await page.getByRole('button', { name: '结束并保存' }).click();

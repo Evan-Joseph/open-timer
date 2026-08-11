@@ -32,6 +32,8 @@ export interface ActiveSessionApi {
   status: 'running' | 'paused';
   active_seconds: number;
   current_segment_started_at: string | null;
+  /** 当前开放段活跃秒数（running 增长，paused 冻结） */
+  current_segment_active_seconds: number | null;
   /** 暂停（离开）开始时刻 */
   paused_at: string | null;
   intent_note: string | null;

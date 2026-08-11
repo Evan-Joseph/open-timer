@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Pause, Play, Square, Flag, Undo2 } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
-import { useMonotonicSeconds, useBeijingTime, formatHms, formatDurationZh, formatBeijingTime } from '../lib/clock.js';
+import { useMonotonicSeconds, useBeijingTime, formatHms, formatHmsShort, formatDurationZh, formatBeijingTime } from '../lib/clock.js';
 import { useSettings } from '../lib/settings.js';
 import { playFinishChime } from '../lib/sound.js';
 
@@ -26,6 +26,9 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const settings = useSettings();
 
   const seconds = useMonotonicSeconds(anchor);
+  // 本段活跃秒（running 增长 / paused 冻结）：主计时拆为「前段累计 + 本段」
+  const segmentSecs = useMonotonicSeconds(store.segmentAnchor, 1000);
+  const prevSecs = Math.max(0, seconds - segmentSecs);
   /** 暂停（离开）已有时长 */
   const awaySeconds = useMonotonicSeconds(store.awayAnchor, 1000);
   const beijing = useBeijingTime(anchor ? { serverNowMs: anchor.serverNowMs, anchorPerfMs: anchor.anchorPerfMs } : null);
@@ -145,8 +148,10 @@ export default function ClockFace({ store }: { store: ClockStore }) {
           <span className="pill-status">{paused ? '· 离开中' : '· 进行中'}</span>
         </div>
 
-        <div className="big-timer" data-testid="timer-seconds" aria-live="off">
-          {formatHms(seconds)}
+        <div className="big-timer" data-testid="timer-seconds" aria-live="off" aria-label={`累计 ${formatHms(seconds)}，本段 ${formatHmsShort(segmentSecs)}`}>
+          <span className="timer-prev" aria-hidden>{formatHms(prevSecs)}</span>
+          <span className="timer-plus" aria-hidden>+</span>
+          <span className="timer-seg">{formatHmsShort(segmentSecs)}</span>
         </div>
 
         <div className="sub-line">

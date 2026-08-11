@@ -106,6 +106,11 @@ describe('API 集成', () => {
     expect(started.status).toBe('running');
     const id = started.session_id;
 
+    // 本段活跃秒：running 时存在（从 0 起算）
+    const startState = await (await ctx.app.request('/api/v1/state', { headers: { cookie: ctx.cookie } })).json();
+    expect(startState.active_session.current_segment_active_seconds).toBeGreaterThanOrEqual(0);
+    expect(Number.isInteger(startState.active_session.current_segment_active_seconds)).toBe(true);
+
     // 非法转移：running 时 resume 应 409
     const badResume = await ctx.app.request(`/api/v1/sessions/${id}/resume`, {
       method: 'POST',
@@ -121,6 +126,11 @@ describe('API 集成', () => {
     expect(pauseRes.status).toBe(200);
     expect((await pauseRes.json()).status).toBe('paused');
 
+    // 本段活跃秒：paused 时冻结为末段净秒（非 0 重置）
+    const pausedState = await (await ctx.app.request('/api/v1/state', { headers: { cookie: ctx.cookie } })).json();
+    expect(pausedState.active_session.current_segment_active_seconds).toBeGreaterThanOrEqual(0);
+    expect(Number.isInteger(pausedState.active_session.current_segment_active_seconds)).toBe(true);
+
     // resume
     const resumeRes = await ctx.app.request(`/api/v1/sessions/${id}/resume`, {
       method: 'POST',
@@ -128,6 +138,10 @@ describe('API 集成', () => {
     });
     expect(resumeRes.status).toBe(200);
     expect((await resumeRes.json()).status).toBe('running');
+
+    // 本段活跃秒：resume 后新段从 0 重新累计（不含休息时长）
+    const resumedState = await (await ctx.app.request('/api/v1/state', { headers: { cookie: ctx.cookie } })).json();
+    expect(resumedState.active_session.current_segment_active_seconds).toBeLessThan(3);
 
     // stop
     const stopRes = await ctx.app.request(`/api/v1/sessions/${id}/stop`, {
