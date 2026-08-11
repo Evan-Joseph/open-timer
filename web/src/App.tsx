@@ -96,7 +96,7 @@ export default function App() {
           <Maximize2 size={16} />
         </button>
         <button className="icon-btn" aria-label="设置" onClick={() => setSettingsOpen(true)}>
-          <Settings size={18} />
+          <Settings size={20} />
         </button>
       </header>
 

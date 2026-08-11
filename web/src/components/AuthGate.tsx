@@ -124,9 +124,10 @@ export default function AuthGate({ phase, onSetup, onLogin, error }: Props) {
                 className="pin-key icon-key"
                 onClick={() => press('del')}
                 aria-label="删除一位"
-                disabled={busy || entry.length === 0}
+                aria-disabled={entry.length === 0}
+                disabled={busy}
               >
-                <Delete size={22} />
+                <Delete size={24} />
               </button>
             ) : (
               <button key={i} type="button" className="pin-key" onClick={() => press(k)} disabled={busy} aria-label={`数字 ${k}`}>

@@ -200,15 +200,15 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         <div className="control-row">
           {paused ? (
             <button className="control-btn resume" onClick={store.resume} disabled={busy} aria-label="继续计时" title="继续">
-              <Play size={22} />
+              <Play size={24} />
             </button>
           ) : (
             <button className="control-btn pause" onClick={store.pause} disabled={busy} aria-label="暂停计时" title="暂停">
-              <Pause size={22} />
+              <Pause size={24} />
             </button>
           )}
           <button className="control-btn stop" onClick={handleStop} disabled={busy} aria-label="结束并保存" title="结束并保存">
-            <Square size={20} />
+            <Square size={24} />
           </button>
         </div>
 
@@ -301,7 +301,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       />
 
       <button className="start-btn" data-testid="start-btn" disabled={busy} onClick={() => store.start(selectedSubject, intentDraft || null)}>
-        <Flag size={18} aria-hidden /> 开始
+        <Flag size={20} aria-hidden /> 开始
       </button>
 
       <div className="today-hint">今天已记录 {formatDurationZh(state?.today_active_seconds ?? 0)}</div>

@@ -87,7 +87,7 @@ export default function RhythmRing({ segmentSeconds, awaySeconds, config, paused
       {showBanners && phase.phase === 'ready_break' && (
         <div className="rhythm-banner ready" role="status" data-testid="rhythm-banner">
           <span className="banner-icon" aria-hidden>
-            {phase.suggestedBreak === 'long' ? <Coffee size={15} /> : <CupSoda size={15} />}
+            {phase.suggestedBreak === 'long' ? <Coffee size={14} /> : <CupSoda size={14} />}
           </span>
           <span>
             已连续专注 {Math.floor(segSecs / 60)} 分钟，
@@ -100,7 +100,7 @@ export default function RhythmRing({ segmentSeconds, awaySeconds, config, paused
       {showBanners && phase.phase === 'break_ready' && (
         <div className="rhythm-banner go" role="status" data-testid="rhythm-banner">
           <span className="banner-icon" aria-hidden>
-            <Sparkles size={15} />
+            <Sparkles size={14} />
           </span>
           <span>休息够了，随时回来继续。点「继续」即可恢复计时。</span>
         </div>

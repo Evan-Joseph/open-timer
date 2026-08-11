@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, LocateFixed, Undo2, ZoomIn, ZoomOut, List, GanttChart } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, LocateFixed, Undo2, ZoomIn, ZoomOut, List, GanttChart } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
 import type { SessionApi } from '../lib/api.js';
 import { apiGet } from '../lib/api.js';
@@ -318,7 +318,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
                   localStorage.setItem('clock-timeline-zoom', String(ZOOM_LEVELS[next]));
                 }}
               >
-                <ZoomOut size={15} />
+                <ZoomOut size={16} />
               </button>
               <button
                 className="icon-btn"
@@ -331,7 +331,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
                   localStorage.setItem('clock-timeline-zoom', String(ZOOM_LEVELS[next]));
                 }}
               >
-                <ZoomIn size={15} />
+                <ZoomIn size={16} />
               </button>
             </>
           )}
@@ -342,14 +342,14 @@ export default function Timeline({ store }: { store: ClockStore }) {
             onClick={() => setMode(mode === 'track' ? 'list' : 'track')}
             data-testid="timeline-mode-btn"
           >
-            {mode === 'track' ? <List size={15} /> : <GanttChart size={15} />}
+            {mode === 'track' ? <List size={16} /> : <GanttChart size={16} />}
           </button>
           <button className="icon-btn" aria-label="前一天" onClick={() => setViewDate(shiftDate(viewDate, -1))}>
             <ChevronLeft size={16} />
           </button>
           {isToday ? (
             <button className="text-btn now-btn" onClick={() => scrollToNow(true)} aria-label="滚动到当前时间" data-testid="scroll-now-btn">
-              <LocateFixed size={13} aria-hidden /> 现在
+              <LocateFixed size={14} aria-hidden /> 现在
             </button>
           ) : (
             <button className="text-btn" onClick={() => setViewDate(store.todayDate)}>
@@ -366,7 +366,18 @@ export default function Timeline({ store }: { store: ClockStore }) {
         /* 流水账视图：按时间排序的记录行，小屏友好 */
         <div className="timeline-list" data-testid="timeline-list">
           {segs.length === 0 ? (
-            <div className="timeline-list-empty">这一天还没有记录</div>
+            <div className="timeline-list-empty" data-testid="timeline-list-empty">
+              <span className="empty-glyph" aria-hidden>
+                <Clock size={20} />
+              </span>
+              <div className="empty-title">这一天还没有记录</div>
+              <div className="empty-desc">{isToday ? '开始一段专注，时间片段会自动出现在这里' : '换个日期看看，或回到今天'}</div>
+              {!isToday && (
+                <button className="text-btn" onClick={() => setViewDate(store.todayDate)}>
+                  回今天
+                </button>
+              )}
+            </div>
           ) : (
             segs.map((seg) => (
               <button
@@ -478,7 +489,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
                   {noteSaving ? '保存中…' : '保存备注'}
                 </button>
                 <button className="text-btn withdraw-btn" onClick={() => void handleWithdraw()} data-testid="withdraw-btn">
-                  <Undo2 size={13} aria-hidden /> 撤回
+                  <Undo2 size={14} aria-hidden /> 撤回
                 </button>
               </>
             )}
