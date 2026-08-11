@@ -242,11 +242,9 @@ button:focus-visible, input:focus-visible {
 .subject-chip:active:not(:disabled), .switch-btn:active:not(:disabled) { transform: scale(0.97); }
 
 /* 含图标/圆点的行容器统一对齐 */
-.rhythm-option, .timeline-list-row, .overview-item, .legend-item {
+.timeline-list-row, .overview-item, .legend-item {
   display: inline-flex; align-items: center;
 }
-
-/* 科目色圆点 */
 .pill-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--sc, var(--text-3));
@@ -409,72 +407,6 @@ button:focus-visible, input:focus-visible {
 .finish-actions { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
 
 /* ==========================================================================
-   番茄节奏环
-   ========================================================================== */
-
-.rhythm {
-  display: flex; flex-direction: column; align-items: center; gap: 10px;
-  margin-top: 4px;
-}
-.rhythm-ring-wrap { position: relative; width: 180px; height: 180px; }
-.rhythm-svg { position: absolute; inset: 0; }
-.rhythm-track { stroke: var(--surface-2); }
-.rhythm-progress {
-  stroke: var(--accent);
-  transition: stroke-dashoffset 0.9s linear, stroke 0.3s ease;
-}
-.rhythm-progress.ready { stroke: var(--amber); }
-.rhythm-progress.go { stroke: var(--success); }
-
-.rhythm-center {
-  position: absolute; inset: 0;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-}
-.rhythm-round { font-size: 12px; color: var(--text-3); }
-.rhythm-remain { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.rhythm-dots { display: flex; gap: 5px; margin-top: 2px; }
-.rhythm-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--surface-2); }
-.rhythm-dot.done { background: var(--accent); }
-.rhythm-dot.current { background: var(--text-2); }
-
-.rhythm-meta { font-size: 12px; color: var(--text-2); }
-
-/* 节奏阶段横幅（常驻、柔和）：ready=amber / go=success */
-.rhythm-banner {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 16px; border-radius: var(--radius);
-  font-size: 13px; max-width: 480px;
-  border: 1px solid var(--border);
-  animation: nudge-in 0.3s ease;
-}
-.rhythm-banner.ready {
-  background: color-mix(in srgb, var(--amber) 10%, var(--surface-1));
-  border-color: color-mix(in srgb, var(--amber) 35%, transparent);
-  color: var(--text-1);
-}
-.rhythm-banner.go {
-  background: color-mix(in srgb, var(--success) 10%, var(--surface-1));
-  border-color: color-mix(in srgb, var(--success) 35%, transparent);
-  color: var(--text-1);
-}
-.banner-icon { display: inline-flex; color: var(--text-2); flex: none; }
-
-/* 空闲态节奏提示行 */
-.rhythm-idle-line {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 7px 16px; border-radius: 999px;
-  font-size: 13px; font-variant-numeric: tabular-nums;
-  animation: fade-rise 0.3s ease;
-}
-.rhythm-idle-line.resting {
-  background: color-mix(in srgb, var(--amber) 9%, var(--surface-2));
-  color: var(--text-1);
-}
-.rhythm-idle-line.ready {
-  background: color-mix(in srgb, var(--success) 10%, var(--surface-2));
-  color: var(--text-1);
-}
-
 /* ==========================================================================
    时间轴
    ========================================================================== */
@@ -744,35 +676,6 @@ button:focus-visible, input:focus-visible {
   background: color-mix(in srgb, var(--surface-2) 88%, white 12%);
 }
 
-/* Apple Settings 式节奏选择列表 */
-.rhythm-list { display: flex; flex-direction: column; gap: 6px; }
-.rhythm-option {
-  justify-content: space-between; gap: 10px;
-  padding: 10px 14px; border-radius: var(--radius);
-  background: var(--surface-1); border: 1px solid var(--border);
-  text-align: left; transition: border-color 0.15s ease, background 0.15s ease;
-}
-.rhythm-option:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-.rhythm-option.active {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 6%, var(--surface-1));
-}
-.rhythm-option-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.rhythm-option-title { font-size: 14px; font-weight: 500; color: var(--text-1); }
-.rhythm-option-sub { font-size: 12px; color: var(--text-2); }
-.rhythm-option-check { color: var(--accent); flex: none; display: inline-flex; }
-
-.rhythm-custom {
-  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
-  font-size: 13px; color: var(--text-2);
-}
-.rhythm-field { display: inline-flex; align-items: center; gap: 5px; }
-.rhythm-field input {
-  width: 56px; padding: 4px 6px; border-radius: var(--radius-sm);
-  border: 1px solid var(--border); background: var(--surface-2);
-  color: var(--text-1); font-size: 13px; text-align: center;
-}
-
 /* iOS 风格开关（Radix Switch）：51×31，轨道圆角 16 */
 .switch-root {
   width: 51px; height: 31px; border-radius: 16px;
@@ -795,6 +698,8 @@ button:focus-visible, input:focus-visible {
 }
 .switch-row + .switch-row { margin-top: 10px; }
 .toggle-lines { display: flex; flex-direction: column; gap: 2px; }
+/* label 与 Switch 以 htmlFor/id 关联：文本可点，结构合法（label 不嵌套 button） */
+.switch-label { color: var(--text-1); font-size: 13px; cursor: pointer; }
 
 /* 环境音 */
 .ambient-list { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -869,11 +774,6 @@ button:active:not(:disabled) { transform: scale(0.98); }
   0% { opacity: 0; transform: scale(0.9); }
   40% { opacity: 1; }
   100% { opacity: 0.6; transform: scale(1); }
-}
-
-@keyframes nudge-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
 }
 
 /* ==========================================================================

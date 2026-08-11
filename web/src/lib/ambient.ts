@@ -363,26 +363,6 @@ class AmbientEngine {
   kind(): AmbientKind {
     return this.current;
   }
-
-  /** 节奏提醒铃：柔和上行音（需已激活 ctx） */
-  chime(long: boolean): void {
-    const ctx = this.ensureCtx();
-    if (!ctx || !this.master) return;
-    const notes = long ? [523.25, 659.25, 783.99] : [659.25, 783.99];
-    notes.forEach((f, i) => {
-      const osc = ctx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.value = f;
-      const g = ctx.createGain();
-      const t0 = ctx.currentTime + i * 0.22;
-      g.gain.setValueAtTime(0, t0);
-      g.gain.linearRampToValueAtTime(0.12, t0 + 0.03);
-      g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.8);
-      osc.connect(g).connect(this.master!);
-      osc.start(t0);
-      osc.stop(t0 + 0.85);
-    });
-  }
 }
 
 export const ambient = new AmbientEngine();

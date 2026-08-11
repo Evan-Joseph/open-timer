@@ -1,14 +1,12 @@
 /** 时钟主区：空闲 / 运行 / 暂停 / 结束反馈四态。 */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { Pause, Play, Square, Flag, Undo2, Coffee, Sparkles } from 'lucide-react';
+import { Pause, Play, Square, Flag, Undo2 } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
 import { useMonotonicSeconds, useBeijingTime, formatHms, formatDurationZh, formatBeijingTime } from '../lib/clock.js';
 import { useSettings } from '../lib/settings.js';
 import { playFinishChime } from '../lib/sound.js';
-import { dayRhythm, proportionalBreakSecs, type SessionStamp } from '@clock/shared';
-import RhythmRing from './RhythmRing.js';
 
 const REDUCED = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const animationsEnabled = !REDUCED && localStorage.getItem('clock-animations') !== 'off';
@@ -28,8 +26,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const settings = useSettings();
 
   const seconds = useMonotonicSeconds(anchor);
-  /** 当前开放段（本轮连续专注）已过秒数，供节奏环 */
-  const segmentSecs = useMonotonicSeconds(store.segmentAnchor, 1000);
   /** 暂停（离开）已有时长 */
   const awaySeconds = useMonotonicSeconds(store.awayAnchor, 1000);
   const beijing = useBeijingTime(anchor ? { serverNowMs: anchor.serverNowMs, anchorPerfMs: anchor.anchorPerfMs } : null);
@@ -41,21 +37,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     return () => window.clearInterval(t);
   }, []);
   const idleTime = formatBeijingTime(idleNowMs);
-
-  // 跨科目/跨会话的当日节奏（空闲态提示：休息中/该回归了/预计回归时间）
-  const dayRhythmInfo = useMemo(() => {
-    if (!settings.rhythm.enabled) return null;
-    const stamps: SessionStamp[] = [];
-    for (const s of store.sessions) {
-      if (s.status !== 'stopped' || !s.ended_at) continue;
-      const startMs = Date.parse(s.started_at);
-      const endMs = Date.parse(s.ended_at);
-      if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
-        stamps.push({ startedAtMs: startMs, endedAtMs: endMs, activeSeconds: s.active_seconds });
-      }
-    }
-    return dayRhythm(stamps, idleNowMs, settings.rhythm);
-  }, [store.sessions, idleNowMs, settings.rhythm]);
 
   /* ---------- 结束反馈 ---------- */
   const [lastStopped, setLastStopped] = useState<{ sessionId: string; subjectId: string; seconds: number } | null>(null);
@@ -77,7 +58,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     localStorage.setItem('clock-last-subject', selectedSubject);
   }, [selectedSubject]);
 
-  // 仅当“从未手动选过且无本地记录”时，才用当天最后一个会话的科目作默认值（只发生一次）
+  // 仅当"从未手动选过且无本地记录"时，才用当天最后一个会话的科目作默认值（只发生一次）
   useEffect(() => {
     if (userPickedRef.current) return;
     if (localStorage.getItem('clock-last-subject')) return;
@@ -173,28 +154,12 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         </div>
         {active.intent_note && <div className="intent-line">「{active.intent_note}」</div>}
 
-        {/* 暂停（离开）时长：中性提示，不计入学习；开节奏时附比例参考小憩时长 */}
+        {/* 暂停（离开）时长：中性提示，不计入学习 */}
         {paused && (
           <div className="away-line" data-testid="away-line" aria-live="off">
             已离开 {formatHms(awaySeconds)}
-            <span className="away-note">
-              {settings.rhythm.enabled
-                ? ` · 参考小憩 ${formatDurationZh(proportionalBreakSecs(segmentSecs, settings.rhythm))}，不计学习时长`
-                : ' · 不计学习时长'}
-            </span>
+            <span className="away-note"> · 不计学习时长</span>
           </div>
-        )}
-
-        {/* 番茄节奏（自动阶段：到点提示休息、休息够了提示回归，均不自动改变计时） */}
-        {settings.rhythm.enabled && (
-          <RhythmRing
-            segmentSeconds={segmentSecs}
-            awaySeconds={awaySeconds}
-            config={settings.rhythm}
-            paused={paused}
-            showBanners={settings.rhythmNudge}
-            chimeEnabled={settings.rhythmChime}
-          />
         )}
 
         <div className="control-row">
@@ -257,23 +222,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       <div className="idle-date">
         {new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', dateStyle: 'full' }).format(new Date())}
       </div>
-      {/* 跨科目节奏提示：休息中 → 显示剩余休息与预计回归时间；休息够了 → 提示回归 */}
-      {dayRhythmInfo?.phase === 'resting' && dayRhythmInfo.projectedResumeMs && (
-        <div className="rhythm-idle-line resting" data-testid="rhythm-idle-resting">
-          <Coffee size={14} aria-hidden />
-          <span>
-            已专注 {formatDurationZh(dayRhythmInfo.focusAccumSec)}，建议休息 {formatDurationZh(dayRhythmInfo.suggestedBreakSec)}
-            {' · '}还剩 {formatDurationZh(dayRhythmInfo.restRemainingSec)}
-            {' · '}预计 {formatBeijingTime(dayRhythmInfo.projectedResumeMs)} 重新投入
-          </span>
-        </div>
-      )}
-      {dayRhythmInfo?.phase === 'break_ready' && (
-        <div className="rhythm-idle-line ready" data-testid="rhythm-idle-ready">
-          <Sparkles size={14} aria-hidden />
-          <span>休息够了，随时开始下一段专注</span>
-        </div>
-      )}
 
       <div className="subject-picker" role="radiogroup" aria-label="选择科目">
         {ordered.map((s) => (

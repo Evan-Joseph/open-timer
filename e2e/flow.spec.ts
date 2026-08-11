@@ -241,51 +241,6 @@ test.describe('截图矩阵与视觉', () => {
   });
 });
 
-test.describe('番茄节奏（自动阶段）', () => {
-  test('开启节奏后显示节奏环；暂停显示离开行与节奏环小憩态', async ({ page }) => {
-    await doSetup(page);
-
-    // 设置里开启自定义节奏
-    await page.getByRole('button', { name: '设置' }).click();
-    await page.getByRole('radio', { name: '自定义' }).click();
-    await page.keyboard.press('Escape');
-
-    await page.getByRole('radio', { name: '数学一' }).click();
-    await page.getByTestId('start-btn').click();
-
-    // 节奏环出现（未到节奏点，无横幅）
-    await expect(page.getByTestId('rhythm-remain')).toBeVisible();
-    await expect(page.getByText('第 1 轮')).toBeVisible();
-    await expect(page.getByTestId('rhythm-banner')).toHaveCount(0);
-
-    // 暂停后显示离开行与节奏环的小憩态
-    await page.getByRole('button', { name: '暂停计时' }).click();
-    await expect(page.getByTestId('away-line')).toBeVisible();
-    await expect(page.getByTestId('away-line')).toContainText('已离开');
-    await expect(page.getByText('小憩中')).toBeVisible();
-
-    // 继续并结束清理
-    await page.getByRole('button', { name: '继续计时' }).click();
-    await expect(page.getByTestId('away-line')).toHaveCount(0);
-    await page.getByRole('button', { name: '结束并保存' }).click();
-    await page.getByRole('button', { name: '好，继续' }).click();
-  });
-
-  test('节奏默认关闭，运行态不显示节奏环', async ({ page, context }) => {
-    // 先进入页面拿到 origin，再清设置与 cookie
-    await page.goto('/');
-    await page.evaluate(() => localStorage.removeItem('clock-settings-v2'));
-    await context.clearCookies();
-    await doSetup(page);
-    await page.getByRole('radio', { name: '英语一' }).click();
-    await page.getByTestId('start-btn').click();
-    await expect(page.getByTestId('timer-seconds')).toBeVisible();
-    await expect(page.locator('.rhythm-ring-wrap')).toHaveCount(0);
-    await page.getByRole('button', { name: '结束并保存' }).click();
-    await page.getByRole('button', { name: '好，继续' }).click();
-  });
-});
-
 test.describe('时间轴信标与自动滚动', () => {
   test('开始会话后时间轴自动定位，「现在」按钮可滚回信标', async ({ page }) => {
     await doSetup(page);
@@ -527,29 +482,5 @@ test.describe('全屏时间轴开关', () => {
 
     await page.evaluate(() => document.exitFullscreen().catch(() => {}));
     await page.waitForTimeout(400);
-  });
-});
-
-test.describe('跨科目节奏提示（空闲态）', () => {
-  test('结束会话后空闲态显示休息建议与预计回归时间', async ({ page }) => {
-    await doSetup(page);
-    // 开启节奏（默认 flow 52/17）
-    await page.getByRole('button', { name: '设置' }).click();
-    await page.getByRole('radio', { name: '平衡 · 52 分专注 / 17 分小憩' }).click();
-    await page.keyboard.press('Escape');
-
-    // 模拟"背单词后结束"：短会话 → 结束 → 空闲
-    await page.getByRole('radio', { name: '英语一' }).click();
-    await page.getByTestId('start-btn').click();
-    await page.waitForTimeout(1200);
-    await page.getByRole('button', { name: '结束并保存' }).click();
-    await page.getByRole('button', { name: '好，继续' }).click();
-
-    // 空闲态出现节奏提示：休息中 + 预计回归时间
-    const resting = page.getByTestId('rhythm-idle-resting');
-    await expect(resting).toBeVisible();
-    await expect(resting).toContainText('建议休息');
-    await expect(resting).toContainText('预计');
-    await expect(resting).toContainText('重新投入');
   });
 });
