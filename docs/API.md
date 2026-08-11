@@ -159,7 +159,7 @@ Base URL：`https://immersive-clock-11408.gaoshenzhou.workers.dev`
 
 ## 写操作端点（需登录 cookie）
 
-登录：`POST /api/v1/auth/login`，body `{ "password": "370785" }`（6 位 PIN）。成功返回 `{ "ok": true }` 并设置 `clock_session` cookie。
+登录：`POST /api/v1/auth/login`，body `{ "password": "<本机安全配置中的 PIN>" }`。成功返回 `{ "ok": true }` 并设置 `clock_session` cookie。PIN 不得写入文档、仓库、命令历史或聊天。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -202,6 +202,10 @@ BASE="https://immersive-clock-11408.gaoshenzhou.workers.dev"
 # 今天（北京时间）的日期
 TODAY=$(TZ=Asia/Shanghai date +%F)
 
+# curl 不自动继承 macOS 系统代理。若直连超时，先从当前代理软件或
+# `scutil --proxy` 核验本机 HTTPS 代理，再仅在当前 shell 显式设置 HTTPS_PROXY。
+# 不要把机器特定端口固化到仓库。
+
 # 1) 当前是否在学 + 今日累计（公开，无需认证）
 curl -s "$BASE/api/v1/state" | python3 -m json.tool
 
@@ -217,8 +221,9 @@ curl -s -H "If-None-Match: $ETAG" "$BASE/api/v1/daily-summary?date=$TODAY&timezo
 curl -s "$BASE/api/v1/sessions?date=$TODAY" | python3 -m json.tool
 
 # 5) 写操作示例（登录后带 cookie；仅当 Agent 被授权替用户操作时）
+test -n "$CLOCK_PIN" || { echo 'CLOCK_PIN 未从本机安全配置加载' >&2; exit 1; }
 curl -s -c /tmp/clock-cj.txt -X POST "$BASE/api/v1/auth/login" -H 'content-type: application/json' \
-  -d '{"password":"370785"}'
+  --data-binary "$(printf '{\"password\":\"%s\"}' "$CLOCK_PIN")"
 curl -s -b /tmp/clock-cj.txt -X POST "$BASE/api/v1/sessions" \
   -H 'content-type: application/json' -H "Idempotency-Key: $(uuidgen)" \
   -d '{"subject_id":"math"}'
