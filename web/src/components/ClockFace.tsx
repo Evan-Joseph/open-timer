@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Pause, Play, Square, Flag, Undo2 } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
+import type { SyncAnchor } from '../lib/clock.js';
 import { useMonotonicSeconds, useDualMonotonic, useWallSeconds, useBeijingTime, formatHms, formatHmsShort, formatDurationZh, formatBeijingTime, awayLevelOf } from '../lib/clock.js';
 import { useSettings } from '../lib/settings.js';
 import { playFinishChime, playAwayReminder } from '../lib/sound.js';
@@ -31,24 +32,33 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const seconds = useMonotonicSeconds(anchor);
   // 本段活跃秒（running 增长 / paused 冻结）：与总累计用同一 tick 同源计算，杜绝抢秒抖动
   const { total: totalSecs, seg: segmentSecs, prev: prevSecs } = useDualMonotonic(anchor, store.segmentAnchor, 1000);
-  /** 暂停（离开）已有时长（墙钟推进，测试可用 page.clock fake） */
-  const awaySeconds = useWallSeconds(store.awayAnchor, 1000);
   const beijing = useBeijingTime(anchor ? { serverNowMs: anchor.serverNowMs, anchorPerfMs: anchor.anchorPerfMs } : null);
 
-  /* ---------- 离开（暂停）渐进提醒 ---------- */
+  /* ---------- 结束反馈 state（需先于离开提醒定义，两者耦合） ---------- */
+  const [lastStopped, setLastStopped] = useState<{ sessionId: string; subjectId: string; seconds: number } | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+
+  /* ---------- 离开（暂停 / 科目结束后）渐进提醒 ---------- */
   const [awaySnoozedUntil, setAwaySnoozedUntil] = useState(0); // 全屏召回推迟到的时间戳
-  const [awayDismissed, setAwayDismissed] = useState(false);   // 本轮暂停已手动关闭全屏召回
+  const [awayDismissed, setAwayDismissed] = useState(false);   // 本轮离开已手动关闭全屏召回
   const awayChimePlayedRef = useRef(false);                   // L2 提示音只播一次
+  const [awayAnchorOverride, setAwayAnchorOverride] = useState<SyncAnchor | null>(null); // 结束态离开锚点
   const paused = active?.status === 'paused';
+  /** 离开中 = 暂停中断 或 科目结束后（本质都是"人不在学习"） */
+  const awayActive = paused || (lastStopped !== null && !active);
+  /** 离开计时锚点：暂停用服务端 paused_at；结束态用本组件在 stop 时记录的墙钟锚点 */
+  const awayAnchor = store.awayAnchor ?? awayAnchorOverride;
+  const awaySeconds = useWallSeconds(awayAnchor, 1000);
   const awayLevel = awayLevelOf(awaySeconds);
-  // 离开状态复位：回到运行/停止后，下一轮暂停重新开始提醒
+  // 离开状态复位：回到学习/开始新段后，下一轮离开重新开始提醒
   useEffect(() => {
-    if (!paused) {
+    if (!awayActive) {
       awayChimePlayedRef.current = false;
       setAwayDismissed(false);
       setAwaySnoozedUntil(0);
+      setAwayAnchorOverride(null);
     }
-  }, [paused]);
+  }, [awayActive]);
   // L2：到达 20 分钟时单次轻音（浏览器需已交互，计时本身需要交互才能开始，满足 autoplay 前提）
   useEffect(() => {
     if (awayLevel >= 2 && !awayChimePlayedRef.current) {
@@ -58,6 +68,42 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   }, [awayLevel]);
   // L3：到达 30 分钟且未推迟/未关闭 → 全屏召回
   const showAwayRecall = awayLevel >= 3 && !awayDismissed && Date.now() >= awaySnoozedUntil;
+  /** 结束态"开始下一段"：延续刚才的科目 */
+  const handleStartNext = () => {
+    const sid = lastStopped?.subjectId ?? selectedSubject;
+    setLastStopped(null);
+    setNoteDraft('');
+    void store.start(sid, null);
+  };
+  /** L3 全屏召回（暂停态与结束态共用；结束态按钮为"开始下一段"） */
+  const awayRecallOverlay =
+    showAwayRecall && lastStopped !== null && !active ? (
+      <div className="away-overlay" role="dialog" aria-modal="true" aria-label="离开提醒" onClick={() => setAwayDismissed(true)}>
+        <div className="away-overlay-card" onClick={(e) => e.stopPropagation()}>
+          <div className="away-overlay-title">已离开 {formatHms(awaySeconds)}</div>
+          <p className="away-overlay-text">回来继续下一段吗？休息久了容易掉出状态。</p>
+          <div className="away-overlay-actions">
+            <button className="primary-btn" onClick={handleStartNext} disabled={busy}>
+              <Flag size={18} aria-hidden /> 开始下一段
+            </button>
+            <button className="ghost-btn" onClick={() => setAwaySnoozedUntil(Date.now() + AWAY_SNOOZE_MS)}>再等 5 分钟</button>
+          </div>
+        </div>
+      </div>
+    ) : showAwayRecall ? (
+      <div className="away-overlay" role="dialog" aria-modal="true" aria-label="离开提醒" onClick={() => setAwayDismissed(true)}>
+        <div className="away-overlay-card" onClick={(e) => e.stopPropagation()}>
+          <div className="away-overlay-title">已离开 {formatHms(awaySeconds)}</div>
+          <p className="away-overlay-text">回来继续这一段吗？休息久了容易掉出状态。</p>
+          <div className="away-overlay-actions">
+            <button className="primary-btn" onClick={() => void store.resume()} disabled={busy}>
+              <Play size={18} aria-hidden /> 回到学习
+            </button>
+            <button className="ghost-btn" onClick={() => setAwaySnoozedUntil(Date.now() + AWAY_SNOOZE_MS)}>再等 5 分钟</button>
+          </div>
+        </div>
+      </div>
+    ) : null;
 
   // 空闲态北京时间与"距上次专注"间隔（5s 步进，共用一个 interval）
   const [idleNowMs, setIdleNowMs] = useState(() => Date.now());
@@ -68,8 +114,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const idleTime = formatBeijingTime(idleNowMs);
 
   /* ---------- 结束反馈 ---------- */
-  const [lastStopped, setLastStopped] = useState<{ sessionId: string; subjectId: string; seconds: number } | null>(null);
-  const [noteDraft, setNoteDraft] = useState('');
   const [selectedSubject, setSelectedSubject] = useState<string>(
     () => localStorage.getItem('clock-last-subject') || 'math',
   );
@@ -104,6 +148,8 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     if (snapshot) {
       if (settings.finishSound) playFinishChime();
       setLastStopped(snapshot); // 立即呈现结束反馈（store.stop 内部乐观清空活动会话）
+      // 结束即离开起点：科目结束后同样进入"已离开"渐进提醒
+      setAwayAnchorOverride({ confirmedSeconds: 0, running: true, anchorPerfMs: performance.now(), serverNowMs: Date.now() });
     }
     await store.stop(null);
   };
@@ -112,7 +158,8 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   if (lastStopped && !active) {
     const subj = subjectOf(lastStopped.subjectId);
     return (
-      <section className="clockface" aria-live="polite">
+      <>
+      <section className="clockface" data-away-level={awayLevel} aria-live="polite">
         <M className="finish-card">
           <div className="finish-glow" aria-hidden />
           <div className="subject-pill" data-color={subj?.color_id}>
@@ -125,6 +172,16 @@ export default function ClockFace({ store }: { store: ClockStore }) {
           <p className="finish-line">
             已记录本次投入。今天累计 {formatDurationZh(state?.today_active_seconds ?? lastStopped.seconds)}。
           </p>
+          {/* 离开时长：科目结束后同样进入"已离开"渐进提醒（L1 黄 / L2 红 / L3 全屏召回） */}
+          <div className="away-slot" aria-live="off">
+            <div
+              className={`away-line${awayLevel >= 2 ? ' strong' : awayLevel >= 1 ? ' urgent' : ''}`}
+              data-testid="away-line"
+            >
+              已离开 {formatHms(awaySeconds)}
+              <span className="away-note"> · 开始下一段前不计学习时长</span>
+            </div>
+          </div>
           <input
             className="finish-note"
             placeholder="补一句备注（可选）"
@@ -159,6 +216,10 @@ export default function ClockFace({ store }: { store: ClockStore }) {
           </div>
         </M>
       </section>
+
+      {/* L3 全屏召回（结束态）：离开 ≥30 分钟，可"开始下一段 / 再等 5 分钟 / 点遮罩关闭本轮" */}
+      {awayRecallOverlay}
+      </>
     );
   }
 
@@ -237,28 +298,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       </section>
 
       {/* L3 全屏召回：离开 ≥30 分钟。渐入 + 半透明遮罩，可"回到学习 / 再等 5 分钟 / 点遮罩关闭本轮" */}
-      {showAwayRecall && (
-        <div
-          className="away-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-label="离开提醒"
-          onClick={() => setAwayDismissed(true)}
-        >
-          <div className="away-overlay-card" onClick={(e) => e.stopPropagation()}>
-            <div className="away-overlay-title">已离开 {formatHms(awaySeconds)}</div>
-            <p className="away-overlay-text">回来继续这一段吗？休息久了容易掉出状态。</p>
-            <div className="away-overlay-actions">
-              <button className="primary-btn" onClick={() => void store.resume()} disabled={busy}>
-                <Play size={18} aria-hidden /> 回到学习
-              </button>
-              <button className="ghost-btn" onClick={() => setAwaySnoozedUntil(Date.now() + AWAY_SNOOZE_MS)}>
-                再等 5 分钟
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {awayRecallOverlay}
     </>
   );
 }

@@ -538,6 +538,48 @@ test.describe('离开渐进提醒', () => {
   });
 });
 
+test.describe('科目结束后的离开提醒', () => {
+  test('结束后同样进入已离开渐进提醒，30 分钟可开始下一段', async ({ page }) => {
+    // 用当前时间作为虚拟时钟起点（离开时长基于墙钟 Date.now，可被 page.clock fake）
+    await page.clock.install();
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数据结构' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1000);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.waitForTimeout(500);
+
+    // 结束卡内即显示"已离开"（与暂停中断同一套逻辑）
+    await expect(page.getByTestId('away-line')).toBeVisible();
+    await expect(page.getByTestId('away-line')).toContainText('已离开');
+    await expect(page.getByTestId('away-line')).toContainText('不计学习时长');
+
+    // L1：≥15 分钟 → 黄（urgent）
+    await page.clock.fastForward(15 * 60 * 1000);
+    await expect(page.getByTestId('away-line')).toHaveClass(/urgent/);
+
+    // L2：≥20 分钟 → 红（strong）
+    await page.clock.fastForward(5 * 60 * 1000);
+    await expect(page.getByTestId('away-line')).toHaveClass(/strong/);
+
+    // L3：≥30 分钟 → 全屏召回，"开始下一段"恢复学习
+    await page.clock.fastForward(10 * 60 * 1000);
+    const dialog = page.getByRole('dialog', { name: '离开提醒' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: '开始下一段' }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(page.getByText('· 进行中')).toBeVisible();
+    // 运行态不再显示离开行（提醒已复位）
+    await expect(page.getByTestId('away-line')).toHaveCount(0);
+
+    // 自我清理
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    const continueBtn = page.getByRole('button', { name: '好，继续' });
+    if ((await continueBtn.count()) > 0) await continueBtn.click();
+    await expect(page.getByTestId('idle-clock')).toBeVisible();
+  });
+});
+
 test.describe('计时防抖', () => {
   test('运行/恢复中前段+本段与累计恒一致（无抢秒 ±1 跳变）', async ({ page }) => {
     await doSetup(page);
