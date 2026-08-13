@@ -38,6 +38,74 @@ export function useMonotonicSeconds(anchor: SyncAnchor | null, tickMs = 1000): n
   return seconds;
 }
 
+/**
+ * 墙钟推进的秒数（基于 Date.now，而非 performance.now）：
+ * 供"离开时长"这类墙钟语义使用——便于测试（page.clock 可 fake Date.now），
+ * 且离开时长本身锚定服务端 paused_at（墙钟），语义一致。
+ * 核心计时（总累计/本段）仍走 performance.now 单调时钟，不受系统时间调整影响。
+ */
+export function useWallSeconds(anchor: SyncAnchor | null, tickMs = 1000): number {
+  const [seconds, setSeconds] = useState(0);
+  const anchorRef = useRef(anchor);
+  anchorRef.current = anchor;
+
+  useEffect(() => {
+    if (!anchor) {
+      setSeconds(0);
+      return;
+    }
+    // 锚定时刻的墙钟毫秒 = 服务端时间 −（单调 elapsed）
+    const anchorWallMs = anchor.serverNowMs - Math.round(performance.now() - anchor.anchorPerfMs);
+    const compute = () => {
+      const a = anchorRef.current;
+      if (!a) return 0;
+      const elapsed = a.running ? Math.max(0, (Date.now() - anchorWallMs) / 1000) : 0;
+      return Math.max(0, Math.floor(a.confirmedSeconds + elapsed));
+    };
+    setSeconds(compute());
+    const t = window.setInterval(() => setSeconds(compute()), tickMs);
+    return () => window.clearInterval(t);
+  }, [anchor, tickMs]);
+
+  return seconds;
+}
+
+/**
+ * 双锚点同源推进：总累计 + 本段 用【同一个 interval / 同一次 performance.now()】
+ * 计算，避免两个独立 interval 各自 Math.floor 的"抢秒"竞态（恢复瞬间加号两侧
+ * 抖动的主因）。前段 = floor(总浮点 - 本段浮点)，保证 prev + seg === total 恒成立。
+ */
+export function useDualMonotonic(
+  totalAnchor: SyncAnchor | null,
+  segAnchor: SyncAnchor | null,
+  tickMs = 1000,
+): { total: number; seg: number; prev: number } {
+  const [val, setVal] = useState({ total: 0, seg: 0, prev: 0 });
+  const refs = useRef({ totalAnchor, segAnchor });
+  refs.current = { totalAnchor, segAnchor };
+
+  useEffect(() => {
+    const compute = () => {
+      const { totalAnchor: t, segAnchor: s } = refs.current;
+      const now = performance.now();
+      const elapse = (a: SyncAnchor | null) =>
+        a && a.running ? Math.max(0, (now - a.anchorPerfMs) / 1000) : 0;
+      const totalF = t ? Math.max(0, t.confirmedSeconds + elapse(t)) : 0;
+      const segF = s ? Math.max(0, s.confirmedSeconds + elapse(s)) : 0;
+      const total = Math.floor(totalF);
+      const seg = Math.max(0, Math.floor(segF));
+      // 浮点差再取整：杜绝"两个 floor 相减"导致的 ±1 抢秒
+      const prev = Math.max(0, Math.floor(totalF - segF));
+      return { total, seg, prev };
+    };
+    setVal(compute());
+    const t = window.setInterval(() => setVal(compute()), tickMs);
+    return () => window.clearInterval(t);
+  }, [totalAnchor, segAnchor, tickMs]);
+
+  return val;
+}
+
 /** 北京时间 HH:MM 显示，锚定服务端时间。 */
 export function useBeijingTime(anchor: { serverNowMs: number; anchorPerfMs: number } | null): string {
   const [text, setText] = useState('--:--');
@@ -92,6 +160,20 @@ export function formatBeijingTime(isoOrMs: string | number): string {
     minute: '2-digit',
     hour12: false,
   }).format(d);
+}
+
+/* ---------- 离开（暂停）渐进提醒分级 ----------
+   调研采纳 Stretchly/Time Out 的三级形式（软提示 → 提示音+通知 → 全屏召回）；
+   阈值用用户的 15/20/30 分钟。L1 黄+呼吸、L2 红+单次轻音、L3 全屏召回。 */
+export const AWAY_SOFT_SEC = 15 * 60;
+export const AWAY_STRONG_SEC = 20 * 60;
+export const AWAY_RECALL_SEC = 30 * 60;
+
+export function awayLevelOf(awaySeconds: number): 0 | 1 | 2 | 3 {
+  if (awaySeconds >= AWAY_RECALL_SEC) return 3;
+  if (awaySeconds >= AWAY_STRONG_SEC) return 2;
+  if (awaySeconds >= AWAY_SOFT_SEC) return 1;
+  return 0;
 }
 
 export function shanghaiTodayLocal(): string {

@@ -378,15 +378,18 @@ button:focus-visible, input:focus-visible {
   font-family: var(--font-num);
   font-size: 72px; font-weight: 200;
   font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1; /* 双保险：等价 tnum 特征 */
+  font-synthesis: none; /* 禁用合成字重，防 fallback 字体宽度变化 */
   line-height: 1.1;
   min-height: 80px; /* 防布局跳动 */
   display: inline-flex; align-items: baseline; justify-content: center; gap: 2px;
   white-space: nowrap;
 }
-/* 前段累计（次级）+ 本段（主视觉）：前段淡色缩小，突出最近一段时长 */
-.timer-prev { font-family: var(--font-num); color: var(--text-3); font-size: 0.55em; font-weight: 300; }
-.timer-plus { font-family: var(--font-num); color: var(--text-3); font-size: 0.55em; }
-.timer-seg { font-family: var(--font-num); color: var(--text-1); font-weight: 500; }
+/* 前段累计（次级）+ 本段（主视觉）：前段淡色缩小，突出最近一段时长。
+   prev 恒 8ch → 加号左锚固定；seg 常态 5ch（MM:SS）恒定，仅 ≥1h 变 8 字符（低频演进） */
+.timer-prev { font-family: var(--font-num); color: var(--text-3); font-size: 0.55em; font-weight: 300; min-width: 8ch; text-align: right; font-synthesis: none; }
+.timer-plus { font-family: var(--font-num); color: var(--text-3); font-size: 0.55em; font-synthesis: none; }
+.timer-seg { font-family: var(--font-num); color: var(--text-1); font-weight: 500; min-width: 5ch; text-align: left; font-synthesis: none; }
 .clockface.is-paused .big-timer { color: var(--text-2); }
 .clockface.is-paused .timer-seg { color: var(--text-2); }
 .clockface.is-paused .timer-prev, .clockface.is-paused .timer-plus { color: var(--text-3); }
@@ -411,14 +414,73 @@ button:focus-visible, input:focus-visible {
 }
 .switch-btn:hover { border-color: var(--sc); }
 
-/* 离开（暂停）时长提示 */
+/* 离开（暂停）时长提示：常驻占位容器，暂停/恢复瞬间不引起布局位移 */
+.away-slot {
+  min-height: 34px;
+  display: flex; align-items: center; justify-content: center;
+}
 .away-line {
   display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center;
   padding: 6px 14px; border-radius: 999px;
   background: var(--surface-2); color: var(--text-1);
   font-family: var(--font-num); font-size: 14px; font-variant-numeric: tabular-nums;
+  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
 }
 .away-note { color: var(--text-3); font-size: 12px; }
+/* L1（≥15min）黄：强调但非警示 */
+.away-line.urgent {
+  background: color-mix(in srgb, var(--amber) 14%, var(--surface-1));
+  color: var(--amber);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 40%, transparent);
+}
+.away-line.urgent .away-note { color: color-mix(in srgb, var(--amber) 70%, var(--text-3)); }
+/* L2（≥20min）红：警示 */
+.away-line.strong {
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface-1));
+  color: var(--danger);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.away-line.strong .away-note { color: color-mix(in srgb, var(--danger) 70%, var(--text-3)); }
+
+/* 分级脉动：L1 缓呼吸，L2 快呼吸（尊重全局 animations-off / reduced-motion 归零） */
+@keyframes pill-breathe {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--amber) 0%, transparent); }
+  50% { transform: scale(1.035); box-shadow: 0 0 0 6px color-mix(in srgb, var(--amber) 12%, transparent); }
+}
+.clockface[data-away-level='1'] .subject-pill {
+  animation: pill-breathe 3.2s ease-in-out infinite;
+  will-change: transform;
+}
+.clockface[data-away-level='2'] .subject-pill,
+.clockface[data-away-level='3'] .subject-pill {
+  animation: pill-breathe 1.8s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* L3 全屏召回：半透明遮罩 + 毛玻璃卡片，渐入（非瞬切） */
+.away-overlay {
+  position: fixed; inset: 0; z-index: 90;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  backdrop-filter: blur(6px);
+  animation: overlay-in 0.28s ease-out both;
+}
+.away-overlay-card {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 32px 36px; max-width: 360px; width: 100%;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: var(--radius-xl); box-shadow: var(--shadow);
+  text-align: center;
+}
+.away-overlay-title {
+  font-family: var(--font-num); font-size: 30px; font-weight: 300;
+  font-variant-numeric: tabular-nums; color: var(--text-1);
+}
+.away-overlay-text { color: var(--text-2); font-size: 14px; line-height: 1.5; }
+.away-overlay-actions { display: flex; gap: 10px; margin-top: 8px; }
+.away-overlay-actions .primary-btn { box-shadow: var(--shadow-sm); }
+@keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
 
 /* 结束反馈 */
 .finish-card {

@@ -492,3 +492,82 @@ test.describe('全屏时间轴开关', () => {
     await page.waitForTimeout(400);
   });
 });
+
+test.describe('离开渐进提醒', () => {
+  test('15/20/30 分钟依次黄/红/全屏召回，可推迟 5 分钟', async ({ page }) => {
+    // 用当前时间作为虚拟时钟起点（离开时长基于墙钟 Date.now，可被 page.clock fake）
+    await page.clock.install();
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数据结构' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1000);
+    await page.getByRole('button', { name: '暂停计时' }).click();
+    await expect(page.getByTestId('away-line')).toBeVisible();
+
+    // L1：≥15 分钟 → 黄（urgent）
+    await page.clock.fastForward(15 * 60 * 1000);
+    await expect(page.getByTestId('away-line')).toHaveClass(/urgent/);
+
+    // L2：≥20 分钟 → 红（strong）
+    await page.clock.fastForward(5 * 60 * 1000);
+    await expect(page.getByTestId('away-line')).toHaveClass(/strong/);
+
+    // L3：≥30 分钟 → 全屏召回
+    await page.clock.fastForward(10 * 60 * 1000);
+    const dialog = page.getByRole('dialog', { name: '离开提醒' });
+    await expect(dialog).toBeVisible();
+
+    // 推迟 5 分钟：立即关闭；4 分钟后不弹，6 分钟后重新弹出
+    await dialog.getByRole('button', { name: '再等 5 分钟' }).click();
+    await expect(dialog).not.toBeVisible();
+    await page.clock.fastForward(4 * 60 * 1000);
+    await expect(dialog).not.toBeVisible();
+    await page.clock.fastForward(2 * 60 * 1000);
+    await expect(dialog).toBeVisible();
+
+    // 回到学习：overlay 关闭并恢复运行
+    await dialog.getByRole('button', { name: '回到学习' }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(page.getByText('· 进行中')).toBeVisible();
+
+    // 自我清理：结束会话回到空闲态（避免串行污染后续依赖空闲态的测试）
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    const continueBtn = page.getByRole('button', { name: '好，继续' });
+    if ((await continueBtn.count()) > 0) await continueBtn.click();
+    await expect(page.getByTestId('idle-clock')).toBeVisible();
+  });
+});
+
+test.describe('计时防抖', () => {
+  test('运行/恢复中前段+本段与累计恒一致（无抢秒 ±1 跳变）', async ({ page }) => {
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数据结构' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(2000);
+    // 暂停 → 恢复（正是此前抖动高发的状态切换点）
+    await page.getByRole('button', { name: '暂停计时' }).click();
+    await page.waitForTimeout(600);
+    await page.getByRole('button', { name: '继续计时' }).click();
+
+    // 连续采样：任意时刻 prev+seg 与累计的偏差 ≤1s（floor 损失），杜绝 prev 多 1 秒又跳回
+    // 注：flex item 的 innerText 会插入换行，用 textContent 解析
+    for (let i = 0; i < 8; i++) {
+      const label = await page.getByTestId('timer-seconds').getAttribute('aria-label');
+      const totalM = label!.match(/累计 (\d{2}):(\d{2}):(\d{2})/);
+      const total = Number(totalM![1]) * 3600 + Number(totalM![2]) * 60 + Number(totalM![3]);
+      const text = await page.getByTestId('timer-seconds').evaluate((el) => el.textContent ?? '');
+      const m = text.match(/(\d{2}):(\d{2}):(\d{2})\+(\d{2}):(\d{2})/);
+      expect(m, `text=${JSON.stringify(text)}`).not.toBeNull();
+      const prevS = Number(m![1]) * 3600 + Number(m![2]) * 60 + Number(m![3]);
+      const segS = Number(m![4]) * 60 + Number(m![5]);
+      expect(Math.abs(total - (prevS + segS))).toBeLessThanOrEqual(1);
+      await page.waitForTimeout(150);
+    }
+
+    // 自我清理：结束会话回到空闲态
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    const continueBtn = page.getByRole('button', { name: '好，继续' });
+    if ((await continueBtn.count()) > 0) await continueBtn.click();
+    await expect(page.getByTestId('idle-clock')).toBeVisible();
+  });
+});
