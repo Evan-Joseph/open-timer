@@ -362,13 +362,13 @@ test.describe('离开（暂停）时长显示', () => {
 
     await page.getByRole('button', { name: '暂停计时' }).click();
     await expect(page.getByTestId('away-line')).toBeVisible();
-    await expect(page.getByTestId('away-line')).toContainText('已离开');
-    await expect(page.getByTestId('away-line')).toContainText('不计学习时长');
+    await expect(page.getByTestId('away-line')).toContainText('休息中');
+    await expect(page.getByTestId('away-line')).toContainText('建议');
 
     // 离开时长在增长（等待 1.5s 后应至少为 00:00:01）
     await page.waitForTimeout(1500);
     const text = await page.getByTestId('away-line').innerText();
-    expect(text).toMatch(/已离开 00:00:0[1-9]/);
+    expect(text).toMatch(/已休息 00:00:0[1-9]/);
 
     await page.getByRole('button', { name: '继续计时' }).click();
     await expect(page.getByTestId('away-line')).toHaveCount(0);
@@ -494,7 +494,7 @@ test.describe('全屏时间轴开关', () => {
 });
 
 test.describe('离开渐进提醒', () => {
-  test('15/20/30 分钟依次黄/红/全屏召回，可推迟 5 分钟', async ({ page }) => {
+  test('按上一段专注时长计算休息窗口，并在临近/到期/超时提醒', async ({ page }) => {
     // 用当前时间作为虚拟时钟起点（离开时长基于墙钟 Date.now，可被 page.clock fake）
     await page.clock.install();
     await doSetup(page);
@@ -504,16 +504,12 @@ test.describe('离开渐进提醒', () => {
     await page.getByRole('button', { name: '暂停计时' }).click();
     await expect(page.getByTestId('away-line')).toBeVisible();
 
-    // L1：≥15 分钟 → 黄（urgent）
-    await page.clock.fastForward(15 * 60 * 1000);
-    await expect(page.getByTestId('away-line')).toHaveClass(/urgent/);
-
-    // L2：≥20 分钟 → 红（strong）
-    await page.clock.fastForward(5 * 60 * 1000);
+    // 约 1 秒专注按最小 5 分钟休息；达到建议休息时长 → 红（strong）
+    await page.clock.fastForward(6 * 60 * 1000);
     await expect(page.getByTestId('away-line')).toHaveClass(/strong/);
 
-    // L3：≥30 分钟 → 全屏召回
-    await page.clock.fastForward(10 * 60 * 1000);
+    // 150% 后 → 全屏召回
+    await page.clock.fastForward(3 * 60 * 1000);
     const dialog = page.getByRole('dialog', { name: '离开提醒' });
     await expect(dialog).toBeVisible();
 
@@ -549,21 +545,17 @@ test.describe('科目结束后的离开提醒', () => {
     await page.getByRole('button', { name: '结束并保存' }).click();
     await page.waitForTimeout(500);
 
-    // 结束卡内即显示"已离开"（与暂停中断同一套逻辑）
+    // 结束卡内显示可解释的休息阶段与建议时长
     await expect(page.getByTestId('away-line')).toBeVisible();
-    await expect(page.getByTestId('away-line')).toContainText('已离开');
-    await expect(page.getByTestId('away-line')).toContainText('不计学习时长');
+    await expect(page.getByTestId('away-line')).toContainText('休息中');
+    await expect(page.getByTestId('away-line')).toContainText('建议 5 分钟');
 
-    // L1：≥15 分钟 → 黄（urgent）
-    await page.clock.fastForward(15 * 60 * 1000);
-    await expect(page.getByTestId('away-line')).toHaveClass(/urgent/);
-
-    // L2：≥20 分钟 → 红（strong）
-    await page.clock.fastForward(5 * 60 * 1000);
+    // 约 1 秒专注按最小 5 分钟休息；达到建议休息时长 → 红（strong）
+    await page.clock.fastForward(6 * 60 * 1000);
     await expect(page.getByTestId('away-line')).toHaveClass(/strong/);
 
-    // L3：≥30 分钟 → 全屏召回，"开始下一段"恢复学习
-    await page.clock.fastForward(10 * 60 * 1000);
+    // 150% 后 → 全屏召回，"开始下一段"恢复学习
+    await page.clock.fastForward(3 * 60 * 1000);
     const dialog = page.getByRole('dialog', { name: '离开提醒' });
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: '开始下一段' }).click();

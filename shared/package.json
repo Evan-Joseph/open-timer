@@ -5,6 +5,7 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
+    "build": "tsc --noEmit",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

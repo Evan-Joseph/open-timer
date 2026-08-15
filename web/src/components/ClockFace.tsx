@@ -5,7 +5,7 @@ import { motion } from 'motion/react';
 import { Pause, Play, Square, Flag, Undo2 } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
 import type { SyncAnchor } from '../lib/clock.js';
-import { useMonotonicSeconds, useDualMonotonic, useWallSeconds, useBeijingTime, formatHms, formatHmsShort, formatDurationZh, formatBeijingTime, awayLevelOf } from '../lib/clock.js';
+import { useMonotonicSeconds, useDualMonotonic, useWallSeconds, useBeijingTime, formatHms, formatHmsShort, formatDurationZh, formatBeijingTime, restPlanForFocus, restStageOf, restStageLabel } from '../lib/clock.js';
 import { useSettings } from '../lib/settings.js';
 import { playFinishChime, playAwayReminder } from '../lib/sound.js';
 
@@ -35,7 +35,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const beijing = useBeijingTime(anchor ? { serverNowMs: anchor.serverNowMs, anchorPerfMs: anchor.anchorPerfMs } : null);
 
   /* ---------- 结束反馈 state（需先于离开提醒定义，两者耦合） ---------- */
-  const [lastStopped, setLastStopped] = useState<{ sessionId: string; subjectId: string; seconds: number } | null>(null);
+  const [lastStopped, setLastStopped] = useState<{ sessionId: string; subjectId: string; seconds: number; focusSeconds: number } | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
 
   /* ---------- 离开（暂停 / 科目结束后）渐进提醒 ---------- */
@@ -49,7 +49,11 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   /** 离开计时锚点：暂停用服务端 paused_at；结束态用本组件在 stop 时记录的墙钟锚点 */
   const awayAnchor = store.awayAnchor ?? awayAnchorOverride;
   const awaySeconds = useWallSeconds(awayAnchor, 1000);
-  const awayLevel = awayLevelOf(awaySeconds);
+  // 休息时长随刚结束的专注段计算：1/5，5-20 分钟封顶；暂停和结束都使用同一规则。
+  const focusForRest = paused ? (active?.current_segment_active_seconds ?? 0) : (lastStopped?.focusSeconds ?? 0);
+  const restPlan = restPlanForFocus(focusForRest);
+  const restStage = restStageOf(awaySeconds, restPlan);
+  const awayLevel = restStage === 'overdue' ? 3 : restStage === 'due' ? 2 : restStage === 'due-soon' ? 1 : 0;
   // 离开状态复位：回到学习/开始新段后，下一轮离开重新开始提醒
   useEffect(() => {
     if (!awayActive) {
@@ -59,14 +63,14 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       setAwayAnchorOverride(null);
     }
   }, [awayActive]);
-  // L2：到达 20 分钟时单次轻音（浏览器需已交互，计时本身需要交互才能开始，满足 autoplay 前提）
+  // 达到建议休息时长后单次轻音；浏览器需已交互，计时本身已满足 autoplay 前提。
   useEffect(() => {
     if (awayLevel >= 2 && !awayChimePlayedRef.current) {
       awayChimePlayedRef.current = true;
       playAwayReminder();
     }
   }, [awayLevel]);
-  // L3：到达 30 分钟且未推迟/未关闭 → 全屏召回
+  // 休息达到建议时长的 150% 且未推迟/未关闭 → 全屏召回
   const showAwayRecall = awayLevel >= 3 && !awayDismissed && Date.now() >= awaySnoozedUntil;
   /** 结束态"开始下一段"：延续刚才的科目 */
   const handleStartNext = () => {
@@ -81,7 +85,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       <div className="away-overlay" role="dialog" aria-modal="true" aria-label="离开提醒" onClick={() => setAwayDismissed(true)}>
         <div className="away-overlay-card" onClick={(e) => e.stopPropagation()}>
           <div className="away-overlay-title">已离开 {formatHms(awaySeconds)}</div>
-          <p className="away-overlay-text">回来继续下一段吗？休息久了容易掉出状态。</p>
+          <p className="away-overlay-text">建议休息 {formatDurationZh(restPlan.recommendedSeconds)}。现在开始下一段吗？</p>
           <div className="away-overlay-actions">
             <button className="primary-btn" onClick={handleStartNext} disabled={busy}>
               <Flag size={18} aria-hidden /> 开始下一段
@@ -94,7 +98,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       <div className="away-overlay" role="dialog" aria-modal="true" aria-label="离开提醒" onClick={() => setAwayDismissed(true)}>
         <div className="away-overlay-card" onClick={(e) => e.stopPropagation()}>
           <div className="away-overlay-title">已离开 {formatHms(awaySeconds)}</div>
-          <p className="away-overlay-text">回来继续这一段吗？休息久了容易掉出状态。</p>
+          <p className="away-overlay-text">建议休息 {formatDurationZh(restPlan.recommendedSeconds)}。现在回到这一段吗？</p>
           <div className="away-overlay-actions">
             <button className="primary-btn" onClick={() => void store.resume()} disabled={busy}>
               <Play size={18} aria-hidden /> 回到学习
@@ -144,7 +148,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const subjectOf = (id: string | null | undefined) => subjects.find((s) => s.subject_id === id);
 
   const handleStop = async () => {
-    const snapshot = active ? { sessionId: active.session_id, subjectId: active.subject_id, seconds } : null;
+    const snapshot = active ? { sessionId: active.session_id, subjectId: active.subject_id, seconds, focusSeconds: segmentSecs } : null;
     if (snapshot) {
       if (settings.finishSound) playFinishChime();
       setLastStopped(snapshot); // 立即呈现结束反馈（store.stop 内部乐观清空活动会话）
@@ -178,8 +182,8 @@ export default function ClockFace({ store }: { store: ClockStore }) {
               className={`away-line${awayLevel >= 2 ? ' strong' : awayLevel >= 1 ? ' urgent' : ''}`}
               data-testid="away-line"
             >
-              已离开 {formatHms(awaySeconds)}
-              <span className="away-note"> · 开始下一段前不计学习时长</span>
+              {restStageLabel(restStage)} · 已休息 {formatHms(awaySeconds)}
+              <span className="away-note"> · 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
             </div>
           </div>
           <input
@@ -254,8 +258,8 @@ export default function ClockFace({ store }: { store: ClockStore }) {
               className={`away-line${awayLevel >= 2 ? ' strong' : awayLevel >= 1 ? ' urgent' : ''}`}
               data-testid="away-line"
             >
-              已离开 {formatHms(awaySeconds)}
-              <span className="away-note"> · 不计学习时长</span>
+              {restStageLabel(restStage)} · 已休息 {formatHms(awaySeconds)}
+              <span className="away-note"> · 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
             </div>
           )}
         </div>

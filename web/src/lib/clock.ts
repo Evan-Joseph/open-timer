@@ -162,19 +162,8 @@ export function formatBeijingTime(isoOrMs: string | number): string {
   }).format(d);
 }
 
-/* ---------- 离开（暂停）渐进提醒分级 ----------
-   调研采纳 Stretchly/Time Out 的三级形式（软提示 → 提示音+通知 → 全屏召回）；
-   阈值用用户的 15/20/30 分钟。L1 黄+呼吸、L2 红+单次轻音、L3 全屏召回。 */
-export const AWAY_SOFT_SEC = 15 * 60;
-export const AWAY_STRONG_SEC = 20 * 60;
-export const AWAY_RECALL_SEC = 30 * 60;
-
-export function awayLevelOf(awaySeconds: number): 0 | 1 | 2 | 3 {
-  if (awaySeconds >= AWAY_RECALL_SEC) return 3;
-  if (awaySeconds >= AWAY_STRONG_SEC) return 2;
-  if (awaySeconds >= AWAY_SOFT_SEC) return 1;
-  return 0;
-}
+export { restPlanForFocus, restStageOf, restStageLabel } from '@clock/shared';
+export type { RestPlan, RestStage } from '@clock/shared';
 
 export function shanghaiTodayLocal(): string {
   return new Intl.DateTimeFormat('en-CA', {
