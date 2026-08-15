@@ -45,6 +45,7 @@
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.06);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
   --material: rgba(255, 255, 255, 0.72);
+  --popover-surface: rgba(255, 255, 255, 0.96);
 
   /* 圆角档位：控件 ≤ 卡片 ≤ 浮层 */
   --radius-sm: 6px;
@@ -82,6 +83,7 @@
   --amber: #fbbf24;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.3);
   --material: rgba(28, 28, 30, 0.72);
+  --popover-surface: rgba(36, 36, 38, 0.96);
 
   --c-amber: #fbbf24;      --c-amber-bg: rgba(180, 83, 9, 0.28);
   --c-teal: #2dd4bf;       --c-teal-bg: rgba(15, 118, 110, 0.3);
@@ -457,6 +459,25 @@ button:focus-visible, input:focus-visible {
   animation: pill-breathe 1.8s ease-in-out infinite;
   will-change: transform;
 }
+.clockface[data-away-level='2'],
+.clockface[data-away-level='3'] {
+  isolation: isolate;
+}
+.clockface[data-away-level='2']::before,
+.clockface[data-away-level='3']::before {
+  content: ''; position: absolute; inset: -28px -44px; z-index: -1;
+  border-radius: 28px; pointer-events: none;
+  background: color-mix(in srgb, var(--amber) 11%, transparent);
+  animation: rest-due-breathe 3.2s ease-in-out infinite;
+}
+.clockface[data-away-level='3']::before {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  animation-duration: 1.8s;
+}
+@keyframes rest-due-breathe {
+  0%, 100% { opacity: 0.45; transform: scale(0.985); }
+  50% { opacity: 1; transform: scale(1.015); }
+}
 
 /* L3 全屏召回：半透明遮罩 + 毛玻璃卡片，渐入（非瞬切） */
 .away-overlay {
@@ -648,8 +669,11 @@ button:focus-visible, input:focus-visible {
 /* 会话 popover（固定宽 + 头部 X 关闭 + 双按钮动作区） */
 .seg-popover {
   position: absolute; bottom: calc(100% + 4px); z-index: 20;
-  width: 320px; max-width: calc(100vw - 24px);
-  padding: 14px 16px; border-radius: var(--radius-lg);
+  width: 440px; max-width: calc(100vw - 24px);
+  padding: 18px; border-radius: var(--radius-xl);
+  background: var(--popover-surface);
+  backdrop-filter: blur(28px) saturate(1.35);
+  -webkit-backdrop-filter: blur(28px) saturate(1.35);
   border: 1px solid var(--border); box-shadow: var(--shadow);
   display: flex; flex-direction: column; gap: 10px;
   font-size: 13px;
@@ -685,8 +709,8 @@ button:focus-visible, input:focus-visible {
   outline: none; border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
-.popover-actions { display: flex; gap: 8px; }
-.popover-save { flex: 1; }
+.popover-actions { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; }
+.popover-actions button { min-width: 0; white-space: nowrap; }
 
 /* 今日概览 + 图例 */
 .today-overview {
@@ -779,13 +803,16 @@ button:focus-visible, input:focus-visible {
    ========================================================================== */
 
 .dialog-overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.32); z-index: 40;
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.44); z-index: 40;
 }
 .dialog-content {
   position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
   z-index: 50; width: min(400px, calc(100vw - 32px));
   max-height: calc(100vh - 48px); overflow-y: auto;
   padding: 22px; border-radius: var(--radius-xl);
+  background: var(--popover-surface);
+  backdrop-filter: blur(32px) saturate(1.3);
+  -webkit-backdrop-filter: blur(32px) saturate(1.3);
   border: 1px solid var(--border); box-shadow: var(--shadow);
   display: flex; flex-direction: column; gap: 16px;
 }
@@ -828,9 +855,10 @@ button:focus-visible, input:focus-visible {
   background: color-mix(in srgb, var(--surface-2) 88%, white 12%);
 }
 .ambient-volume {
-  display: flex; align-items: center; gap: 10px;
+  display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: center; gap: 10px;
   font-size: 13px; color: var(--text-2);
 }
+.ambient-volume output { color: var(--text-1); font-variant-numeric: tabular-nums; }
 .ambient-volume input[type='range'] {
   flex: 1; accent-color: var(--accent); max-width: 220px;
 }
@@ -935,6 +963,10 @@ button:active:not(:disabled) { transform: scale(0.98); }
   .history-strip-head { display: grid; gap: 2px; }
   .pin-pad { grid-template-columns: repeat(3, 64px); gap: 12px; }
   .pin-key { width: 64px; height: 64px; font-size: 24px; }
+  .seg-popover { padding: 16px; }
+  .popover-edit-grid { grid-template-columns: 1fr; }
+  .popover-actions { grid-template-columns: 1fr 1fr; }
+  .popover-actions .danger-btn { grid-column: 1 / -1; }
 }
 
 /* ==========================================================================

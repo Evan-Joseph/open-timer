@@ -593,11 +593,11 @@ export default function Timeline({ store }: { store: ClockStore }) {
 
       {popover && (
         <div
-          className="seg-popover material"
+          className="seg-popover"
           role="dialog"
           aria-label="会话详情"
           data-testid="seg-popover"
-          style={{ left: `clamp(8px, ${popover.containerX}px, calc(100% - 344px))` }}
+          style={{ left: `clamp(8px, ${popover.containerX}px, calc(100% - min(464px, calc(100vw - 24px))))` }}
         >
           <div className="popover-head">
             <span className="popover-subject" data-color={popover.row.colorId}>
@@ -637,18 +637,18 @@ export default function Timeline({ store }: { store: ClockStore }) {
               </label>
               <label className="popover-field">
                 <span>备注</span>
-              <input
-                className="popover-note-input"
-                placeholder="备注（可选）"
-                value={noteDraft}
-                maxLength={200}
-                onChange={(e) => setNoteDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void handleSaveNote();
-                }}
-                aria-label="编辑备注"
-                data-testid="popover-note-input"
-              />
+                <input
+                  className="popover-note-input"
+                  placeholder="这次想记下什么？（可选）"
+                  value={noteDraft}
+                  maxLength={200}
+                  onChange={(e) => setNoteDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void handleSaveNote();
+                  }}
+                  aria-label="编辑备注"
+                  data-testid="popover-note-input"
+                />
               </label>
             </div>
           )}

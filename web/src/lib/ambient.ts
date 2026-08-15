@@ -31,7 +31,7 @@ class AmbientEngine {
   private tickScheduler: number | null = null;
   private nextTickTime = 0;
   private current: AmbientKind = 'none';
-  private volume = 0.35;
+  private volume = 0.45;
   private running = false;
 
   private ensureCtx(): AudioContext | null {

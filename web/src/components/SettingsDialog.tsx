@@ -20,7 +20,7 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content material" aria-describedby={undefined}>
+        <Dialog.Content className="dialog-content" aria-describedby={undefined}>
           <Dialog.Title className="dialog-title">设置</Dialog.Title>
 
           <div className="setting-row">
@@ -80,7 +80,7 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
               ))}
             </div>
             <label className="ambient-volume">
-              音量
+              <span>音量 <output>{Math.round(settings.ambientVolume * 100)}%</output></span>
               <input
                 type="range"
                 min={0}
@@ -91,7 +91,7 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
               />
             </label>
             <p className="setting-hint">
-              全部由浏览器实时合成，无外部资源；切换标签页后声音持续播放，不打断沉浸。刷新后任意点击一下页面，声音会自动恢复（浏览器自动播放限制）。
+              全部由浏览器实时合成。新用户默认 45%，实际响度仍取决于系统、浏览器和耳机音量；建议先低后高调整。刷新后需点击页面恢复声音（浏览器自动播放限制）。
             </p>
           </div>
 

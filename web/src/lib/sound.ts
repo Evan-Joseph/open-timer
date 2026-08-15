@@ -35,7 +35,7 @@ export function playFinishChime(volume = 0.12): void {
 }
 
 /** 离开提醒音：单枚上行三连音（约 1.2s），比结束音更柔和、突出"召唤"感。 */
-export function playAwayReminder(volume = 0.1): void {
+export function playAwayReminder(volume = 0.14): void {
   const ac = ensureCtx();
   if (!ac) return;
   const t0 = ac.currentTime;

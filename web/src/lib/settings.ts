@@ -17,7 +17,7 @@ export interface LocalSettings {
 const DEFAULTS: LocalSettings = {
   finishSound: false,
   ambientKind: 'none',
-  ambientVolume: 0.35,
+  ambientVolume: 0.45,
 };
 
 function load(): LocalSettings {

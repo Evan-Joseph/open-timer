@@ -65,6 +65,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const [awaySnoozedUntil, setAwaySnoozedUntil] = useState(0); // 全屏召回推迟到的时间戳
   const [awayDismissed, setAwayDismissed] = useState(false);   // 本轮离开已手动关闭全屏召回
   const awayChimePlayedRef = useRef(false);                   // L2 提示音只播一次
+  const overdueChimePlayedRef = useRef(false);                // L3 逾期升级音只播一次
   const [awayAnchorOverride, setAwayAnchorOverride] = useState<SyncAnchor | null>(null); // 结束态离开锚点
   const paused = active?.status === 'paused';
   /** 离开中 = 暂停中断 或 科目结束后（本质都是"人不在学习"） */
@@ -83,6 +84,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   useEffect(() => {
     if (!awayActive) {
       awayChimePlayedRef.current = false;
+      overdueChimePlayedRef.current = false;
       setAwayDismissed(false);
       setAwaySnoozedUntil(0);
       setAwayAnchorOverride(null);
@@ -93,6 +95,13 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     if (awayLevel >= 2 && !awayChimePlayedRef.current) {
       awayChimePlayedRef.current = true;
       playAwayReminder();
+    }
+  }, [awayLevel]);
+  // 进入逾期后再播放一次更明确的升级提示，避免持续循环声音造成惊扰。
+  useEffect(() => {
+    if (awayLevel >= 3 && !overdueChimePlayedRef.current) {
+      overdueChimePlayedRef.current = true;
+      playAwayReminder(0.2);
     }
   }, [awayLevel]);
   // 休息达到建议时长的 150% 且未推迟/未关闭 → 全屏召回
