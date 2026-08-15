@@ -298,7 +298,8 @@ button:focus-visible, input:focus-visible {
 .main {
   flex: 1;
   display: flex; align-items: center; justify-content: center;
-  padding: 32px 16px;
+  padding: clamp(28px, 6vh, 72px) 16px;
+  transition: transform 0.25s ease, padding 0.25s ease;
 }
 
 /* ==========================================================================
@@ -316,7 +317,7 @@ button:focus-visible, input:focus-visible {
 /* 空闲态 */
 .idle-clock {
   font-family: var(--font-num);
-  font-size: 56px; font-weight: 300;
+  font-size: clamp(56px, 8vw, 96px); font-weight: 300;
   font-variant-numeric: tabular-nums;
   color: var(--text-1);
   line-height: 1.15; /* 收紧行高，替代原先日期处的负 margin hack */
@@ -376,7 +377,7 @@ button:focus-visible, input:focus-visible {
 
 .big-timer {
   font-family: var(--font-num);
-  font-size: 72px; font-weight: 200;
+  font-size: clamp(64px, 10vw, 112px); font-weight: 200;
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1; /* 双保险：等价 tnum 特征 */
   font-synthesis: none; /* 禁用合成字重，防 fallback 字体宽度变化 */
@@ -501,6 +502,18 @@ button:focus-visible, input:focus-visible {
 .finish-line { color: var(--text-2); font-size: 14px; margin: 0; }
 .finish-actions { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
 
+.popover-edit-grid { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 10px; }
+.popover-field { display: grid; gap: 5px; color: var(--text-2); font-size: 12px; }
+.popover-time-input,
+.popover-note-input {
+  min-width: 0; height: 40px; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-2); color: var(--text-1); font: inherit;
+}
+.popover-time-input { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.popover-time-input:focus,
+.popover-note-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 /* ==========================================================================
 /* ==========================================================================
    时间轴
@@ -518,6 +531,15 @@ button:focus-visible, input:focus-visible {
   min-height: 24px;
 }
 .timeline-title { font-size: 14px; font-weight: 600; margin: 0; }
+.history-strip { max-width: 960px; margin: 0 auto 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-2); }
+.history-strip-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; color: var(--text-2); font-size: 12px; }
+.history-strip-head strong { color: var(--text-1); font-size: 13px; }
+.history-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+.history-day { min-height: 58px; display: grid; gap: 1px; align-content: center; text-align: left; padding: 7px 8px; border-radius: var(--radius); background: var(--surface-1); border: 1px solid transparent; }
+.history-day:hover, .history-day:focus-visible { border-color: var(--accent); }
+.history-day span, .history-day small { color: var(--text-2); font-size: 11px; }
+.history-day strong { font-family: var(--font-num); font-size: 13px; font-variant-numeric: tabular-nums; }
+.history-empty { color: var(--text-2); padding: 8px 0 2px; font-size: 12px; }
 .timeline-total { color: var(--text-3); font-weight: 400; }
 .timeline-nav { display: flex; align-items: center; gap: 4px; }
 .now-btn { display: inline-flex; align-items: center; gap: 4px; }
@@ -835,9 +857,8 @@ button:focus-visible, input:focus-visible {
    ========================================================================== */
 
 .app.fullscreen-mode .topbar { display: none; }
-.app.fullscreen-mode .main { padding: 0 16px; }
-.app.fullscreen-mode .big-timer { font-size: min(18vw, 160px); min-height: 1.2em; }
-.app.fullscreen-mode .idle-clock { font-size: min(14vw, 120px); }
+.app.fullscreen-mode .main { padding: clamp(28px, 6vh, 72px) 16px; }
+.app.fullscreen-mode .big-timer { min-height: 1.2em; }
 .app.fullscreen-mode .subject-pill.large { font-size: 22px; padding: 10px 26px; }
 /* 全屏空闲态：日期/胶囊/提示随主视觉放大，保持层级比例 */
 .app.fullscreen-mode .idle-date { font-size: 22px; }
@@ -861,6 +882,7 @@ button:focus-visible, input:focus-visible {
 
 /* 时间轴展开时控制条移到顶部：抽屉占满底部 45vh，避免按钮遮挡时间轴内容 */
 .app.fullscreen-mode.fs-timeline-open .fs-controls { bottom: auto; top: 16px; }
+.app.fullscreen-mode.fs-timeline-open .main { transform: translateY(-10vh); }
 
 /* 全屏时间轴抽屉：底部滑出，收起时隐藏（visibility 同步，保证可访问性树一致） */
 .timeline-drawer {
@@ -909,6 +931,8 @@ button:active:not(:disabled) { transform: scale(0.98); }
   .big-timer { font-size: 56px; min-height: 62px; }
   .idle-clock { font-size: 44px; }
   .main { padding: 24px 16px; }
+  .history-days { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .history-strip-head { display: grid; gap: 2px; }
   .pin-pad { grid-template-columns: repeat(3, 64px); gap: 12px; }
   .pin-key { width: 64px; height: 64px; font-size: 24px; }
 }

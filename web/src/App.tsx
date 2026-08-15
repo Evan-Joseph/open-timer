@@ -6,7 +6,7 @@ import AuthGate from './components/AuthGate.js';
 import ClockFace from './components/ClockFace.js';
 import Timeline from './components/Timeline.js';
 import SettingsDialog from './components/SettingsDialog.js';
-import { Settings, Maximize2, GanttChart, List } from 'lucide-react';
+import { Settings, GanttChart, List } from 'lucide-react';
 
 export default function App() {
   const store = useClockStore();
@@ -76,20 +76,20 @@ export default function App() {
     };
   }, [settings.ambientKind]);
 
-  // 全屏状态跟踪
+  // 自动识别 DOM Fullscreen 与浏览器自身全屏（如 F11），不再由应用主动接管全屏。
   useEffect(() => {
-    const onFs = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    const onFs = () => {
+      const browserFullscreen = window.matchMedia('(display-mode: fullscreen)').matches;
+      setIsFullscreen(Boolean(document.fullscreenElement) || browserFullscreen);
+    };
+    onFs();
     document.addEventListener('fullscreenchange', onFs);
-    return () => document.removeEventListener('fullscreenchange', onFs);
+    window.addEventListener('resize', onFs);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFs);
+      window.removeEventListener('resize', onFs);
+    };
   }, []);
-
-  const toggleFullscreen = () => {
-    if (document.fullscreenElement) {
-      void document.exitFullscreen();
-    } else {
-      void document.documentElement.requestFullscreen().catch(() => {});
-    }
-  };
 
   // 退出全屏时恢复时间轴显示状态
   useEffect(() => {
@@ -114,9 +114,6 @@ export default function App() {
         <span className="topbar-title">沉浸时钟</span>
         <span className={`topbar-status-dot ${store.state?.active_session?.status === 'running' ? 'live' : ''}`} aria-hidden />
         <span className="topbar-date">{store.todayDate} · 北京时间</span>
-        <button className="icon-btn" aria-label="全屏沉浸模式" title="全屏" onClick={toggleFullscreen}>
-          <Maximize2 size={16} />
-        </button>
         <button className="icon-btn" aria-label="设置" onClick={() => setSettingsOpen(true)}>
           <Settings size={20} />
         </button>
@@ -149,7 +146,7 @@ export default function App() {
             {fsShowTimeline ? <List size={15} /> : <GanttChart size={15} />}
             <span>{fsShowTimeline ? '收起时间轴' : '展开时间轴'}</span>
           </button>
-          <span className="fs-hint">按 Esc 退出全屏</span>
+          <span className="fs-hint">全屏显示</span>
         </div>
       )}
 

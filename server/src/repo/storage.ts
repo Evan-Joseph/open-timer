@@ -56,6 +56,8 @@ export interface Storage {
   setSessionNote(sessionId: string, note: string, nowMs: number): Promise<void>;
   /** 手动改时（retime）：重算 activeSeconds 并记录 adjustment。 */
   applyRetime(sessionId: string, deltaSeconds: number, reason: string | null, nowMs: number): Promise<void>;
+  /** 调整已结束会话的起点，同时修正首段、净时长并保留审计。 */
+  adjustSessionStart(sessionId: string, startedAtMs: number, reason: string | null, nowMs: number): Promise<void>;
 
   /* ---- 查询 ---- */
   sessionsOverlapping(startMs: number, endMs: number): Promise<SessionRow[]>;

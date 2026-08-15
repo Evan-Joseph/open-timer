@@ -422,6 +422,25 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(sessionResponse((await storage.getSession(id))!));
   });
 
+  const AdjustStartSchema = z.object({ started_at: z.iso.datetime({ offset: true }), reason: NoteSchema.nullable() });
+
+  app.post('/api/v1/sessions/:id/adjust-start', requireOwner(storage), async (c) => {
+    const id = paramId(c);
+    if (!id) return c.json({ error: 'INVALID_ID' }, 400);
+    const body = AdjustStartSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: 'INVALID_BODY' }, 400);
+    const session = await storage.getSession(id);
+    if (!session) return c.json({ error: 'SESSION_NOT_FOUND' }, 404);
+    if (session.status !== 'stopped') return c.json({ error: 'ILLEGAL_TRANSITION' }, 409);
+    try {
+      await storage.adjustSessionStart(id, Date.parse(body.data.started_at), body.data.reason, now());
+    } catch (error) {
+      if ((error as Error).message === 'INVALID_START') return c.json({ error: 'INVALID_START' }, 400);
+      throw error;
+    }
+    return c.json(sessionResponse((await storage.getSession(id))!));
+  });
+
   /* ---------- 查询（公开只读） ---------- */
 
   app.get('/api/v1/sessions', publicCors, async (c) => {

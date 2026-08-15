@@ -170,6 +170,37 @@ describe('API 集成', () => {
     expect(stopped.end_note).toBe('今天状态不错');
   });
 
+  it('adjust-start 同步修改首段、会话起点与净时长', async () => {
+    const headers = { 'content-type': 'application/json', cookie: ctx.cookie };
+    const start = await ctx.app.request('/api/v1/sessions', {
+      method: 'POST',
+      headers: { ...headers, 'idempotency-key': 'adjust-start-create' },
+      body: JSON.stringify({ subject_id: 'english' }),
+    });
+    expect(start.status).toBe(201);
+    const created = await start.json();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await ctx.app.request(`/api/v1/sessions/${created.session_id}/stop`, {
+      method: 'POST',
+      headers: { ...headers, 'idempotency-key': 'adjust-start-stop' },
+      body: JSON.stringify({}),
+    });
+
+    const earlier = new Date(Date.parse(created.started_at) - 10 * 60_000).toISOString();
+    const adjusted = await ctx.app.request(`/api/v1/sessions/${created.session_id}/adjust-start`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ started_at: earlier, reason: '补录' }),
+    });
+    expect(adjusted.status).toBe(200);
+    const body = await adjusted.json();
+    expect(body.started_at).toBe(earlier);
+    expect(body.active_seconds).toBeGreaterThanOrEqual(600);
+
+    const segments = await ctx.storage.getSegments(created.session_id);
+    expect(segments[0].startedAtMs).toBe(Date.parse(earlier));
+  });
+
   it('幂等：同 key 重复 start 回放原响应，不创建第二个会话', async () => {
     const h = {
       'content-type': 'application/json',

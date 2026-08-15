@@ -407,6 +407,30 @@ test.describe('时间轴 popover 编辑备注', () => {
   });
 });
 
+test.describe('时间轴起点补录', () => {
+  test('已结束会话可把开始时间向前调整', async ({ page }) => {
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数学一' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1200);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+
+    await page.waitForTimeout(1600);
+    await expect(page.locator('.seg-hit').last()).toBeVisible({ timeout: 8000 });
+    await page.locator('.seg-hit:visible').last().click();
+    const input = page.getByTestId('popover-start-input');
+    await expect(input).toBeVisible();
+    const original = await input.inputValue();
+    const [hour, minute] = original.split(':').map(Number);
+    const earlierMinutes = (hour * 60 + minute - 10 + 1440) % 1440;
+    const earlier = `${String(Math.floor(earlierMinutes / 60)).padStart(2, '0')}:${String(earlierMinutes % 60).padStart(2, '0')}`;
+    await input.fill(earlier);
+    await page.getByTestId('popover-save-start').click();
+    await expect(page.getByTestId('toast')).toContainText('开始时间已更新');
+  });
+});
+
 test.describe('时间轴缩放与流水账视图', () => {
   test('缩放改变轨道宽度，流水账视图可切换回', async ({ page }) => {
     await doSetup(page);
@@ -443,12 +467,10 @@ test.describe('时间轴缩放与流水账视图', () => {
 });
 
 test.describe('全屏沉浸模式', () => {
-  test('全屏按钮存在；进入全屏后时间轴与顶栏隐藏', async ({ page }) => {
+  test('无应用内全屏按钮；外部进入全屏后自动切换布局', async ({ page }) => {
     await doSetup(page);
-    const btn = page.getByRole('button', { name: '全屏沉浸模式' });
-    await expect(btn).toBeVisible();
-    // headless 环境可能不支持 Fullscreen API；仅在真实进入全屏时验证隐藏行为
-    await btn.click().catch(() => {});
+    await expect(page.getByRole('button', { name: '全屏沉浸模式' })).toHaveCount(0);
+    await page.evaluate(() => document.documentElement.requestFullscreen().catch(() => {}));
     await page.waitForTimeout(600);
     const fs = await page.evaluate(() => Boolean(document.fullscreenElement));
     if (fs) {
@@ -467,7 +489,7 @@ test.describe('全屏沉浸模式', () => {
 test.describe('全屏时间轴开关', () => {
   test('全屏下默认隐藏时间轴，可通过控制条展开与收起', async ({ page }) => {
     await doSetup(page);
-    await page.getByRole('button', { name: '全屏沉浸模式' }).click();
+    await page.evaluate(() => document.documentElement.requestFullscreen().catch(() => {}));
     await page.waitForTimeout(600);
     const fs = await page.evaluate(() => Boolean(document.fullscreenElement));
     if (!fs) return; // headless 不支持全屏则跳过断言
@@ -490,6 +512,20 @@ test.describe('全屏时间轴开关', () => {
 
     await page.evaluate(() => document.exitFullscreen().catch(() => {}));
     await page.waitForTimeout(400);
+  });
+});
+
+test.describe('首页休息状态', () => {
+  test('关闭结束反馈后仍显示休息建议，刷新后可恢复', async ({ page }) => {
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数据结构' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1200);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+    await expect(page.getByTestId('idle-rest-line')).toContainText('建议 5 分钟');
+    await page.reload();
+    await expect(page.getByTestId('idle-rest-line')).toContainText('已休息');
   });
 });
 

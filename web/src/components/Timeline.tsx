@@ -12,9 +12,9 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Clock, LocateFixed, Undo2, X, ZoomIn, ZoomOut, List, GanttChart } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, LocateFixed, Undo2, X, ZoomIn, ZoomOut, List, GanttChart, CalendarDays } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
-import type { SessionApi } from '../lib/api.js';
+import type { DailySummaryApi, SessionApi } from '../lib/api.js';
 import { apiGet } from '../lib/api.js';
 import { formatBeijingTime, formatDurationZh } from '../lib/clock.js';
 import { shanghaiDayRangeUtc } from '@clock/shared';
@@ -82,8 +82,13 @@ export default function Timeline({ store }: { store: ClockStore }) {
   /** popover 内编辑备注 */
   const [noteDraft, setNoteDraft] = useState('');
   const [noteSaving, setNoteSaving] = useState(false);
+  const [startDraft, setStartDraft] = useState('');
+  const [startSaving, setStartSaving] = useState(false);
   /** 查看历史日时按日期拉取的会话数据 */
   const [historySessions, setHistorySessions] = useState<SessionApi[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historySummaries, setHistorySummaries] = useState<DailySummaryApi[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const prevTodayRef = useRef(store.todayDate);
@@ -93,6 +98,17 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const activeSessionId = store.state?.active_session?.session_id ?? null;
   const prevActiveIdRef = useRef<string | null>(null);
   const historyCacheRef = useRef<Map<string, SessionApi[]>>(new Map());
+
+  const loadHistory = useCallback(async () => {
+    if (historyLoading) return;
+    setHistoryLoading(true);
+    const dates = Array.from({ length: 7 }, (_, index) => shiftDate(store.todayDate, -index));
+    const rows = await Promise.all(
+      dates.map((date) => apiGet<DailySummaryApi>(`/api/v1/daily-summary?date=${date}&timezone=Asia%2FShanghai`).catch(() => null)),
+    );
+    setHistorySummaries(rows.filter((row): row is DailySummaryApi => row !== null));
+    setHistoryLoading(false);
+  }, [historyLoading, store.todayDate]);
 
   // 信标持续移动（30s 步进）：不触发强制滚动
   useEffect(() => {
@@ -296,6 +312,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
     const row = sessionRowsRef.current.find((r) => r.sessionId === seg.sessionId);
     if (!row) return;
     setNoteDraft(seg.note ?? '');
+    setStartDraft(row.startLabel);
     setNoteSaving(false);
     const track = trackRef.current;
     const scrollEl = scrollRef.current;
@@ -312,6 +329,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
   /** 流水账整行点击：以行元素在 .timeline 容器中的水平中心定位弹窗。 */
   const openRowPopover = useCallback((row: SessionRow, anchor: HTMLElement) => {
     setNoteDraft(row.note ?? '');
+    setStartDraft(row.startLabel);
     setNoteSaving(false);
     const container = anchor.closest('.timeline') as HTMLElement | null;
     if (!container) {
@@ -362,6 +380,17 @@ export default function Timeline({ store }: { store: ClockStore }) {
     setPopover(null);
     historyCacheRef.current.delete(viewDateRef.current);
   }, [popover, noteSaving, noteDraft, store]);
+
+  const handleSaveStart = useCallback(async () => {
+    if (!popover || startSaving || !/^\d{2}:\d{2}$/.test(startDraft)) return;
+    setStartSaving(true);
+    const ok = await store.adjustStart(popover.row.sessionId, `${viewDateRef.current}T${startDraft}:00+08:00`);
+    setStartSaving(false);
+    if (ok) {
+      setPopover(null);
+      historyCacheRef.current.delete(viewDateRef.current);
+    }
+  }, [popover, startDraft, startSaving, store]);
 
   // 当日（viewDate）各科小计：跟随所看日期
   const overview = useMemo(() => {
@@ -439,8 +468,41 @@ export default function Timeline({ store }: { store: ClockStore }) {
           <button className="icon-btn" aria-label="后一天" onClick={() => setViewDate(shiftDate(viewDate, 1))} disabled={isToday}>
             <ChevronRight size={16} />
           </button>
+          <button
+            className={`icon-btn ${historyOpen ? 'selected' : ''}`}
+            aria-label="近 7 天回顾"
+            title="近 7 天回顾"
+            onClick={() => {
+              const next = !historyOpen;
+              setHistoryOpen(next);
+              if (next) void loadHistory();
+            }}
+            data-testid="history-toggle"
+          >
+            <CalendarDays size={16} />
+          </button>
         </div>
       </div>
+
+      {historyOpen && (
+        <div className="history-strip" data-testid="history-strip">
+          <div className="history-strip-head">
+            <strong>近 7 天执行回顾</strong>
+            <span>只展示计时事实，不代表掌握程度</span>
+          </div>
+          {historyLoading ? <div className="history-empty">正在读取…</div> : (
+            <div className="history-days">
+              {historySummaries.map((day) => (
+                <button key={day.date} className="history-day" onClick={() => setViewDate(day.date)}>
+                  <span>{day.date.slice(5)}</span>
+                  <strong>{formatDurationZh(day.total_active_seconds)}</strong>
+                  <small>{day.by_subject.filter((item) => item.active_seconds > 0).length} 科</small>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {mode === 'list' ? (
         /* 流水账视图：按时间排序的记录行，小屏友好 */
@@ -561,7 +623,20 @@ export default function Timeline({ store }: { store: ClockStore }) {
             </div>
           </div>
           {popover.row.stopped && (
-            <div className="popover-note-edit">
+            <div className="popover-edit-grid">
+              <label className="popover-field">
+                <span>开始时间</span>
+                <input
+                  className="popover-time-input"
+                  type="time"
+                  value={startDraft}
+                  onChange={(event) => setStartDraft(event.target.value)}
+                  aria-label="编辑开始时间"
+                  data-testid="popover-start-input"
+                />
+              </label>
+              <label className="popover-field">
+                <span>备注</span>
               <input
                 className="popover-note-input"
                 placeholder="备注（可选）"
@@ -574,6 +649,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
                 aria-label="编辑备注"
                 data-testid="popover-note-input"
               />
+              </label>
             </div>
           )}
           {!popover.row.stopped && popover.row.note && <div className="popover-note">「{popover.row.note}」</div>}
@@ -586,6 +662,14 @@ export default function Timeline({ store }: { store: ClockStore }) {
                 data-testid="popover-save-note"
               >
                 {noteSaving ? '保存中…' : '保存备注'}
+              </button>
+              <button
+                className="ghost-btn"
+                onClick={() => void handleSaveStart()}
+                disabled={startSaving}
+                data-testid="popover-save-start"
+              >
+                {startSaving ? '更新中…' : '更新起点'}
               </button>
               <button className="ghost-btn danger-btn" onClick={() => void handleWithdraw()} data-testid="withdraw-btn">
                 <Undo2 size={14} aria-hidden /> 撤回

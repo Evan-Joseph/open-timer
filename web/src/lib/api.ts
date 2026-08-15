@@ -47,6 +47,12 @@ export interface StateApi {
   today_date: string;
 }
 
+export interface DailySummaryApi {
+  date: string;
+  total_active_seconds: number;
+  by_subject: Array<{ subject_id: string; active_seconds: number; session_count: number }>;
+}
+
 function newIdempotencyKey(): string {
   return crypto.randomUUID();
 }

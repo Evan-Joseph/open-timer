@@ -272,6 +272,29 @@ export class D1Storage implements Storage {
     ]);
   }
 
+  async adjustSessionStart(sessionId: string, startedAtMs: number, reason: string | null, nowMs: number): Promise<void> {
+    const session = await this.requireActive(sessionId);
+    if (session.status !== 'stopped') throw new Error('ILLEGAL_TRANSITION');
+    const first = await this.db
+      .prepare('SELECT * FROM active_segment WHERE session_id = ? ORDER BY started_at_ms, id LIMIT 1')
+      .bind(sessionId)
+      .first<Record<string, unknown>>();
+    if (!first || first.ended_at_ms == null || startedAtMs >= Number(first.ended_at_ms)) throw new Error('INVALID_START');
+    const deltaSeconds = Math.round((Number(first.started_at_ms) - startedAtMs) / 1000);
+    const activeSeconds = session.activeSeconds + deltaSeconds;
+    if (activeSeconds < 0) throw new Error('INVALID_START');
+    await this.db.batch([
+      this.db.prepare('UPDATE session SET started_at_ms = ?, active_seconds = ? WHERE id = ?').bind(startedAtMs, activeSeconds, sessionId),
+      this.db.prepare('UPDATE active_segment SET started_at_ms = ? WHERE id = ?').bind(startedAtMs, Number(first.id)),
+      this.db
+        .prepare('INSERT INTO manual_adjustment (session_id, kind, before_json, after_json, reason, created_at_ms) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(sessionId, 'retime', JSON.stringify({ started_at_ms: session.startedAtMs }), JSON.stringify({ started_at_ms: startedAtMs }), reason, nowMs),
+      this.db
+        .prepare('INSERT INTO audit_log (actor, action, target, detail_json, server_time_ms) VALUES (?, ?, ?, ?, ?)')
+        .bind('owner', 'session_start_adjust', sessionId, JSON.stringify({ started_at_ms: startedAtMs }), nowMs),
+    ]);
+  }
+
   /* ---- 查询 ---- */
 
   async sessionsOverlapping(startMs: number, endMs: number): Promise<SessionRow[]> {

@@ -1,6 +1,6 @@
 /** 时钟主区：空闲 / 运行 / 暂停 / 结束反馈四态。 */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Pause, Play, Square, Flag, Undo2 } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
@@ -38,6 +38,29 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const [lastStopped, setLastStopped] = useState<{ sessionId: string; subjectId: string; seconds: number; focusSeconds: number } | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
 
+  // 最近一次结束会话是空闲页休息状态的可恢复来源，刷新或关闭结束卡后仍保留提示。
+  const recentStopped = useMemo(() => {
+    return store.sessions
+      .filter((session) => session.status === 'stopped' && session.ended_at)
+      .sort((a, b) => Date.parse(b.ended_at!) - Date.parse(a.ended_at!))[0] ?? null;
+  }, [store.sessions]);
+  const recentFocusSeconds = useMemo(() => {
+    const segment = recentStopped?.segments.at(-1);
+    if (!segment?.ended_at) return 0;
+    return Math.max(0, Math.floor((Date.parse(segment.ended_at) - Date.parse(segment.started_at)) / 1000));
+  }, [recentStopped]);
+  const recentRestAnchor = useMemo<SyncAnchor | null>(() => {
+    if (!recentStopped?.ended_at) return null;
+    const endedMs = Date.parse(recentStopped.ended_at);
+    if (!Number.isFinite(endedMs)) return null;
+    return {
+      confirmedSeconds: Math.max(0, Math.floor((Date.now() - endedMs) / 1000)),
+      running: true,
+      anchorPerfMs: performance.now(),
+      serverNowMs: Date.now(),
+    };
+  }, [recentStopped?.ended_at]);
+
   /* ---------- 离开（暂停 / 科目结束后）渐进提醒 ---------- */
   const [awaySnoozedUntil, setAwaySnoozedUntil] = useState(0); // 全屏召回推迟到的时间戳
   const [awayDismissed, setAwayDismissed] = useState(false);   // 本轮离开已手动关闭全屏召回
@@ -45,12 +68,14 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const [awayAnchorOverride, setAwayAnchorOverride] = useState<SyncAnchor | null>(null); // 结束态离开锚点
   const paused = active?.status === 'paused';
   /** 离开中 = 暂停中断 或 科目结束后（本质都是"人不在学习"） */
-  const awayActive = paused || (lastStopped !== null && !active);
+  const awayActive = paused || (!active && (lastStopped !== null || recentRestAnchor !== null));
   /** 离开计时锚点：暂停用服务端 paused_at；结束态用本组件在 stop 时记录的墙钟锚点 */
-  const awayAnchor = store.awayAnchor ?? awayAnchorOverride;
+  const awayAnchor = store.awayAnchor ?? awayAnchorOverride ?? recentRestAnchor;
   const awaySeconds = useWallSeconds(awayAnchor, 1000);
   // 休息时长随刚结束的专注段计算：1/5，5-20 分钟封顶；暂停和结束都使用同一规则。
-  const focusForRest = paused ? (active?.current_segment_active_seconds ?? 0) : (lastStopped?.focusSeconds ?? 0);
+  const focusForRest = paused
+    ? (active?.current_segment_active_seconds ?? 0)
+    : (lastStopped?.focusSeconds ?? recentFocusSeconds);
   const restPlan = restPlanForFocus(focusForRest);
   const restStage = restStageOf(awaySeconds, restPlan);
   const awayLevel = restStage === 'overdue' ? 3 : restStage === 'due' ? 2 : restStage === 'due-soon' ? 1 : 0;
@@ -71,17 +96,18 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     }
   }, [awayLevel]);
   // 休息达到建议时长的 150% 且未推迟/未关闭 → 全屏召回
-  const showAwayRecall = awayLevel >= 3 && !awayDismissed && Date.now() >= awaySnoozedUntil;
+  const showAwayRecall = awayActive && awayLevel >= 3 && !awayDismissed && Date.now() >= awaySnoozedUntil;
   /** 结束态"开始下一段"：延续刚才的科目 */
   const handleStartNext = () => {
-    const sid = lastStopped?.subjectId ?? selectedSubject;
+    const sid = lastStopped?.subjectId ?? recentStopped?.subject_id ?? selectedSubject;
+    setAwayDismissed(true);
     setLastStopped(null);
     setNoteDraft('');
     void store.start(sid, null);
   };
   /** L3 全屏召回（暂停态与结束态共用；结束态按钮为"开始下一段"） */
   const awayRecallOverlay =
-    showAwayRecall && lastStopped !== null && !active ? (
+    showAwayRecall && !active ? (
       <div className="away-overlay" role="dialog" aria-modal="true" aria-label="离开提醒" onClick={() => setAwayDismissed(true)}>
         <div className="away-overlay-card" onClick={(e) => e.stopPropagation()}>
           <div className="away-overlay-title">已离开 {formatHms(awaySeconds)}</div>
@@ -100,7 +126,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
           <div className="away-overlay-title">已离开 {formatHms(awaySeconds)}</div>
           <p className="away-overlay-text">建议休息 {formatDurationZh(restPlan.recommendedSeconds)}。现在回到这一段吗？</p>
           <div className="away-overlay-actions">
-            <button className="primary-btn" onClick={() => void store.resume()} disabled={busy}>
+            <button className="primary-btn" onClick={() => { setAwayDismissed(true); void store.resume(); }} disabled={busy}>
               <Play size={18} aria-hidden /> 回到学习
             </button>
             <button className="ghost-btn" onClick={() => setAwaySnoozedUntil(Date.now() + AWAY_SNOOZE_MS)}>再等 5 分钟</button>
@@ -328,6 +354,18 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       <div className="idle-date">
         {new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', dateStyle: 'full' }).format(new Date())}
       </div>
+
+      {recentRestAnchor && (
+        <div className="away-slot idle-rest" aria-live="polite">
+          <div
+            className={`away-line${awayLevel >= 2 ? ' strong' : awayLevel >= 1 ? ' urgent' : ''}`}
+            data-testid="idle-rest-line"
+          >
+            {restStageLabel(restStage)} · 已休息 {formatHms(awaySeconds)}
+            <span className="away-note">· 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
+          </div>
+        </div>
+      )}
 
       <div className="subject-picker" role="radiogroup" aria-label="选择科目">
         {ordered.map((s) => (

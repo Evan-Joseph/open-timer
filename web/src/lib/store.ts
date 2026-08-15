@@ -35,6 +35,7 @@ export interface ClockStore {
   /** 撤回（作废）一个已停止的会话；服务端保留审计，所有汇总自动排除 */
   withdraw: (sessionId: string, reason?: string | null) => Promise<boolean>;
   setNote: (sessionId: string, note: string) => Promise<void>;
+  adjustStart: (sessionId: string, startedAt: string) => Promise<boolean>;
 }
 
 const POLL_MS_IDLE = 15_000; // 空闲时慢轮询
@@ -369,6 +370,22 @@ export function useClockStore(): ClockStore {
     [refresh],
   );
 
+  const adjustStart = useCallback(async (sessionId: string, startedAt: string) => {
+    setBusy(true);
+    const res = await apiPost(`/api/v1/sessions/${sessionId}/adjust-start`, {
+      started_at: startedAt,
+      reason: '补录实际开始时间',
+    });
+    setBusy(false);
+    if (!res.ok) {
+      flashError('开始时间无效，请检查是否早于结束时间');
+      return false;
+    }
+    flashToast('开始时间已更新');
+    await refresh();
+    return true;
+  }, [flashError, flashToast, refresh]);
+
   // 构造单调时钟锚点：随 state 身份 memo，避免每次渲染重新锚定导致秒数跳变。
   // 防拖锚点纪律（NTP 式）：偏差 ≤1.2s 时保持旧锚继续平滑，只有大偏差才重锚。
   const anchor: SyncAnchor | null = useMemo(() => {
@@ -468,5 +485,6 @@ export function useClockStore(): ClockStore {
     switchSubject,
     withdraw,
     setNote,
+    adjustStart,
   };
 }
