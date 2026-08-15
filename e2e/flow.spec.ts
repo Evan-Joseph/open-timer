@@ -289,6 +289,51 @@ test.describe('时间轴信标与自动滚动', () => {
   });
 });
 
+test.describe('近 7 天执行回顾', () => {
+  test('展示周期指标、每日趋势与科目分布，并可进入单日时间轴', async ({ page }) => {
+    await doSetup(page);
+    const state = await (await page.request.get('/api/v1/state')).json();
+    const subjects = await (await page.request.get('/api/v1/subjects')).json();
+    const shift = (date: string, delta: number) => {
+      const [year, month, day] = date.split('-').map(Number);
+      const shifted = new Date(Date.UTC(year, month - 1, day + delta));
+      return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}-${String(shifted.getUTCDate()).padStart(2, '0')}`;
+    };
+    const currentDates = new Set(Array.from({ length: 7 }, (_, index) => shift(state.today_date, -index)));
+    await page.route('**/api/v1/daily-summary?**', async (route) => {
+      const date = new URL(route.request().url()).searchParams.get('date')!;
+      const current = currentDates.has(date);
+      const total = current ? 3600 : 1800;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          date,
+          total_active_seconds: total,
+          by_subject: [
+            { subject_id: subjects[0].subject_id, active_seconds: total * 2 / 3, session_count: 1 },
+            { subject_id: subjects[1].subject_id, active_seconds: total / 3, session_count: 1 },
+          ],
+        }),
+      });
+    });
+
+    await page.getByTestId('history-toggle').click();
+    const report = page.getByTestId('history-strip');
+    await expect(report).toBeVisible();
+    await expect(report.locator('.history-metrics')).toContainText('7 小时');
+    await expect(report.locator('.history-metrics')).toContainText('7 / 7 天');
+    await expect(report.locator('.history-metrics')).toContainText('+100%');
+    await expect(report.locator('.history-day')).toHaveCount(7);
+    await expect(report.locator('.history-subject-list > span')).toHaveCount(2);
+    await expect(report.locator('.history-subject-list')).toContainText('67%');
+
+    const targetDate = shift(state.today_date, -3);
+    await report.getByRole('button', { name: new RegExp(targetDate) }).click();
+    await expect(page.locator('.timeline-title')).toContainText(targetDate);
+  });
+});
+
 test.describe('选科状态归属', () => {
   test('手动选择的科目不被轮询抢回，刷新后记住', async ({ page }) => {
     await doSetup(page);

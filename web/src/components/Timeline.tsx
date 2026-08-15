@@ -67,6 +67,13 @@ function shiftDate(date: string, delta: number): string {
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
 }
 
+function formatHistoryDuration(seconds: number): string {
+  if (seconds <= 0) return '0';
+  if (seconds < 3600) return `${Math.round(seconds / 60)}分`;
+  const hours = seconds / 3600;
+  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)}小时`;
+}
+
 export default function Timeline({ store }: { store: ClockStore }) {
   const [viewDate, setViewDate] = useState(store.todayDate);
   const [popover, setPopover] = useState<{ row: SessionRow; containerX: number } | null>(null);
@@ -102,11 +109,16 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const loadHistory = useCallback(async () => {
     if (historyLoading) return;
     setHistoryLoading(true);
-    const dates = Array.from({ length: 7 }, (_, index) => shiftDate(store.todayDate, -index));
+    // 同时读取前一周期，仅用于事实型环比；缺失日保留为 0，避免图表列数跳动。
+    const dates = Array.from({ length: 14 }, (_, index) => shiftDate(store.todayDate, -index));
     const rows = await Promise.all(
-      dates.map((date) => apiGet<DailySummaryApi>(`/api/v1/daily-summary?date=${date}&timezone=Asia%2FShanghai`).catch(() => null)),
+      dates.map((date) => apiGet<DailySummaryApi>(`/api/v1/daily-summary?date=${date}&timezone=Asia%2FShanghai`).catch(() => ({
+        date,
+        total_active_seconds: 0,
+        by_subject: [],
+      }))),
     );
-    setHistorySummaries(rows.filter((row): row is DailySummaryApi => row !== null));
+    setHistorySummaries(rows);
     setHistoryLoading(false);
   }, [historyLoading, store.todayDate]);
 
@@ -406,6 +418,41 @@ export default function Timeline({ store }: { store: ClockStore }) {
 
   const totalSeconds = overview.reduce((a, b) => a + b.seconds, 0);
 
+  const historyModel = useMemo(() => {
+    const current = historySummaries.slice(0, 7).sort((a, b) => a.date.localeCompare(b.date));
+    const previous = historySummaries.slice(7, 14);
+    const total = current.reduce((sum, day) => sum + day.total_active_seconds, 0);
+    const previousTotal = previous.reduce((sum, day) => sum + day.total_active_seconds, 0);
+    const activeDays = current.filter((day) => day.total_active_seconds > 0).length;
+    const maxDay = Math.max(1, ...current.map((day) => day.total_active_seconds));
+    const change = previousTotal > 0 ? (total - previousTotal) / previousTotal : null;
+    const subjectSeconds = new Map<string, number>();
+    for (const day of current) {
+      for (const item of day.by_subject) {
+        subjectSeconds.set(item.subject_id, (subjectSeconds.get(item.subject_id) ?? 0) + item.active_seconds);
+      }
+    }
+    const subjects = [...subjectSeconds.entries()]
+      .filter(([, seconds]) => seconds > 0)
+      .map(([subjectId, seconds]) => {
+        const subject = store.subjects.find((item) => item.subject_id === subjectId);
+        return {
+          subjectId,
+          seconds,
+          label: subject?.display_name ?? subjectId,
+          colorId: subject?.color_id ?? 'blue',
+          share: total > 0 ? seconds / total : 0,
+        };
+      })
+      .sort((a, b) => b.seconds - a.seconds);
+    return { current, total, activeDays, activeAverage: activeDays > 0 ? total / activeDays : 0, maxDay, change, subjects };
+  }, [historySummaries, store.subjects]);
+
+  const weekdayLabel = (date: string) => {
+    const [year, month, day] = date.split('-').map(Number);
+    return new Intl.DateTimeFormat('zh-CN', { weekday: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(year, month - 1, day)));
+  };
+
   return (
     <section className="timeline" aria-label="时间轴">
       <div className="timeline-head">
@@ -487,18 +534,63 @@ export default function Timeline({ store }: { store: ClockStore }) {
       {historyOpen && (
         <div className="history-strip" data-testid="history-strip">
           <div className="history-strip-head">
-            <strong>近 7 天执行回顾</strong>
-            <span>只展示计时事实，不代表掌握程度</span>
+            <div>
+              <strong>近 7 天执行时间</strong>
+              <span>{historyModel.current[0]?.date.slice(5)} – {historyModel.current.at(-1)?.date.slice(5)}</span>
+            </div>
+            <span>仅记录时间事实</span>
           </div>
           {historyLoading ? <div className="history-empty">正在读取…</div> : (
-            <div className="history-days">
-              {historySummaries.map((day) => (
-                <button key={day.date} className="history-day" onClick={() => setViewDate(day.date)}>
-                  <span>{day.date.slice(5)}</span>
-                  <strong>{formatDurationZh(day.total_active_seconds)}</strong>
-                  <small>{day.by_subject.filter((item) => item.active_seconds > 0).length} 科</small>
-                </button>
-              ))}
+            <div className="history-report">
+              <div className="history-metrics" aria-label="近 7 天汇总">
+                <div><span>总计</span><strong>{formatDurationZh(historyModel.total)}</strong></div>
+                <div><span>活跃天数</span><strong>{historyModel.activeDays}<small> / 7 天</small></strong></div>
+                <div><span>活跃日均</span><strong>{formatDurationZh(historyModel.activeAverage)}</strong></div>
+                <div>
+                  <span>较前 7 天</span>
+                  <strong className={historyModel.change === null ? '' : historyModel.change >= 0 ? 'trend-up' : 'trend-down'}>
+                    {historyModel.change === null ? '暂无基线' : `${historyModel.change >= 0 ? '+' : '−'}${Math.abs(historyModel.change * 100).toFixed(0)}%`}
+                  </strong>
+                </div>
+              </div>
+              <div className="history-chart" role="list" aria-label="每日执行时间">
+                {historyModel.current.map((day) => {
+                  const height = day.total_active_seconds > 0 ? Math.max(8, (day.total_active_seconds / historyModel.maxDay) * 100) : 3;
+                  const selected = day.date === viewDate;
+                  return (
+                    <button
+                      key={day.date}
+                      className={`history-day${selected ? ' selected' : ''}`}
+                      onClick={() => setViewDate(day.date)}
+                      aria-pressed={selected}
+                      aria-label={`${day.date}，执行 ${formatDurationZh(day.total_active_seconds)}`}
+                    >
+                      <span className="history-day-value">{formatHistoryDuration(day.total_active_seconds)}</span>
+                      <span className="history-bar-track" aria-hidden><span className="history-bar" style={{ height: `${height}%` }} /></span>
+                      <span className="history-weekday">{day.date === store.todayDate ? '今天' : weekdayLabel(day.date)}</span>
+                      <small>{day.date.slice(5)}</small>
+                    </button>
+                  );
+                })}
+              </div>
+              {historyModel.subjects.length > 0 && (
+                <div className="history-subjects" aria-label="近 7 天科目分布">
+                  <div className="history-subject-bar" aria-hidden>
+                    {historyModel.subjects.map((subject) => (
+                      <span key={subject.subjectId} data-color={subject.colorId} style={{ width: `${subject.share * 100}%`, background: 'var(--sc)' }} />
+                    ))}
+                  </div>
+                  <div className="history-subject-list">
+                    {historyModel.subjects.map((subject) => (
+                      <span key={subject.subjectId} data-color={subject.colorId}>
+                        <i className="pill-dot" aria-hidden /> {subject.label}
+                        <strong>{formatDurationZh(subject.seconds)}</strong>
+                        <small>{Math.round(subject.share * 100)}%</small>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
