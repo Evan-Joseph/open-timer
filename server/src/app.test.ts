@@ -82,6 +82,7 @@ describe('API 集成', () => {
     // subjects：无需任何凭据（公开只读 API，供其他 Agent 读取）
     const noauth = await ctx.app.request('/api/v1/subjects');
     expect(noauth.status).toBe(200);
+    expect(noauth.headers.get('cache-control')).toBe('public, max-age=3600, must-revalidate');
     const subjects = await noauth.json();
     expect(subjects).toHaveLength(7);
     expect(subjects.map((s: { subject_id: string }) => s.subject_id)).toContain('data-structures');
@@ -91,16 +92,19 @@ describe('API 集成', () => {
     // state：无凭据可读（空库 → active_session null）
     const st = await ctx.app.request('/api/v1/state');
     expect(st.status).toBe(200);
+    expect(st.headers.get('cache-control')).toBe('no-store');
     expect((await st.json()).active_session).toBeNull();
 
     // sessions?date：无凭据可读
     const sess = await ctx.app.request('/api/v1/sessions?date=2026-01-01');
     expect(sess.status).toBe(200);
+    expect(sess.headers.get('cache-control')).toBe('no-store');
     expect((await sess.json()).sessions).toEqual([]);
 
     // daily-summary：无凭据可读
     const ds = await ctx.app.request('/api/v1/daily-summary?date=2026-01-01&timezone=Asia/Shanghai');
     expect(ds.status).toBe(200);
+    expect(ds.headers.get('cache-control')).toBe('private, no-cache, must-revalidate');
     expect((await ds.json()).total_active_seconds).toBe(0);
   });
 

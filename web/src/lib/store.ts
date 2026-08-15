@@ -42,6 +42,7 @@ const POLL_MS_IDLE = 15_000; // 空闲时慢轮询
 const POLL_MS_ACTIVE = 5_000; // 运行中快轮询（UI 靠单调时钟平滑，轮询只校准）
 const ERROR_TTL_MS = 6_000;
 const TOAST_TTL_MS = 2_600;
+const SYNC_PULSE_KEY = 'clock-sync-pulse';
 
 export function useClockStore(): ClockStore {
   const [phase, setPhase] = useState<AuthPhase>('loading');
@@ -64,12 +65,16 @@ export function useClockStore(): ClockStore {
   const awayAnchorRef = useRef<SyncAnchor | null>(null);
   /** 最新已应用的 state（用于丢弃滞后轮询响应） */
   const stateRef = useRef<StateApi | null>(null);
+  /** 写操作前后递增；旧 epoch 的在途轮询永远不能覆盖新状态。 */
+  const syncEpochRef = useRef(0);
+  const refreshSeqRef = useRef(0);
+  const appliedSessionsSeqRef = useRef(0);
 
   const todayDate = state?.today_date ?? shanghaiTodayLocal();
 
-  const applyState = useCallback((s: StateApi) => {
+  const applyState = useCallback((s: StateApi, epoch: number) => {
     // 写操作进行中：服务端返回的可能是写完成前的旧状态，不得覆盖乐观 UI
-    if (writeLockedRef.current) return;
+    if (writeLockedRef.current || epoch !== syncEpochRef.current) return;
     // 丢弃滞后的轮询响应（以服务端时间戳为准），防止旧状态回跳
     if (stateRef.current && s.server_now_ms <= stateRef.current.server_now_ms) return;
     perfAtStateRef.current = performance.now();
@@ -77,18 +82,28 @@ export function useClockStore(): ClockStore {
     setState(s);
   }, []);
 
-  const applySessions = useCallback((list: SessionApi[]) => {
-    if (writeLockedRef.current) return;
+  const applySessions = useCallback((list: SessionApi[], epoch: number, sequence: number) => {
+    if (writeLockedRef.current || epoch !== syncEpochRef.current) return;
+    if (sequence < appliedSessionsSeqRef.current) return;
+    appliedSessionsSeqRef.current = sequence;
     setSessions(list);
   }, []);
 
   /**
-   * 解锁写状态：等一个 RTT 让锁期间“在途”的轮询响应落完，
-   * 再开放状态应用，防止旧响应在解锁后把乐观状态冲掉。
+   * 解锁写状态时再次推进 epoch。写前或写中的在途响应即使晚到，也会被确定性丢弃。
    */
   const releaseWriteLock = useCallback(async () => {
-    await new Promise((r) => window.setTimeout(r, 600));
+    syncEpochRef.current += 1;
     writeLockedRef.current = false;
+  }, []);
+
+  const beginWrite = useCallback(() => {
+    syncEpochRef.current += 1;
+    writeLockedRef.current = true;
+  }, []);
+
+  const notifyPeers = useCallback(() => {
+    localStorage.setItem(SYNC_PULSE_KEY, `${Date.now()}:${crypto.randomUUID()}`);
   }, []);
 
   /** 错误提示：自动消失，不打扰 */
@@ -105,20 +120,32 @@ export function useClockStore(): ClockStore {
   }, []);
 
   const refresh = useCallback(async () => {
+    const epoch = syncEpochRef.current;
+    const sequence = ++refreshSeqRef.current;
     try {
       // state 与 sessions 并行拉取，减少串行延迟
       const [s] = await Promise.all([
         apiGet<StateApi>('/api/v1/state'),
         apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${shanghaiTodayLocal()}`)
-          .then((d) => applySessions(d.sessions))
+          .then((d) => applySessions(d.sessions, epoch, sequence))
           .catch(() => {}),
       ]);
-      applyState(s);
+      applyState(s, epoch);
       if (!writeLockedRef.current) setError(null);
     } catch {
-      flashError('暂时无法同步，正在重试');
+      if (epoch === syncEpochRef.current) flashError('暂时无法同步，正在重试');
     }
   }, [applyState, applySessions, flashError]);
+
+  // 同源其他标签页完成写操作后立即同步；跨设备仍由服务端轮询校准。
+  useEffect(() => {
+    if (phase !== 'ready') return;
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === SYNC_PULSE_KEY) void refresh();
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [phase, refresh]);
 
   // 初始鉴权探测
   useEffect(() => {
@@ -223,7 +250,7 @@ export function useClockStore(): ClockStore {
 
   const start = useCallback(
     async (subjectId: string, intentNote: string | null) => {
-      writeLockedRef.current = true;
+      beginWrite();
       setBusy(true);
       const res = await apiPost<{ session_id: string; started_at: string }>('/api/v1/sessions', {
         subject_id: subjectId,
@@ -237,6 +264,7 @@ export function useClockStore(): ClockStore {
         refresh(); // 可能别处已有活动会话，拉取真实状态
         return false;
       }
+      notifyPeers();
       // 乐观进入运行态：立即渲染，不等 refresh 往返
       const d = res.data;
       if (d) {
@@ -263,12 +291,12 @@ export function useClockStore(): ClockStore {
       refresh();
       return true;
     },
-    [refresh, flashError],
+    [beginWrite, refresh, flashError, notifyPeers],
   );
 
   const pause = useCallback(async () => {
     if (!activeId) return;
-    writeLockedRef.current = true; // 锁定：轮询不得覆盖乐观状态
+    beginWrite(); // 锁定：轮询不得覆盖乐观状态
     optimisticSetStatus('paused'); // 立即反馈
     setBusy(true);
     const res = await apiPost(`/api/v1/sessions/${activeId}/pause`);
@@ -280,12 +308,13 @@ export function useClockStore(): ClockStore {
       refresh();
       return;
     }
+    notifyPeers();
     refresh();
-  }, [activeId, refresh, optimisticSetStatus, flashError]);
+  }, [activeId, beginWrite, refresh, optimisticSetStatus, flashError, notifyPeers]);
 
   const resume = useCallback(async () => {
     if (!activeId) return;
-    writeLockedRef.current = true;
+    beginWrite();
     optimisticSetStatus('running');
     setBusy(true);
     const res = await apiPost(`/api/v1/sessions/${activeId}/resume`);
@@ -297,13 +326,14 @@ export function useClockStore(): ClockStore {
       refresh();
       return;
     }
+    notifyPeers();
     refresh();
-  }, [activeId, refresh, optimisticSetStatus, flashError]);
+  }, [activeId, beginWrite, refresh, optimisticSetStatus, flashError, notifyPeers]);
 
   const stop = useCallback(
     async (endNote: string | null) => {
       if (!activeId) return;
-      writeLockedRef.current = true;
+      beginWrite();
       optimisticSetStatus(null); // 立即回到空闲/结束反馈
       setBusy(true);
       const res = await apiPost(`/api/v1/sessions/${activeId}/stop`, { end_note: endNote || null });
@@ -315,15 +345,16 @@ export function useClockStore(): ClockStore {
         refresh();
         return;
       }
+      notifyPeers();
       refresh();
     },
-    [activeId, refresh, optimisticSetStatus, flashError],
+    [activeId, beginWrite, refresh, optimisticSetStatus, flashError, notifyPeers],
   );
 
   const switchSubject = useCallback(
     async (subjectId: string) => {
       if (!activeId) return;
-      writeLockedRef.current = true;
+      beginWrite();
       setBusy(true);
       const res = await apiPost(`/api/v1/sessions/${activeId}/switch`, { subject_id: subjectId });
       setBusy(false);
@@ -333,9 +364,10 @@ export function useClockStore(): ClockStore {
         refresh();
         return;
       }
+      notifyPeers();
       refresh();
     },
-    [activeId, refresh, flashError],
+    [activeId, beginWrite, refresh, flashError, notifyPeers],
   );
 
   /**
@@ -345,7 +377,8 @@ export function useClockStore(): ClockStore {
    */
   const withdraw = useCallback(
     async (sessionId: string, reason: string | null = '误记') => {
-      writeLockedRef.current = true;
+      beginWrite();
+      const removedSeconds = sessions.find((session) => session.session_id === sessionId)?.active_seconds ?? 0;
       setBusy(true);
       const res = await apiPost(`/api/v1/sessions/${sessionId}/void`, { reason });
       setBusy(false);
@@ -355,19 +388,23 @@ export function useClockStore(): ClockStore {
         refresh();
         return false;
       }
+      setSessions((current) => current.filter((session) => session.session_id !== sessionId));
+      setState((current) => current ? { ...current, today_active_seconds: Math.max(0, current.today_active_seconds - removedSeconds) } : current);
       flashToast('已撤回这条记录');
-      refresh();
+      notifyPeers();
+      await refresh();
       return true;
     },
-    [refresh, flashError, flashToast],
+    [beginWrite, sessions, refresh, flashError, flashToast, notifyPeers],
   );
 
   const setNote = useCallback(
     async (sessionId: string, note: string) => {
-      await apiPatch(`/api/v1/sessions/${sessionId}/note`, { note }).catch(() => {});
+      const res = await apiPatch(`/api/v1/sessions/${sessionId}/note`, { note }).catch(() => null);
+      if (res?.ok) notifyPeers();
       refresh();
     },
-    [refresh],
+    [refresh, notifyPeers],
   );
 
   const adjustStart = useCallback(async (sessionId: string, startedAt: string) => {
@@ -382,9 +419,10 @@ export function useClockStore(): ClockStore {
       return false;
     }
     flashToast('开始时间已更新');
+    notifyPeers();
     await refresh();
     return true;
-  }, [flashError, flashToast, refresh]);
+  }, [flashError, flashToast, refresh, notifyPeers]);
 
   // 构造单调时钟锚点：随 state 身份 memo，避免每次渲染重新锚定导致秒数跳变。
   // 防拖锚点纪律（NTP 式）：偏差 ≤1.2s 时保持旧锚继续平滑，只有大偏差才重锚。

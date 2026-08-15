@@ -71,15 +71,15 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   /** 离开中 = 暂停中断 或 科目结束后（本质都是"人不在学习"） */
   const awayActive = paused || (!active && (lastStopped !== null || recentRestAnchor !== null));
   /** 离开计时锚点：暂停用服务端 paused_at；结束态用本组件在 stop 时记录的墙钟锚点 */
-  const awayAnchor = store.awayAnchor ?? awayAnchorOverride ?? recentRestAnchor;
+  const awayAnchor = awayActive ? (store.awayAnchor ?? awayAnchorOverride ?? recentRestAnchor) : null;
   const awaySeconds = useWallSeconds(awayAnchor, 1000);
   // 休息时长随刚结束的专注段计算：1/5，5-20 分钟封顶；暂停和结束都使用同一规则。
   const focusForRest = paused
     ? (active?.current_segment_active_seconds ?? 0)
     : (lastStopped?.focusSeconds ?? recentFocusSeconds);
   const restPlan = restPlanForFocus(focusForRest);
-  const restStage = restStageOf(awaySeconds, restPlan);
-  const awayLevel = restStage === 'overdue' ? 3 : restStage === 'due' ? 2 : restStage === 'due-soon' ? 1 : 0;
+  const restStage = awayActive ? restStageOf(awaySeconds, restPlan) : 'resting';
+  const awayLevel = awayActive ? (restStage === 'overdue' ? 3 : restStage === 'due' ? 2 : restStage === 'due-soon' ? 1 : 0) : 0;
   // 离开状态复位：回到学习/开始新段后，下一轮离开重新开始提醒
   useEffect(() => {
     if (!awayActive) {
@@ -113,6 +113,15 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     setLastStopped(null);
     setNoteDraft('');
     void store.start(sid, null);
+  };
+  const handleWithdrawLastStopped = async () => {
+    if (!lastStopped) return;
+    const ok = await store.withdraw(lastStopped.sessionId, '误记');
+    if (!ok) return;
+    setLastStopped(null);
+    setAwayAnchorOverride(null);
+    setAwayDismissed(true);
+    setNoteDraft('');
   };
   /** L3 全屏召回（暂停态与结束态共用；结束态按钮为"开始下一段"） */
   const awayRecallOverlay =
@@ -234,11 +243,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
               className="ghost-btn"
               data-testid="finish-withdraw-btn"
               disabled={store.busy}
-              onClick={() => {
-                void store.withdraw(lastStopped.sessionId, '误记');
-                setLastStopped(null);
-                setNoteDraft('');
-              }}
+              onClick={() => void handleWithdrawLastStopped()}
             >
               <Undo2 size={14} aria-hidden /> 撤回这条
             </button>

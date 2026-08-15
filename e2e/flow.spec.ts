@@ -187,6 +187,32 @@ test.describe('核心流程', () => {
   });
 });
 
+test.describe('多标签页同步', () => {
+  test('写操作在轮询周期前同步到其他标签页', async ({ page, context }) => {
+    await doSetup(page);
+    const peer = await context.newPage();
+    await peer.goto('/');
+    await expect(peer.getByTestId('idle-clock')).toBeVisible();
+
+    const startedAt = Date.now();
+    await page.getByRole('radio', { name: '数据结构' }).click();
+    await page.getByTestId('start-btn').click();
+    await expect(peer.getByText('· 进行中')).toBeVisible({ timeout: 3_000 });
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+
+    await page.getByRole('button', { name: '暂停计时' }).click();
+    await expect(peer.getByText('· 离开中')).toBeVisible({ timeout: 3_000 });
+
+    await page.getByRole('button', { name: '继续计时' }).click();
+    await expect(peer.getByText('· 进行中')).toBeVisible({ timeout: 3_000 });
+
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await expect(peer.getByTestId('idle-clock')).toBeVisible({ timeout: 3_000 });
+    await page.getByTestId('finish-withdraw-btn').click();
+    await peer.close();
+  });
+});
+
 test.describe('截图矩阵与视觉', () => {
   test('空闲态与运行态截图（浅色）', async ({ page }) => {
     await doSetup(page);
@@ -353,6 +379,7 @@ test.describe('撤回（作废）与一致性', () => {
     await doSetup(page);
     // 记录基线（其他用例可能留有片段/时长）
     const beforeSegs = await page.locator('.seg').count();
+    const beforeRestLines = await page.getByTestId('idle-rest-line').count();
     const beforeState = await (await page.request.get('/api/v1/state')).json();
     const beforeSeconds = beforeState.today_active_seconds as number;
 
@@ -368,6 +395,7 @@ test.describe('撤回（作废）与一致性', () => {
 
     // 一致性：回到空闲态；片段数与累计时长回到基线（本次会话被完整排除）
     await expect(page.getByTestId('idle-clock')).toBeVisible();
+    await expect(page.getByTestId('idle-rest-line')).toHaveCount(beforeRestLines);
     await expect(page.locator('.seg')).toHaveCount(beforeSegs);
     const afterState = await (await page.request.get('/api/v1/state')).json();
     expect(afterState.today_active_seconds).toBe(beforeSeconds);
@@ -606,6 +634,9 @@ test.describe('离开渐进提醒', () => {
     await dialog.getByRole('button', { name: '回到学习' }).click();
     await expect(dialog).not.toBeVisible();
     await expect(page.getByText('· 进行中')).toBeVisible();
+    await expect(page.locator('.clockface.is-running')).toHaveAttribute('data-away-level', '0');
+    await page.clock.fastForward(20 * 60 * 1000);
+    await expect(page.getByRole('dialog', { name: '离开提醒' })).toHaveCount(0);
 
     // 自我清理：结束会话回到空闲态（避免串行污染后续依赖空闲态的测试）
     await page.getByRole('button', { name: '结束并保存' }).click();
@@ -644,6 +675,7 @@ test.describe('科目结束后的离开提醒', () => {
     await expect(page.getByText('· 进行中')).toBeVisible();
     // 运行态不再显示离开行（提醒已复位）
     await expect(page.getByTestId('away-line')).toHaveCount(0);
+    await expect(page.locator('.clockface.is-running')).toHaveAttribute('data-away-level', '0');
 
     // 自我清理
     await page.getByRole('button', { name: '结束并保存' }).click();

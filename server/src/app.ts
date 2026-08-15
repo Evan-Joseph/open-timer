@@ -71,6 +71,19 @@ export function createApp(deps: AppDeps): Hono {
     await next();
   });
 
+  // 动态事实禁止使用陈旧缓存；日报保留 ETag 重验证，固定科目表可短时缓存。
+  app.use('/api/*', async (c, next) => {
+    await next();
+    const path = c.req.path;
+    if (path === '/api/v1/subjects' && c.req.method === 'GET') {
+      c.header('Cache-Control', 'public, max-age=3600, must-revalidate');
+    } else if (path === '/api/v1/daily-summary' && c.req.method === 'GET') {
+      c.header('Cache-Control', 'private, no-cache, must-revalidate');
+    } else {
+      c.header('Cache-Control', 'no-store');
+    }
+  });
+
   // CSRF：写请求必须来自同源（Origin 与 Host 匹配）。
   app.use('/api/*', async (c, next) => {
     if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
