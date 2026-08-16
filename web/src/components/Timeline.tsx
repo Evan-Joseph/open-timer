@@ -79,10 +79,11 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const viewTransition = animationsEnabled ? { duration: 0.22, ease: [0.2, 0, 0, 1] as const } : { duration: 0 };
   const [viewDate, setViewDate] = useState(store.todayDate);
   const [popover, setPopover] = useState<{ row: SessionRow; containerX: number } | null>(null);
+  const [hoverPreview, setHoverPreview] = useState<{ row: SessionRow; containerX: number } | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [scale, setScale] = useState<TimelineScale>(() => {
     const saved = localStorage.getItem('clock-timeline-scale');
-    return saved === 'full-day' || saved === 'effective-day' ? saved : 'default';
+    return saved === 'full-day' ? saved : 'default';
   });
   const [mode, setMode] = useState<'track' | 'list'>('track');
   /** popover 内编辑备注 */
@@ -105,6 +106,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const historyCacheRef = useRef<Map<string, SessionApi[]>>(new Map());
   const historyReportRef = useRef<HTMLDivElement>(null);
   const autoScrolledHistoryRef = useRef(false);
+  const hoverPreviewTimerRef = useRef<number | null>(null);
 
   const loadHistory = useCallback(async () => {
     if (historyLoading) return;
@@ -184,6 +186,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
   useEffect(() => {
     viewDateRef.current = viewDate;
     setPopover(null);
+    setHoverPreview(null);
   }, [viewDate]);
 
   const segs: RenderSeg[] = useMemo(() => {
@@ -224,8 +227,8 @@ export default function Timeline({ store }: { store: ClockStore }) {
     ? Math.min(LEARNING_DAY.endMinute, Math.max(LEARNING_DAY.startMinute, (nowMs - startMs) / 60_000))
     : (segs[0]?.startMinute ?? (LEARNING_DAY.startMinute + LEARNING_DAY.endMinute) / 2);
   const visibleRange = useMemo(
-    () => timelineRange(scale, segs.map((seg) => ({ startMinute: seg.startMinute, endMinute: seg.endMinute })), anchorMinute),
-    [scale, segs, anchorMinute],
+    () => timelineRange(scale, anchorMinute),
+    [scale, anchorMinute],
   );
   const visibleMinutes = visibleRange.endMinute - visibleRange.startMinute;
   const minuteToPercent = useCallback(
@@ -326,22 +329,45 @@ export default function Timeline({ store }: { store: ClockStore }) {
 
   const nowPercent = minuteToPercent(Math.min(Math.max((nowMs - startMs) / 60_000, visibleRange.startMinute), visibleRange.endMinute));
 
-  /** 点片段：轨道坐标 → 容器坐标（trackRect 已含滚动位移，直接相减）；数据提升到会话级。 */
+  const previewPositionForSeg = useCallback((seg: RenderSeg) => {
+    const track = trackRef.current;
+    const timeline = track?.closest('.timeline') as HTMLElement | null;
+    if (!track || !timeline) return 0;
+    const trackRect = track.getBoundingClientRect();
+    const timelineRect = timeline.getBoundingClientRect();
+    return trackRect.left - timelineRect.left + minuteToPercent((seg.startMinute + seg.endMinute) / 2) / 100 * trackRect.width;
+  }, [minuteToPercent]);
+
+  /** 点击固定会话详情；编辑与撤回只存在于固定态。 */
   const openPopover = useCallback((seg: RenderSeg) => {
     const row = sessionRowsRef.current.find((r) => r.sessionId === seg.sessionId);
     if (!row) return;
+    if (hoverPreviewTimerRef.current !== null) window.clearTimeout(hoverPreviewTimerRef.current);
+    setHoverPreview(null);
     setNoteDraft(seg.note ?? '');
     setStartDraft(row.startLabel);
     setNoteSaving(false);
-    const track = trackRef.current;
-    if (!track) {
-      setPopover({ row, containerX: 0 });
-      return;
-    }
-    const trackRect = track.getBoundingClientRect();
-    const xInContainer = minuteToPercent((seg.startMinute + seg.endMinute) / 2) / 100 * trackRect.width;
-    setPopover({ row, containerX: xInContainer });
-  }, [minuteToPercent]);
+    setPopover({ row, containerX: previewPositionForSeg(seg) });
+  }, [previewPositionForSeg]);
+
+  const scheduleHoverPreview = useCallback((seg: RenderSeg) => {
+    if (popover) return;
+    if (hoverPreviewTimerRef.current !== null) window.clearTimeout(hoverPreviewTimerRef.current);
+    hoverPreviewTimerRef.current = window.setTimeout(() => {
+      const row = sessionRowsRef.current.find((item) => item.sessionId === seg.sessionId);
+      if (row) setHoverPreview({ row, containerX: previewPositionForSeg(seg) });
+    }, 180);
+  }, [popover, previewPositionForSeg]);
+
+  const dismissHoverPreview = useCallback(() => {
+    if (hoverPreviewTimerRef.current !== null) window.clearTimeout(hoverPreviewTimerRef.current);
+    hoverPreviewTimerRef.current = null;
+    setHoverPreview(null);
+  }, []);
+
+  useEffect(() => () => {
+    if (hoverPreviewTimerRef.current !== null) window.clearTimeout(hoverPreviewTimerRef.current);
+  }, []);
 
   /** 流水账整行点击：以行元素在 .timeline 容器中的水平中心定位弹窗。 */
   const openRowPopover = useCallback((row: SessionRow, anchor: HTMLElement) => {
@@ -621,7 +647,6 @@ export default function Timeline({ store }: { store: ClockStore }) {
           {([
             ['default', '默认'],
             ['full-day', '全天'],
-            ['effective-day', '有效全天'],
           ] as const).map(([value, label]) => (
             <button
               key={value}
@@ -701,9 +726,11 @@ export default function Timeline({ store }: { store: ClockStore }) {
             return (
               <span
                 key={seg.key}
-                className={`seg ${seg.running ? 'running' : ''}`}
+                className={`seg ${seg.running ? 'running' : ''}${popover?.row.sessionId === seg.sessionId ? ' active' : ''}`}
                 data-color={seg.colorId}
                 style={{ left: `${left}%`, width: `${width}%`, '--seg-row': lane } as CSSProperties}
+                onMouseEnter={() => scheduleHoverPreview(seg)}
+                onMouseLeave={dismissHoverPreview}
               >
                 <button
                   className="seg-hit"
@@ -724,6 +751,24 @@ export default function Timeline({ store }: { store: ClockStore }) {
         </div>
       )}</motion.div>}
       </AnimatePresence>
+
+      {!historyOpen && hoverPreview && !popover && (
+        <div
+          className="seg-preview"
+          role="status"
+          data-testid="seg-preview"
+          style={{ left: `clamp(8px, ${hoverPreview.containerX}px, calc(100% - min(304px, calc(100vw - 24px))))` }}
+        >
+          <div className="seg-preview-title">
+            <span className="pill-dot" data-color={hoverPreview.row.colorId} aria-hidden />
+            <strong>{hoverPreview.row.displayName}</strong>
+          </div>
+          <div className="seg-preview-meta">
+            {hoverPreview.row.startLabel} – {hoverPreview.row.endLabel ?? '进行中'} · {formatDurationZh(hoverPreview.row.seconds)}
+          </div>
+          <span className="seg-preview-hint">点击查看详情</span>
+        </div>
+      )}
 
       {!historyOpen && popover && (
         <div

@@ -1,18 +1,12 @@
-export type TimelineScale = 'default' | 'full-day' | 'effective-day';
+export type TimelineScale = 'default' | 'full-day';
 
-export interface MinuteRange {
-  startMinute: number;
-  endMinute: number;
-}
-
-export const LEARNING_DAY: MinuteRange = {
+export const LEARNING_DAY: { startMinute: number; endMinute: number } = {
   startMinute: 8 * 60,
   endMinute: 22 * 60 + 30,
 };
 
 const DEFAULT_WINDOW_MINUTES = 4 * 60;
 const DEFAULT_ANCHOR_POSITION = 0.6;
-const EFFECTIVE_PADDING_MINUTES = 30;
 
 export function isQuietMinute(minuteOfDay: number): boolean {
   const minute = ((Math.floor(minuteOfDay) % 1440) + 1440) % 1440;
@@ -26,20 +20,10 @@ export function isQuietMinute(minuteOfDay: number): boolean {
 
 export function timelineRange(
   scale: TimelineScale,
-  intervals: MinuteRange[],
   anchorMinute: number,
-): MinuteRange {
-  if (scale === 'full-day' || (scale === 'effective-day' && intervals.length === 0)) {
+): { startMinute: number; endMinute: number } {
+  if (scale === 'full-day') {
     return { ...LEARNING_DAY };
-  }
-
-  if (scale === 'effective-day') {
-    const first = Math.min(...intervals.map((interval) => interval.startMinute));
-    const last = Math.max(...intervals.map((interval) => interval.endMinute));
-    return {
-      startMinute: Math.max(LEARNING_DAY.startMinute, first - EFFECTIVE_PADDING_MINUTES),
-      endMinute: Math.min(LEARNING_DAY.endMinute, last + EFFECTIVE_PADDING_MINUTES),
-    };
   }
 
   const desiredStart = Math.round(anchorMinute - DEFAULT_WINDOW_MINUTES * DEFAULT_ANCHOR_POSITION);

@@ -5,6 +5,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 import { rmSync } from 'node:fs';
+import { isQuietMinute } from '@clock/shared';
 
 const PASSWORD = '123456';
 
@@ -110,7 +111,7 @@ test.describe('核心流程', () => {
     expect(total).toBeGreaterThan(0);
   });
 
-  test('时间轴片段点击弹出详情且热区足够大', async ({ page }) => {
+  test('时间轴片段悬停预览，点击后固定打开详情且热区足够大', async ({ page }) => {
     await doSetup(page);
     // 快速产生一个已停止会话
     await page.getByRole('radio', { name: '数学一' }).click();
@@ -126,6 +127,10 @@ test.describe('核心流程', () => {
     // 稀疏时热区 ≥24px（±12px 扩展）；密集相邻时按中点分割仍保证可点
     expect(box!.width).toBeGreaterThanOrEqual(3);
 
+    await seg.hover();
+    await expect(page.getByTestId('seg-preview')).toBeVisible();
+    await expect(page.getByRole('dialog', { name: '会话详情' })).toHaveCount(0);
+    await seg.hover();
     await seg.click();
     await expect(page.getByRole('dialog', { name: '会话详情' })).toBeVisible();
     await expect(page.getByText('净时长')).toBeVisible();
@@ -528,7 +533,7 @@ test.describe('时间轴起点补录', () => {
 });
 
 test.describe('时间轴尺度与流水账视图', () => {
-  test('三种语义尺度可切换，不再提供放大缩小', async ({ page }) => {
+  test('默认与全天尺度可切换，不再提供放大缩小或有效全天', async ({ page }) => {
     await doSetup(page);
     // 产生一个会话
     await page.getByRole('radio', { name: '数学一' }).click();
@@ -544,7 +549,7 @@ test.describe('时间轴尺度与流水账视图', () => {
 
     const scales = page.getByRole('radiogroup', { name: '时间轴尺度' });
     await expect(scales).toBeVisible();
-    await expect(scales.getByRole('radio')).toHaveCount(3);
+    await expect(scales.getByRole('radio')).toHaveCount(2);
     await expect(scales.getByRole('radio', { name: '默认' })).toHaveAttribute('aria-checked', 'true');
     await expect(track).toHaveAttribute('data-scale', 'default');
 
@@ -553,8 +558,7 @@ test.describe('时间轴尺度与流水账视图', () => {
     await expect(track.locator('.tick-label').first()).toHaveText('08:00');
     await expect(track.locator('.tick-label').last()).toHaveText('22:30');
 
-    await scales.getByRole('radio', { name: '有效全天' }).click();
-    await expect(track).toHaveAttribute('data-scale', 'effective-day');
+    await expect(scales.getByRole('radio', { name: '有效全天' })).toHaveCount(0);
 
     // 切换流水账视图
     await page.getByTestId('timeline-mode-btn').click();
@@ -652,7 +656,8 @@ test.describe('离开渐进提醒', () => {
   });
 
   test('按上一段专注时长计算休息窗口，并在临近/到期/超时提醒', async ({ page }) => {
-    // 用当前时间作为虚拟时钟起点（离开时长基于墙钟 Date.now，可被 page.clock fake）
+    const beijingNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
+    test.skip(isQuietMinute(beijingNow.getUTCHours() * 60 + beijingNow.getUTCMinutes()), '静默时段与提醒升级场景互斥');
     await page.clock.install();
     await doSetup(page);
     await page.getByRole('radio', { name: '数据结构' }).click();
@@ -696,8 +701,8 @@ test.describe('离开渐进提醒', () => {
 
 test.describe('科目结束后的离开提醒', () => {
   test('结束后同样进入已离开渐进提醒，30 分钟可开始下一段', async ({ page }) => {
-    // 用当前时间作为虚拟时钟起点（离开时长基于墙钟 Date.now，可被 page.clock fake）
-    await page.clock.install();
+    // 固定在北京时间 10:00，避免真实运行时间落入静默区导致用例漂移。
+    await page.clock.install({ time: new Date('2026-08-16T02:00:00.000Z') });
     await doSetup(page);
     await page.getByRole('radio', { name: '数据结构' }).click();
     await page.getByTestId('start-btn').click();
