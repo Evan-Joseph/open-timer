@@ -26,8 +26,8 @@ Base URL：`https://clock.4c666.top`
 
 ```json
 [
-  { "subject_id": "math", "display_name": "数学一", "aggregate_group": "math", "color_id": "amber", "sort_order": 1 },
-  { "subject_id": "english", "display_name": "英语一", "aggregate_group": "english", "color_id": "teal", "sort_order": 2 },
+  { "subject_id": "math", "display_name": "数学二", "aggregate_group": "math", "color_id": "amber", "sort_order": 1 },
+  { "subject_id": "english", "display_name": "英语二", "aggregate_group": "english", "color_id": "teal", "sort_order": 2 },
   { "subject_id": "data-structures", "display_name": "数据结构", "aggregate_group": "408", "color_id": "blue", "sort_order": 3 },
   { "subject_id": "computer-organization", "display_name": "计算机组成原理", "aggregate_group": "408", "color_id": "indigo", "sort_order": 4 },
   { "subject_id": "operating-systems", "display_name": "操作系统", "aggregate_group": "408", "color_id": "violet", "sort_order": 5 },
@@ -83,8 +83,8 @@ Base URL：`https://clock.4c666.top`
   "generated_at": "2026-08-10T14:30:00.000Z",
   "total_active_seconds": 7320,
   "by_subject": [
-    { "subject_id": "math", "display_name": "数学一", "active_seconds": 3600, "session_count": 1 },
-    { "subject_id": "english", "display_name": "英语一", "active_seconds": 3720, "session_count": 2 },
+    { "subject_id": "math", "display_name": "数学二", "active_seconds": 3600, "session_count": 1 },
+    { "subject_id": "english", "display_name": "英语二", "active_seconds": 3720, "session_count": 2 },
     { "subject_id": "data-structures", "display_name": "数据结构", "active_seconds": 0, "session_count": 0 },
     { "subject_id": "computer-organization", "display_name": "计算机组成原理", "active_seconds": 0, "session_count": 0 },
     { "subject_id": "operating-systems", "display_name": "操作系统", "active_seconds": 0, "session_count": 0 },

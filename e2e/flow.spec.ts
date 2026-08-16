@@ -114,7 +114,7 @@ test.describe('核心流程', () => {
   test('时间轴片段悬停预览，点击后固定打开详情且热区足够大', async ({ page }) => {
     await doSetup(page);
     // 快速产生一个已停止会话
-    await page.getByRole('radio', { name: '数学一' }).click();
+    await page.getByRole('radio', { name: '数学二' }).click();
     await page.getByTestId('start-btn').click();
     await page.waitForTimeout(1200);
     await page.getByRole('button', { name: '结束并保存' }).click();
@@ -139,7 +139,7 @@ test.describe('核心流程', () => {
 
   test('换科目结束当前段并开启新段', async ({ page }) => {
     await doSetup(page);
-    await page.getByRole('radio', { name: '英语一' }).click();
+    await page.getByRole('radio', { name: '英语二' }).click();
     await page.getByTestId('start-btn').click();
     await expect(page.getByText('· 进行中')).toBeVisible();
 
@@ -297,7 +297,7 @@ test.describe('截图矩阵与视觉', () => {
 test.describe('时间轴信标与定位', () => {
   test('默认尺度将当前时间置于约 60%，用户浏览后仅点击「现在」才归位', async ({ page }) => {
     await doSetup(page);
-    await page.getByRole('radio', { name: '数学一' }).click();
+    await page.getByRole('radio', { name: '数学二' }).click();
     await page.getByTestId('start-btn').click();
     await page.waitForTimeout(800);
 
@@ -472,7 +472,7 @@ test.describe('撤回（作废）与一致性', () => {
 test.describe('离开（暂停）时长显示', () => {
   test('暂停后显示「已离开」计时且不计学习时长', async ({ page }) => {
     await doSetup(page);
-    await page.getByRole('radio', { name: '数学一' }).click();
+    await page.getByRole('radio', { name: '数学二' }).click();
     await page.getByTestId('start-btn').click();
     await page.waitForTimeout(1000);
 
@@ -501,7 +501,7 @@ test.describe('时间轴 popover 编辑备注', () => {
     await doSetup(page);
     const beforeSegs = await page.locator('.seg').count();
     // 产生一个已停止会话
-    await page.getByRole('radio', { name: '英语一' }).click();
+    await page.getByRole('radio', { name: '英语二' }).click();
     await page.getByTestId('start-btn').click();
     await page.waitForTimeout(1200);
     await page.getByRole('button', { name: '结束并保存' }).click();
@@ -529,7 +529,7 @@ test.describe('时间轴 popover 编辑备注', () => {
 test.describe('时间轴起点补录', () => {
   test('已结束会话可把开始时间向前调整', async ({ page }) => {
     await doSetup(page);
-    await page.getByRole('radio', { name: '数学一' }).click();
+    await page.getByRole('radio', { name: '数学二' }).click();
     await page.getByTestId('start-btn').click();
     await page.waitForTimeout(1200);
     await page.getByRole('button', { name: '结束并保存' }).click();
@@ -554,7 +554,7 @@ test.describe('时间轴尺度与流水账视图', () => {
   test('默认与全天尺度可切换，不再提供放大缩小或有效全天', async ({ page }) => {
     await doSetup(page);
     // 产生一个会话
-    await page.getByRole('radio', { name: '数学一' }).click();
+    await page.getByRole('radio', { name: '数学二' }).click();
     await page.getByTestId('start-btn').click();
     await page.waitForTimeout(1200);
     await page.getByRole('button', { name: '结束并保存' }).click();

@@ -44,7 +44,7 @@ test('视觉审计样式断言', async ({ page }) => {
   expect(input.fontSize).toBe('15px');
 
   // 4. 运行态控制按钮 24px 图标 + 56 圆
-  await page.getByRole('radio', { name: '数学一' }).click();
+  await page.getByRole('radio', { name: '数学二' }).click();
   await page.getByTestId('start-btn').click();
   await page.waitForTimeout(1200);
   const ctl = await page.locator('.control-btn.pause').evaluate((el) => {

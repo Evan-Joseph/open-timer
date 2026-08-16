@@ -86,6 +86,10 @@ describe('API 集成', () => {
     const subjects = await noauth.json();
     expect(subjects).toHaveLength(7);
     expect(subjects.map((s: { subject_id: string }) => s.subject_id)).toContain('data-structures');
+    expect(subjects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ subject_id: 'math', display_name: '数学二', aggregate_group: 'math' }),
+      expect.objectContaining({ subject_id: 'english', display_name: '英语二', aggregate_group: 'english' }),
+    ]));
     // CORS：跨域可读
     expect(noauth.headers.get('access-control-allow-origin')).toBe('*');
 

@@ -5,8 +5,8 @@ import type { SubjectDef, SubjectId, AggregateGroup } from './types.js';
  * 408 在计时层拆为四个真实模块，汇总层提供 408 聚合。
  */
 export const SUBJECTS: readonly SubjectDef[] = [
-  { id: 'math', displayName: '数学一', aggregateGroup: 'math', colorId: 'amber', sortOrder: 1 },
-  { id: 'english', displayName: '英语一', aggregateGroup: 'english', colorId: 'teal', sortOrder: 2 },
+  { id: 'math', displayName: '数学二', aggregateGroup: 'math', colorId: 'amber', sortOrder: 1 },
+  { id: 'english', displayName: '英语二', aggregateGroup: 'english', colorId: 'teal', sortOrder: 2 },
   { id: 'data-structures', displayName: '数据结构', aggregateGroup: '408', colorId: 'blue', sortOrder: 3 },
   { id: 'computer-organization', displayName: '计算机组成原理', aggregateGroup: '408', colorId: 'indigo', sortOrder: 4 },
   { id: 'operating-systems', displayName: '操作系统', aggregateGroup: '408', colorId: 'violet', sortOrder: 5 },
