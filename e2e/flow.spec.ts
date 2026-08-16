@@ -271,8 +271,8 @@ test.describe('截图矩阵与视觉', () => {
   });
 });
 
-test.describe('时间轴信标与自动滚动', () => {
-  test('开始会话后时间轴自动定位，「现在」按钮可滚回信标', async ({ page }) => {
+test.describe('时间轴信标与定位', () => {
+  test('默认尺度将当前时间置于约 60%，用户浏览后仅点击「现在」才归位', async ({ page }) => {
     await doSetup(page);
     await page.getByRole('radio', { name: '数学一' }).click();
     await page.getByTestId('start-btn').click();
@@ -281,24 +281,16 @@ test.describe('时间轴信标与自动滚动', () => {
     // 信标存在
     await expect(page.getByTestId('now-line')).toBeVisible();
 
-    // 手动滚到远端（模拟用户浏览历史时段）
     const scroll = page.getByTestId('timeline-scroll');
-    await scroll.evaluate((el) => { el.scrollLeft = 4000; });
-    await page.waitForTimeout(100);
+    await expect(scroll).toBeVisible();
 
-    // 点击「现在」平滑滚回信标（时间无关：验证 now-line 进入可视区）
+    await page.getByRole('radio', { name: '全天', exact: true }).click();
+    await page.waitForTimeout(1100);
+    await expect(page.getByRole('radio', { name: '全天', exact: true })).toHaveAttribute('aria-checked', 'true');
+
     await page.getByTestId('scroll-now-btn').click();
-    await page.waitForFunction(
-      () => {
-        const scrollEl = document.querySelector('[data-testid="timeline-scroll"]');
-        const nowLine = document.querySelector('[data-testid="now-line"]') as HTMLElement | null;
-        if (!scrollEl || !nowLine) return false;
-        const rect = scrollEl.getBoundingClientRect();
-        const lineRect = nowLine.getBoundingClientRect();
-        return lineRect.left >= rect.left - 5 && lineRect.left <= rect.right + 5;
-      },
-      { timeout: 5000 },
-    );
+    await expect(page.getByRole('radio', { name: '默认' })).toHaveAttribute('aria-checked', 'true');
+    await expect(scroll).toBeVisible();
 
     // 清理
     await page.getByRole('button', { name: '结束并保存' }).click();
@@ -316,7 +308,7 @@ test.describe('时间轴信标与自动滚动', () => {
 });
 
 test.describe('近 7 天执行回顾', () => {
-  test('展示周期指标、每日趋势与科目分布，并可进入单日时间轴', async ({ page }) => {
+  test('以固定全天泳道展示七天记录，并隐藏单日时间轴', async ({ page }) => {
     await doSetup(page);
     const state = await (await page.request.get('/api/v1/state')).json();
     const subjects = await (await page.request.get('/api/v1/subjects')).json();
@@ -344,19 +336,50 @@ test.describe('近 7 天执行回顾', () => {
       });
     });
 
+    await page.route('**/api/v1/sessions?**', async (route) => {
+      const date = new URL(route.request().url()).searchParams.get('date')!;
+      const startedAt = `${date}T01:00:00.000Z`;
+      const endedAt = `${date}T02:00:00.000Z`;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [{
+            session_id: `history-${date}`,
+            subject_id: subjects[0].subject_id,
+            started_at: startedAt,
+            ended_at: endedAt,
+            active_seconds: 3600,
+            status: 'stopped',
+            end_reason: 'manual',
+            note: null,
+            segments: [{ started_at: startedAt, ended_at: endedAt }],
+          }],
+        }),
+      });
+    });
+
+    await page.evaluate(() => window.scrollTo(0, 0));
     await page.getByTestId('history-toggle').click();
     const report = page.getByTestId('history-strip');
     await expect(report).toBeVisible();
     await expect(report.locator('.history-metrics')).toContainText('7 小时');
     await expect(report.locator('.history-metrics')).toContainText('7 / 7 天');
     await expect(report.locator('.history-metrics')).toContainText('+100%');
-    await expect(report.locator('.history-day')).toHaveCount(7);
+    await expect(report.locator('.history-lane')).toHaveCount(7);
+    await expect(report.locator('.history-lane-segment')).toHaveCount(7);
+    await expect(report.getByText('08:00', { exact: true })).toBeVisible();
+    await expect(report.getByText('22:30', { exact: true })).toBeVisible();
     await expect(report.locator('.history-subject-list > span')).toHaveCount(2);
     await expect(report.locator('.history-subject-list')).toContainText('67%');
-
-    const targetDate = shift(state.today_date, -3);
-    await report.getByRole('button', { name: new RegExp(targetDate) }).click();
-    await expect(page.locator('.timeline-title')).toContainText(targetDate);
+    await expect(report.getByRole('button', { name: /2026-/ })).toHaveCount(0);
+    await expect(page.getByTestId('timeline-scroll')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '前一天' })).toHaveCount(0);
+    await expect(page.getByTestId('scroll-now-btn')).toHaveCount(0);
+    await expect(page.getByTestId('now-line')).toHaveCount(0);
+    await page.waitForFunction(() => (
+      window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 4
+    ));
   });
 });
 
@@ -504,8 +527,8 @@ test.describe('时间轴起点补录', () => {
   });
 });
 
-test.describe('时间轴缩放与流水账视图', () => {
-  test('缩放改变轨道宽度，流水账视图可切换回', async ({ page }) => {
+test.describe('时间轴尺度与流水账视图', () => {
+  test('三种语义尺度可切换，不再提供放大缩小', async ({ page }) => {
     await doSetup(page);
     // 产生一个会话
     await page.getByRole('radio', { name: '数学一' }).click();
@@ -516,17 +539,22 @@ test.describe('时间轴缩放与流水账视图', () => {
 
     const track = page.locator('.timeline-track');
     await expect(track).toBeVisible();
-    const baseWidth = (await track.boundingBox())!.width;
+    await expect(page.getByRole('button', { name: '放大时间轴' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '缩小时间轴' })).toHaveCount(0);
 
-    // 放大后轨道变宽
-    await page.getByRole('button', { name: '放大时间轴' }).click();
-    const zoomedWidth = (await track.boundingBox())!.width;
-    expect(zoomedWidth).toBeGreaterThan(baseWidth);
+    const scales = page.getByRole('radiogroup', { name: '时间轴尺度' });
+    await expect(scales).toBeVisible();
+    await expect(scales.getByRole('radio')).toHaveCount(3);
+    await expect(scales.getByRole('radio', { name: '默认' })).toHaveAttribute('aria-checked', 'true');
+    await expect(track).toHaveAttribute('data-scale', 'default');
 
-    // 缩小回原宽
-    await page.getByRole('button', { name: '缩小时间轴' }).click();
-    const backWidth = (await track.boundingBox())!.width;
-    expect(backWidth).toBeCloseTo(baseWidth, 0);
+    await scales.getByRole('radio', { name: '全天', exact: true }).click();
+    await expect(track).toHaveAttribute('data-scale', 'full-day');
+    await expect(track.locator('.tick-label').first()).toHaveText('08:00');
+    await expect(track.locator('.tick-label').last()).toHaveText('22:30');
+
+    await scales.getByRole('radio', { name: '有效全天' }).click();
+    await expect(track).toHaveAttribute('data-scale', 'effective-day');
 
     // 切换流水账视图
     await page.getByTestId('timeline-mode-btn').click();

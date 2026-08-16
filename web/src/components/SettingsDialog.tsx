@@ -1,6 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
-import { useSettings, updateSettings } from '../lib/settings.js';
+import { setAnimationsEnabled, useAnimationsEnabled, useSettings, updateSettings } from '../lib/settings.js';
 import { AMBIENT_LABELS } from '../lib/ambient.js';
 
 interface Props {
@@ -13,7 +13,7 @@ interface Props {
 
 export default function SettingsDialog({ open, onOpenChange, theme, onThemeChange, onLogout }: Props) {
   const settings = useSettings();
-  const animationsOn = localStorage.getItem('clock-animations') !== 'off';
+  const animationsOn = useAnimationsEnabled();
   const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   return (
@@ -108,10 +108,7 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
                   aria-checked={animationsOn === (value === 'on')}
                   className={`seg-item ${animationsOn === (value === 'on') ? 'active' : ''}`}
                   disabled={reduced}
-                  onClick={() => {
-                    localStorage.setItem('clock-animations', value);
-                    window.location.reload();
-                  }}
+                  onClick={() => setAnimationsEnabled(value === 'on')}
                 >
                   {label}
                 </button>

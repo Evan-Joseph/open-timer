@@ -1,5 +1,5 @@
 /**
- * 底部日时间轴：00:00–24:00 固定比例轨道 + 科目片段 + 当前信标。
+ * 底部日时间轴：可学习时段的固定尺度轨道 + 科目片段 + 当前信标。
  *
  * 交互模型（参考 FullCalendar nowIndicator/scrollTime 与 Toggl Track）：
  * - 信标随时间持续移动（30s 步进），不强制拖动视口（尊重用户手动浏览）；
@@ -11,19 +11,19 @@
  * 数据：store.sessions 是"今天"的数据；查看历史日时按日期拉取（带轻量缓存）。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Clock, LocateFixed, Undo2, X, ZoomIn, ZoomOut, List, GanttChart, CalendarDays } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { ChevronLeft, ChevronRight, Clock, LocateFixed, Undo2, X, List, GanttChart, CalendarDays } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import type { ClockStore } from '../lib/store.js';
 import type { DailySummaryApi, SessionApi } from '../lib/api.js';
 import { apiGet } from '../lib/api.js';
 import { formatBeijingTime, formatDurationZh } from '../lib/clock.js';
-import { shanghaiDayRangeUtc } from '@clock/shared';
+import { useAnimationsEnabled } from '../lib/settings.js';
+import { LEARNING_DAY, shanghaiDayRangeUtc, timelineRange, type TimelineScale } from '@clock/shared';
 
-const BASE_PX_PER_MINUTE = 4; // 1x 缩放：24h = 5760px
-const ZOOM_LEVELS = [0.5, 1, 2, 4];
-const DAY_MINUTES = 1440;
-const MIN_SEG_PX = 3;
 const NOW_TICK_MS = 30_000;
+// 960px 轨道中 24px 热区约等于 6 分钟，留出一分余量避免相邻热区相互遮挡。
+const HIT_TARGET_GUARD_MINUTES = 7;
 
 interface RenderSeg {
   key: string;
@@ -31,8 +31,8 @@ interface RenderSeg {
   subjectId: string;
   colorId: string;
   displayName: string;
-  leftPx: number;
-  widthPx: number;
+  startMinute: number;
+  endMinute: number;
   startLabel: string;
   endLabel: string | null;
   seconds: number;
@@ -75,17 +75,16 @@ function formatHistoryDuration(seconds: number): string {
 }
 
 export default function Timeline({ store }: { store: ClockStore }) {
+  const animationsEnabled = useAnimationsEnabled();
+  const viewTransition = animationsEnabled ? { duration: 0.22, ease: [0.2, 0, 0, 1] as const } : { duration: 0 };
   const [viewDate, setViewDate] = useState(store.todayDate);
   const [popover, setPopover] = useState<{ row: SessionRow; containerX: number } | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
-  /** 缩放级别索引与轨道/流水账视图 */
-  const [zoomIdx, setZoomIdx] = useState(() => {
-    const saved = Number(localStorage.getItem('clock-timeline-zoom'));
-    const i = ZOOM_LEVELS.indexOf(saved);
-    return i >= 0 ? i : 1;
+  const [scale, setScale] = useState<TimelineScale>(() => {
+    const saved = localStorage.getItem('clock-timeline-scale');
+    return saved === 'full-day' || saved === 'effective-day' ? saved : 'default';
   });
   const [mode, setMode] = useState<'track' | 'list'>('track');
-  const pxPerMinute = BASE_PX_PER_MINUTE * ZOOM_LEVELS[zoomIdx];
   /** popover 内编辑备注 */
   const [noteDraft, setNoteDraft] = useState('');
   const [noteSaving, setNoteSaving] = useState(false);
@@ -95,16 +94,17 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const [historySessions, setHistorySessions] = useState<SessionApi[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historySummaries, setHistorySummaries] = useState<DailySummaryApi[]>([]);
+  const [historyWeekSessions, setHistoryWeekSessions] = useState<Map<string, SessionApi[]>>(new Map());
   const [historyLoading, setHistoryLoading] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const prevTodayRef = useRef(store.todayDate);
   /** 定位以 viewDateRef 为准，避免 effect 声明顺序导致的竞态 */
   const viewDateRef = useRef(viewDate);
-  const locatedDateRef = useRef<string | null>(null);
   const activeSessionId = store.state?.active_session?.session_id ?? null;
   const prevActiveIdRef = useRef<string | null>(null);
   const historyCacheRef = useRef<Map<string, SessionApi[]>>(new Map());
+  const historyReportRef = useRef<HTMLDivElement>(null);
+  const autoScrolledHistoryRef = useRef(false);
 
   const loadHistory = useCallback(async () => {
     if (historyLoading) return;
@@ -118,7 +118,18 @@ export default function Timeline({ store }: { store: ClockStore }) {
         by_subject: [],
       }))),
     );
+    const weekDates = dates.slice(0, 7);
+    const sessions = await Promise.all(
+      weekDates.map(async (date) => {
+        const cached = historyCacheRef.current.get(date);
+        if (cached) return [date, cached] as const;
+        const result = await apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${date}`).catch(() => ({ sessions: [] }));
+        historyCacheRef.current.set(date, result.sessions);
+        return [date, result.sessions] as const;
+      }),
+    );
     setHistorySummaries(rows);
+    setHistoryWeekSessions(new Map(sessions));
     setHistoryLoading(false);
   }, [historyLoading, store.todayDate]);
 
@@ -133,7 +144,6 @@ export default function Timeline({ store }: { store: ClockStore }) {
     if (prevTodayRef.current !== store.todayDate) {
       setViewDate((prev) => (prev === prevTodayRef.current ? store.todayDate : prev));
       prevTodayRef.current = store.todayDate;
-      locatedDateRef.current = null; // 新的一天允许重新定位
     }
   }, [store.todayDate]);
 
@@ -189,16 +199,14 @@ export default function Timeline({ store }: { store: ClockStore }) {
         if (segEnd <= startMs || segStart >= endMs) continue;
         const cs = Math.max(segStart, startMs);
         const ce = Math.min(segEnd, endMs);
-        const leftPx = ((cs - startMs) / 60000) * pxPerMinute;
-        const rawWidthPx = ((ce - cs) / 60000) * pxPerMinute;
         out.push({
           key: `${s.session_id}-${i}`,
           sessionId: s.session_id,
           subjectId: s.subject_id,
           colorId: subj?.color_id ?? 'blue',
           displayName: subj?.display_name ?? s.subject_id,
-          leftPx,
-          widthPx: Math.max(MIN_SEG_PX, rawWidthPx),
+          startMinute: (cs - startMs) / 60_000,
+          endMinute: (ce - startMs) / 60_000,
           startLabel: formatBeijingTime(cs),
           endLabel: seg.ended_at ? formatBeijingTime(ce) : null,
           seconds: Math.floor((ce - cs) / 1000),
@@ -208,9 +216,36 @@ export default function Timeline({ store }: { store: ClockStore }) {
         });
       }
     }
-    return out.sort((a, b) => a.leftPx - b.leftPx);
+    return out.sort((a, b) => a.startMinute - b.startMinute);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateSessions, store.subjects, startMs, endMs, isToday, pxPerMinute, Math.floor(nowMs / NOW_TICK_MS)]);
+  }, [dateSessions, store.subjects, startMs, endMs, isToday, Math.floor(nowMs / NOW_TICK_MS)]);
+
+  const anchorMinute = isToday
+    ? Math.min(LEARNING_DAY.endMinute, Math.max(LEARNING_DAY.startMinute, (nowMs - startMs) / 60_000))
+    : (segs[0]?.startMinute ?? (LEARNING_DAY.startMinute + LEARNING_DAY.endMinute) / 2);
+  const visibleRange = useMemo(
+    () => timelineRange(scale, segs.map((seg) => ({ startMinute: seg.startMinute, endMinute: seg.endMinute })), anchorMinute),
+    [scale, segs, anchorMinute],
+  );
+  const visibleMinutes = visibleRange.endMinute - visibleRange.startMinute;
+  const minuteToPercent = useCallback(
+    (minute: number) => ((minute - visibleRange.startMinute) / visibleMinutes) * 100,
+    [visibleRange.startMinute, visibleMinutes],
+  );
+  const visibleSegs = useMemo(
+    () => segs.filter((seg) => seg.endMinute > visibleRange.startMinute && seg.startMinute < visibleRange.endMinute),
+    [segs, visibleRange],
+  );
+  const positionedSegs = useMemo(() => {
+    const laneEnds = Array<number>(visibleSegs.length).fill(-Infinity);
+    return visibleSegs.map((seg) => {
+      let lane = laneEnds.findIndex((endMinute) => endMinute + HIT_TARGET_GUARD_MINUTES <= seg.startMinute);
+      if (lane < 0) lane = laneEnds.indexOf(Math.min(...laneEnds));
+      laneEnds[lane] = seg.endMinute;
+      return { seg, lane };
+    });
+  }, [visibleSegs]);
+  const timelineLaneCount = Math.max(1, ...positionedSegs.map(({ lane }) => lane + 1));
 
   /** 会话级分组：一个 session 的所有段合并为一行（弹窗/流水账共用数据源）。 */
   const sessionRows: SessionRow[] = useMemo(() => {
@@ -257,45 +292,16 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const sessionRowsRef = useRef<SessionRow[]>([]);
   sessionRowsRef.current = sessionRows;
 
-  /** 滚动到指定轨道 px（自动钳制），behavior 可选平滑。 */
-  const scrollToPx = useCallback((px: number, smooth: boolean) => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const target = Math.max(0, Math.min(px - el.clientWidth * 0.6, el.scrollWidth - el.clientWidth));
-    el.scrollTo({ left: target, behavior: smooth ? 'smooth' : 'auto' });
+  const scrollToNow = useCallback(() => {
+    setScale('default');
+    localStorage.setItem('clock-timeline-scale', 'default');
   }, []);
-
-  const scrollToNow = useCallback(
-    (smooth: boolean) => {
-      const nowClamped = Math.min(Math.max(Date.now(), startMs), endMs);
-      const px = ((nowClamped - startMs) / 60000) * pxPerMinute;
-      scrollToPx(px, smooth);
-    },
-    [startMs, endMs, pxPerMinute, scrollToPx],
-  );
-
-  // 定位：每个日期只自动定位一次；以 viewDateRef 为准判断目标日（修复 effect 顺序竞态）
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const targetDate = viewDateRef.current;
-    if (locatedDateRef.current === targetDate) return;
-    locatedDateRef.current = targetDate;
-    if (targetDate === store.todayDate) {
-      scrollToNow(false);
-    } else if (segs.length > 0) {
-      scrollToPx(segs[0].leftPx, false);
-    } else {
-      scrollToPx(8 * 60 * pxPerMinute, false); // 历史空日：定位 08:00
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewDate, segs, store.todayDate]);
 
   // 新会话开始：平滑滚到信标（片段正在生长）
   useEffect(() => {
     if (activeSessionId && activeSessionId !== prevActiveIdRef.current) {
       const t = window.setTimeout(() => {
-        if (viewDateRef.current === store.todayDate) scrollToNow(true);
+        if (viewDateRef.current === store.todayDate) scrollToNow();
       }, 150);
       prevActiveIdRef.current = activeSessionId;
       return () => window.clearTimeout(t);
@@ -304,20 +310,21 @@ export default function Timeline({ store }: { store: ClockStore }) {
   }, [activeSessionId, scrollToNow, store.todayDate]);
 
   const ticks = useMemo(() => {
-    const arr: Array<{ label: string; leftPx: number; major: boolean }> = [];
-    // 缩放越深刻度越稀（避免标签重叠）：2x 起 60 分钟，4x 起 120 分钟
-    const step = pxPerMinute >= 16 ? 120 : pxPerMinute >= 8 ? 60 : 30;
-    for (let m = 0; m <= DAY_MINUTES; m += step) {
-      arr.push({
-        label: `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`,
-        leftPx: m * pxPerMinute,
-        major: m % 60 === 0,
-      });
+    const values = [visibleRange.startMinute];
+    const step = scale === 'full-day' ? 120 : 60;
+    for (let minute = Math.ceil(visibleRange.startMinute / step) * step; minute < visibleRange.endMinute; minute += step) {
+      if (minute > visibleRange.startMinute) values.push(minute);
     }
-    return arr;
-  }, [pxPerMinute]);
+    values.push(visibleRange.endMinute);
+    return values.map((minute) => ({
+      minute,
+      label: `${String(Math.floor(minute / 60) % 24).padStart(2, '0')}:${String(Math.round(minute) % 60).padStart(2, '0')}`,
+      leftPercent: minuteToPercent(minute),
+      major: minute % 60 === 0,
+    }));
+  }, [minuteToPercent, scale, visibleRange]);
 
-  const nowPx = ((Math.min(Math.max(nowMs, startMs), endMs) - startMs) / 60000) * pxPerMinute;
+  const nowPercent = minuteToPercent(Math.min(Math.max((nowMs - startMs) / 60_000, visibleRange.startMinute), visibleRange.endMinute));
 
   /** 点片段：轨道坐标 → 容器坐标（trackRect 已含滚动位移，直接相减）；数据提升到会话级。 */
   const openPopover = useCallback((seg: RenderSeg) => {
@@ -327,16 +334,14 @@ export default function Timeline({ store }: { store: ClockStore }) {
     setStartDraft(row.startLabel);
     setNoteSaving(false);
     const track = trackRef.current;
-    const scrollEl = scrollRef.current;
-    if (!track || !scrollEl) {
-      setPopover({ row, containerX: seg.leftPx });
+    if (!track) {
+      setPopover({ row, containerX: 0 });
       return;
     }
     const trackRect = track.getBoundingClientRect();
-    const containerRect = scrollEl.getBoundingClientRect();
-    const xInContainer = trackRect.left - containerRect.left + seg.leftPx + seg.widthPx / 2;
+    const xInContainer = minuteToPercent((seg.startMinute + seg.endMinute) / 2) / 100 * trackRect.width;
     setPopover({ row, containerX: xInContainer });
-  }, []);
+  }, [minuteToPercent]);
 
   /** 流水账整行点击：以行元素在 .timeline 容器中的水平中心定位弹窗。 */
   const openRowPopover = useCallback((row: SessionRow, anchor: HTMLElement) => {
@@ -453,45 +458,49 @@ export default function Timeline({ store }: { store: ClockStore }) {
     return new Intl.DateTimeFormat('zh-CN', { weekday: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(year, month - 1, day)));
   };
 
+  const historyLanes = useMemo(() => historyModel.current.map((day) => {
+    const { startMs: dayStart, endMs: dayEnd } = shanghaiDayRangeUtc(day.date);
+    const segments = (historyWeekSessions.get(day.date) ?? []).flatMap((session) => {
+      if (session.status === 'voided') return [];
+      const subject = store.subjects.find((item) => item.subject_id === session.subject_id);
+      return session.segments.flatMap((segment, index) => {
+        const start = Math.max(dayStart, Date.parse(segment.started_at));
+        const end = Math.min(dayEnd, segment.ended_at ? Date.parse(segment.ended_at) : dayEnd);
+        if (end <= start) return [];
+        const startMinute = (start - dayStart) / 60_000;
+        const endMinute = (end - dayStart) / 60_000;
+        if (endMinute <= LEARNING_DAY.startMinute || startMinute >= LEARNING_DAY.endMinute) return [];
+        return [{
+          key: `${session.session_id}-${index}`,
+          colorId: subject?.color_id ?? 'blue',
+          left: ((Math.max(startMinute, LEARNING_DAY.startMinute) - LEARNING_DAY.startMinute) / (LEARNING_DAY.endMinute - LEARNING_DAY.startMinute)) * 100,
+          width: Math.max(0.35, ((Math.min(endMinute, LEARNING_DAY.endMinute) - Math.max(startMinute, LEARNING_DAY.startMinute)) / (LEARNING_DAY.endMinute - LEARNING_DAY.startMinute)) * 100),
+        }];
+      });
+    });
+    return { ...day, segments };
+  }), [historyModel.current, historyWeekSessions, store.subjects]);
+
+  useEffect(() => {
+    if (!historyOpen || historyLoading || autoScrolledHistoryRef.current) return;
+    autoScrolledHistoryRef.current = true;
+    const id = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+      });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [historyOpen, historyLoading, historyLanes]);
+
   return (
     <section className="timeline" aria-label="时间轴">
       <div className="timeline-head">
         <h2 className="timeline-title">
-          时间轴 · {viewDate}
+          {historyOpen ? '近 7 天执行回顾' : `时间轴 · ${viewDate}`}
           {totalSeconds > 0 && <span className="timeline-total"> · 共 {formatDurationZh(totalSeconds)}</span>}
         </h2>
         <div className="timeline-nav">
-          {mode === 'track' && (
-            <>
-              <button
-                className="icon-btn"
-                aria-label="缩小时间轴"
-                title="缩小"
-                disabled={zoomIdx <= 0}
-                onClick={() => {
-                  const next = zoomIdx - 1;
-                  setZoomIdx(next);
-                  localStorage.setItem('clock-timeline-zoom', String(ZOOM_LEVELS[next]));
-                }}
-              >
-                <ZoomOut size={16} />
-              </button>
-              <button
-                className="icon-btn"
-                aria-label="放大时间轴"
-                title="放大"
-                disabled={zoomIdx >= ZOOM_LEVELS.length - 1}
-                onClick={() => {
-                  const next = zoomIdx + 1;
-                  setZoomIdx(next);
-                  localStorage.setItem('clock-timeline-zoom', String(ZOOM_LEVELS[next]));
-                }}
-              >
-                <ZoomIn size={16} />
-              </button>
-            </>
-          )}
-          <button
+          {!historyOpen && <button
             className="icon-btn"
             aria-label={mode === 'track' ? '切换到流水账视图' : '切换到时间轴视图'}
             title={mode === 'track' ? '流水账' : '时间轴'}
@@ -499,22 +508,22 @@ export default function Timeline({ store }: { store: ClockStore }) {
             data-testid="timeline-mode-btn"
           >
             {mode === 'track' ? <List size={16} /> : <GanttChart size={16} />}
-          </button>
-          <button className="icon-btn" aria-label="前一天" onClick={() => setViewDate(shiftDate(viewDate, -1))}>
+          </button>}
+          {!historyOpen && <button className="icon-btn" aria-label="前一天" onClick={() => setViewDate(shiftDate(viewDate, -1))}>
             <ChevronLeft size={16} />
-          </button>
-          {isToday ? (
-            <button className="text-btn now-btn" onClick={() => scrollToNow(true)} aria-label="滚动到当前时间" data-testid="scroll-now-btn">
+          </button>}
+          {!historyOpen && (isToday ? (
+            <button className="text-btn now-btn" onClick={scrollToNow} aria-label="滚动到当前时间" data-testid="scroll-now-btn">
               <LocateFixed size={14} aria-hidden /> 现在
             </button>
           ) : (
             <button className="text-btn" onClick={() => setViewDate(store.todayDate)}>
               回今天
             </button>
-          )}
-          <button className="icon-btn" aria-label="后一天" onClick={() => setViewDate(shiftDate(viewDate, 1))} disabled={isToday}>
+          ))}
+          {!historyOpen && <button className="icon-btn" aria-label="后一天" onClick={() => setViewDate(shiftDate(viewDate, 1))} disabled={isToday}>
             <ChevronRight size={16} />
-          </button>
+          </button>}
           <button
             className={`icon-btn ${historyOpen ? 'selected' : ''}`}
             aria-label="近 7 天回顾"
@@ -522,7 +531,10 @@ export default function Timeline({ store }: { store: ClockStore }) {
             onClick={() => {
               const next = !historyOpen;
               setHistoryOpen(next);
-              if (next) void loadHistory();
+              if (next) {
+                autoScrolledHistoryRef.current = false;
+                void loadHistory();
+              }
             }}
             data-testid="history-toggle"
           >
@@ -531,8 +543,16 @@ export default function Timeline({ store }: { store: ClockStore }) {
         </div>
       </div>
 
+      <AnimatePresence initial={false}>
       {historyOpen && (
-        <div className="history-strip" data-testid="history-strip">
+        <motion.div
+          key="week"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={viewTransition}
+        >
+        <div className="history-strip" data-testid="history-strip" ref={historyReportRef}>
           <div className="history-strip-head">
             <div>
               <strong>近 7 天执行时间</strong>
@@ -553,25 +573,23 @@ export default function Timeline({ store }: { store: ClockStore }) {
                   </strong>
                 </div>
               </div>
-              <div className="history-chart" role="list" aria-label="每日执行时间">
-                {historyModel.current.map((day) => {
-                  const height = day.total_active_seconds > 0 ? Math.max(8, (day.total_active_seconds / historyModel.maxDay) * 100) : 3;
-                  const selected = day.date === viewDate;
-                  return (
-                    <button
-                      key={day.date}
-                      className={`history-day${selected ? ' selected' : ''}`}
-                      onClick={() => setViewDate(day.date)}
-                      aria-pressed={selected}
-                      aria-label={`${day.date}，执行 ${formatDurationZh(day.total_active_seconds)}`}
-                    >
-                      <span className="history-day-value">{formatHistoryDuration(day.total_active_seconds)}</span>
-                      <span className="history-bar-track" aria-hidden><span className="history-bar" style={{ height: `${height}%` }} /></span>
-                      <span className="history-weekday">{day.date === store.todayDate ? '今天' : weekdayLabel(day.date)}</span>
-                      <small>{day.date.slice(5)}</small>
-                    </button>
-                  );
-                })}
+              <div className="history-lanes" role="list" aria-label="近 7 天固定全天泳道">
+                <div className="history-axis" aria-hidden>
+                  <span>08:00</span><span>12:00</span><span>16:00</span><span>20:00</span><span>22:30</span>
+                </div>
+                {historyLanes.map((day) => (
+                  <div key={day.date} className="history-lane" role="listitem" aria-label={`${day.date}，执行 ${formatDurationZh(day.total_active_seconds)}`}>
+                    <div className="history-lane-label">
+                      <strong>{day.date === store.todayDate ? '今天' : weekdayLabel(day.date)}</strong>
+                      <span>{day.date.slice(5)} · {formatHistoryDuration(day.total_active_seconds)}</span>
+                    </div>
+                    <div className="history-lane-track">
+                      {day.segments.map((segment) => (
+                        <span key={segment.key} className="history-lane-segment" data-color={segment.colorId} style={{ left: `${segment.left}%`, width: `${segment.width}%` }} />
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
               {historyModel.subjects.length > 0 && (
                 <div className="history-subjects" aria-label="近 7 天科目分布">
@@ -594,9 +612,42 @@ export default function Timeline({ store }: { store: ClockStore }) {
             </div>
           )}
         </div>
+        </motion.div>
+      )}
+      </AnimatePresence>
+
+      {!historyOpen && mode === 'track' && (
+        <div className="timeline-scale" role="radiogroup" aria-label="时间轴尺度">
+          {([
+            ['default', '默认'],
+            ['full-day', '全天'],
+            ['effective-day', '有效全天'],
+          ] as const).map(([value, label]) => (
+            <button
+              key={value}
+              role="radio"
+              aria-checked={scale === value}
+              className={scale === value ? 'selected' : ''}
+              onClick={() => {
+                setScale(value);
+                localStorage.setItem('clock-timeline-scale', value);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       )}
 
-      {mode === 'list' ? (
+      <AnimatePresence mode="wait" initial={false}>
+      {!historyOpen && <motion.div
+        key={mode}
+        className="timeline-view-shell"
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -4 }}
+        transition={viewTransition}
+      >{mode === 'list' ? (
         /* 流水账视图：按时间排序的记录行，小屏友好 */
         <div className="timeline-list" data-testid="timeline-list">
           {segs.length === 0 ? (
@@ -636,54 +687,45 @@ export default function Timeline({ store }: { store: ClockStore }) {
         </div>
       ) : (
         /* 轨道始终渲染：空日也保留刻度与信标（时间感） */
-        <div className="timeline-scroll" ref={scrollRef} data-testid="timeline-scroll">
-          <div className="timeline-track" ref={trackRef} style={{ width: DAY_MINUTES * pxPerMinute }}>
+        <div className="timeline-scroll" data-testid="timeline-scroll">
+          <div className="timeline-track" ref={trackRef} data-scale={scale} style={{ '--timeline-lanes': timelineLaneCount } as CSSProperties}>
           {ticks.map((t) => (
-            <div key={t.leftPx} className={`tick ${t.major ? 'major' : ''}`} style={{ left: t.leftPx }}>
-              {t.major && t.leftPx < DAY_MINUTES * pxPerMinute - 40 && <span className="tick-label">{t.label}</span>}
+            <div key={t.minute} className={`tick ${t.major ? 'major' : ''}`} style={{ left: `${t.leftPercent}%` }}>
+              <span className="tick-label">{t.label}</span>
             </div>
           ))}
-          {segs.map((seg, i) => {
-            // 热区按相邻片段中点分割：不重叠、不留缝；稀疏时向两侧扩展 12px（窄片段总热区 ≥24px）
-            const prev = segs[i - 1];
-            const next = segs[i + 1];
-            const visualEnd = seg.leftPx + seg.widthPx;
-            let hotLeft = seg.leftPx - 12;
-            let hotRight = visualEnd + 12;
-            if (prev) {
-              const prevEnd = prev.leftPx + prev.widthPx;
-              hotLeft = Math.max(hotLeft, (prevEnd + seg.leftPx) / 2);
-            }
-            if (next) {
-              hotRight = Math.min(hotRight, (visualEnd + next.leftPx) / 2);
-            }
+          {positionedSegs.map(({ seg, lane }) => {
+            const left = Math.max(0, minuteToPercent(Math.max(seg.startMinute, visibleRange.startMinute)));
+            const right = Math.min(100, minuteToPercent(Math.min(seg.endMinute, visibleRange.endMinute)));
+            const width = Math.max(0.45, right - left);
             return (
               <span
                 key={seg.key}
                 className={`seg ${seg.running ? 'running' : ''}`}
                 data-color={seg.colorId}
-                style={{ left: hotLeft, width: Math.max(4, hotRight - hotLeft) }}
+                style={{ left: `${left}%`, width: `${width}%`, '--seg-row': lane } as CSSProperties}
               >
                 <button
                   className="seg-hit"
                   aria-label={`${seg.displayName} ${seg.startLabel} 到 ${seg.endLabel ?? '现在'}，${formatDurationZh(seg.seconds)}`}
                   onClick={() => openPopover(seg)}
                 />
-                <span className="seg-fill" style={{ left: seg.leftPx - hotLeft, width: seg.widthPx }} aria-hidden />
+                <span className="seg-fill" aria-hidden />
               </span>
             );
           })}
-          {segs.length === 0 && <div className="timeline-empty-inline">这一天还没有记录</div>}
+          {visibleSegs.length === 0 && <div className="timeline-empty-inline">这一天还没有记录</div>}
           {isToday && (
-            <div className="now-line" style={{ left: nowPx }} data-testid="now-line" aria-label="当前时间">
+            <div className="now-line" style={{ left: `${nowPercent}%` }} data-testid="now-line" aria-label="当前时间">
               <span className="now-flag" aria-hidden />
             </div>
           )}
           </div>
         </div>
-      )}
+      )}</motion.div>}
+      </AnimatePresence>
 
-      {popover && (
+      {!historyOpen && popover && (
         <div
           className="seg-popover"
           role="dialog"
@@ -771,7 +813,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
         </div>
       )}
 
-      {overview.length > 0 && (
+      {!historyOpen && overview.length > 0 && (
         <div className="today-overview">
           {overview.map((it) => {
             const subj = store.subjects.find((s) => s.subject_id === it.subject_id);
@@ -785,13 +827,13 @@ export default function Timeline({ store }: { store: ClockStore }) {
         </div>
       )}
 
-      <div className="legend" aria-hidden={false}>
+      {!historyOpen && <div className="legend" aria-hidden={false}>
         {store.subjects.map((s) => (
           <span key={s.subject_id} className="legend-item" data-color={s.color_id}>
             <span className="pill-dot" aria-hidden /> {s.display_name}
           </span>
         ))}
-      </div>
+      </div>}
     </section>
   );
 }

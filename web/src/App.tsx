@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useClockStore } from './lib/store.js';
-import { useSettings } from './lib/settings.js';
+import { useAnimationsEnabled, useSettings } from './lib/settings.js';
 import { ambient } from './lib/ambient.js';
 import AuthGate from './components/AuthGate.js';
 import ClockFace from './components/ClockFace.js';
@@ -11,6 +11,7 @@ import { Settings, GanttChart, List } from 'lucide-react';
 export default function App() {
   const store = useClockStore();
   const settings = useSettings();
+  const animationsEnabled = useAnimationsEnabled();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   /** 全屏模式下时间轴是否展开 */
@@ -32,8 +33,8 @@ export default function App() {
 
   // 动画开关：off 时给 <html> 挂 class，CSS 层全局归零（与组件层 motion 跳过并存）
   useEffect(() => {
-    document.documentElement.classList.toggle('animations-off', localStorage.getItem('clock-animations') === 'off');
-  }, []);
+    document.documentElement.classList.toggle('animations-off', !animationsEnabled);
+  }, [animationsEnabled]);
 
   // 标签页标题反映运行状态
   useEffect(() => {

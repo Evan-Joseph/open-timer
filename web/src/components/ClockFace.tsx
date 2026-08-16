@@ -6,17 +6,15 @@ import { Pause, Play, Square, Flag, Undo2 } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
 import type { SyncAnchor } from '../lib/clock.js';
 import { useMonotonicSeconds, useDualMonotonic, useWallSeconds, useBeijingTime, formatHms, formatHmsShort, formatDurationZh, formatBeijingTime, restPlanForFocus, restStageOf, restStageLabel } from '../lib/clock.js';
-import { useSettings } from '../lib/settings.js';
+import { useAnimationsEnabled, useSettings } from '../lib/settings.js';
 import { playFinishChime, playAwayReminder } from '../lib/sound.js';
 import { isQuietMinute } from '@clock/shared';
-
-const REDUCED = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-const animationsEnabled = !REDUCED && localStorage.getItem('clock-animations') !== 'off';
 
 /* 全屏召回"再等 5 分钟"（推迟仅一次性的简单实现：到期后若仍离开则再次弹出） */
 const AWAY_SNOOZE_MS = 5 * 60_000;
 
 function M({ children, ...props }: any) {
+  const animationsEnabled = useAnimationsEnabled();
   if (!animationsEnabled) return <div {...props}>{children}</div>;
   return (
     <motion.div {...props} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.22 }}>

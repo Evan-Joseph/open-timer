@@ -38,6 +38,34 @@ function load(): LocalSettings {
 /** 简单的全局设置 store（跨组件同步用自定义事件）。 */
 const EVT = 'clock-settings-changed';
 
+function systemPrefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+export function areAnimationsEnabled(): boolean {
+  return !systemPrefersReducedMotion() && localStorage.getItem('clock-animations') !== 'off';
+}
+
+export function setAnimationsEnabled(enabled: boolean): void {
+  localStorage.setItem('clock-animations', enabled ? 'on' : 'off');
+  window.dispatchEvent(new CustomEvent(EVT));
+}
+
+export function useAnimationsEnabled(): boolean {
+  const [enabled, setEnabled] = useState(areAnimationsEnabled);
+  useEffect(() => {
+    const update = () => setEnabled(areAnimationsEnabled());
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    window.addEventListener(EVT, update);
+    media.addEventListener('change', update);
+    return () => {
+      window.removeEventListener(EVT, update);
+      media.removeEventListener('change', update);
+    };
+  }, []);
+  return enabled;
+}
+
 export function getSettings(): LocalSettings {
   return load();
 }

@@ -552,6 +552,17 @@ button:focus-visible, input:focus-visible {
   min-height: 24px;
 }
 .timeline-title { font-size: 14px; font-weight: 600; margin: 0; }
+.timeline-scale {
+  display: flex; width: max-content; margin: 0 auto 10px; padding: 2px;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2);
+}
+.timeline-scale button {
+  min-width: 68px; height: 28px; padding: 0 10px; border: 0; border-radius: 5px;
+  color: var(--text-2); background: transparent; font: inherit; font-size: 12px;
+  transition: color 160ms var(--ease-standard, ease), background-color 160ms var(--ease-standard, ease), box-shadow 160ms var(--ease-standard, ease);
+}
+.timeline-scale button:hover { color: var(--text-1); }
+.timeline-scale button.selected { color: var(--text-1); background: var(--surface-1); box-shadow: var(--shadow-sm); }
 .history-strip { max-width: 960px; margin: 0 auto 14px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--shadow-sm); }
 .history-strip-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; color: var(--text-3); font-size: 11px; }
 .history-strip-head > div { display: flex; gap: 8px; align-items: baseline; }
@@ -565,17 +576,15 @@ button:focus-visible, input:focus-visible {
 .history-metrics strong small { color: var(--text-3); font-size: 11px; font-weight: 400; }
 .history-metrics .trend-up { color: var(--success); }
 .history-metrics .trend-down { color: var(--danger); }
-.history-chart { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; min-height: 154px; }
-.history-day { min-width: 0; display: grid; grid-template-rows: 20px 1fr 18px 16px; gap: 3px; align-items: end; padding: 4px 5px; border: 0; border-radius: var(--radius); background: transparent; text-align: center; }
-.history-day:hover { background: var(--surface-2); }
-.history-day:focus-visible { outline-offset: 0; }
-.history-day.selected { background: color-mix(in srgb, var(--accent) 9%, transparent); }
-.history-day-value { overflow: hidden; color: var(--text-2); font-family: var(--font-num); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; text-overflow: ellipsis; }
-.history-bar-track { position: relative; display: block; width: min(28px, 70%); height: 88px; justify-self: center; border-radius: 6px; background: var(--surface-2); overflow: hidden; }
-.history-bar { position: absolute; inset: auto 0 0; min-height: 3px; border-radius: 6px 6px 3px 3px; background: var(--accent); transition: height 0.28s cubic-bezier(0.2, 0, 0, 1), background-color 0.15s ease; }
-.history-day.selected .history-bar { background: var(--text-1); }
-.history-weekday { color: var(--text-1); font-size: 11px; font-weight: 600; }
-.history-day small { color: var(--text-3); font-family: var(--font-num); font-size: 10px; font-variant-numeric: tabular-nums; }
+.history-lanes { display: grid; gap: 7px; }
+.history-axis { display: grid; grid-template-columns: 120px repeat(5, 1fr); align-items: end; color: var(--text-3); font-family: var(--font-num); font-size: 10px; font-variant-numeric: tabular-nums; }
+.history-axis span:not(:first-child) { text-align: right; }
+.history-lane { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; align-items: center; min-height: 28px; }
+.history-lane-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+.history-lane-label strong { color: var(--text-1); font-size: 11px; white-space: nowrap; }
+.history-lane-label span { overflow: hidden; color: var(--text-3); font-family: var(--font-num); font-size: 10px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.history-lane-track { position: relative; height: 12px; overflow: hidden; border-radius: 4px; background: repeating-linear-gradient(90deg, var(--surface-2) 0 calc(27.59% - 1px), var(--border) calc(27.59% - 1px) 27.59%); }
+.history-lane-segment { position: absolute; top: 2px; bottom: 2px; min-width: 2px; border-radius: 2px; background: var(--sc); transition: width 220ms var(--ease-standard, ease), left 220ms var(--ease-standard, ease); }
 .history-subjects { display: grid; gap: 9px; }
 .history-subject-bar { display: flex; height: 7px; overflow: hidden; border-radius: 999px; background: var(--surface-2); }
 .history-subject-bar > span { min-width: 2px; }
@@ -589,13 +598,12 @@ button:focus-visible, input:focus-visible {
 .now-btn { display: inline-flex; align-items: center; gap: 4px; }
 
 .timeline-scroll {
-  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  overflow: hidden;
   max-width: 960px; margin: 0 auto;
-  scrollbar-width: thin;
 }
 .timeline-track {
-  position: relative; height: 96px; /* 固定高度，零布局跳动 */
-  min-width: 100%;
+  position: relative; min-height: 96px; height: max(96px, calc(42px + var(--timeline-lanes, 1) * 20px));
+  width: 100%;
   flex: none;
 }
 
@@ -610,17 +618,17 @@ button:focus-visible, input:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-.seg { position: absolute; top: 34px; height: 28px; pointer-events: none; }
-/* 透明热区：可点击，按相邻中点分割，互不遮挡 */
+.seg { position: absolute; top: calc(34px + var(--seg-row, 0) * 20px); height: 16px; pointer-events: none; }
+/* 可视片段按真实比例呈现；热区单独扩展，确保短片段可点。 */
 .seg-hit {
-  position: absolute; inset: 0;
+  position: absolute; top: -4px; bottom: -4px; left: 50%; width: 24px; transform: translateX(-50%);
   padding: 0; border: none; background: transparent;
   pointer-events: auto;
   border-radius: 3px;
 }
 .seg-hit:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .seg-fill {
-  position: absolute; top: 4px; height: 20px; border-radius: 3px;
+  position: absolute; inset: 0; border-radius: 3px;
   background: var(--sc);
   opacity: 0.92;
   pointer-events: none;
@@ -634,6 +642,7 @@ button:focus-visible, input:focus-visible {
   background: var(--accent);
   opacity: 0.7;
   z-index: 3; transition: left 0.9s linear;
+  pointer-events: none;
 }
 .now-flag {
   position: absolute; top: -4px; left: -3px;
