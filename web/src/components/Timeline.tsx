@@ -11,7 +11,7 @@
  * 数据：store.sessions 是"今天"的数据；查看历史日时按日期拉取（带轻量缓存）。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Clock, LocateFixed, Undo2, X, List, GanttChart, CalendarDays } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { ClockStore } from '../lib/store.js';
@@ -22,8 +22,6 @@ import { useAnimationsEnabled } from '../lib/settings.js';
 import { LEARNING_DAY, shanghaiDayRangeUtc, timelineRange, type TimelineScale } from '@clock/shared';
 
 const NOW_TICK_MS = 30_000;
-// 960px 轨道中 24px 热区约等于 6 分钟，留出一分余量避免相邻热区相互遮挡。
-const HIT_TARGET_GUARD_MINUTES = 7;
 
 interface RenderSeg {
   key: string;
@@ -239,17 +237,6 @@ export default function Timeline({ store }: { store: ClockStore }) {
     () => segs.filter((seg) => seg.endMinute > visibleRange.startMinute && seg.startMinute < visibleRange.endMinute),
     [segs, visibleRange],
   );
-  const positionedSegs = useMemo(() => {
-    const laneEnds = Array<number>(visibleSegs.length).fill(-Infinity);
-    return visibleSegs.map((seg) => {
-      let lane = laneEnds.findIndex((endMinute) => endMinute + HIT_TARGET_GUARD_MINUTES <= seg.startMinute);
-      if (lane < 0) lane = laneEnds.indexOf(Math.min(...laneEnds));
-      laneEnds[lane] = seg.endMinute;
-      return { seg, lane };
-    });
-  }, [visibleSegs]);
-  const timelineLaneCount = Math.max(1, ...positionedSegs.map(({ lane }) => lane + 1));
-
   /** 会话级分组：一个 session 的所有段合并为一行（弹窗/流水账共用数据源）。 */
   const sessionRows: SessionRow[] = useMemo(() => {
     const out: SessionRow[] = [];
@@ -713,22 +700,35 @@ export default function Timeline({ store }: { store: ClockStore }) {
       ) : (
         /* 轨道始终渲染：空日也保留刻度与信标（时间感） */
         <div className="timeline-scroll" data-testid="timeline-scroll">
-          <div className="timeline-track" ref={trackRef} data-scale={scale} style={{ '--timeline-lanes': timelineLaneCount } as CSSProperties}>
+          <div className="timeline-track" ref={trackRef} data-scale={scale}>
           {ticks.map((t) => (
             <div key={t.minute} className={`tick ${t.major ? 'major' : ''}`} style={{ left: `${t.leftPercent}%` }}>
               <span className="tick-label">{t.label}</span>
             </div>
           ))}
-          {positionedSegs.map(({ seg, lane }) => {
-            const left = Math.max(0, minuteToPercent(Math.max(seg.startMinute, visibleRange.startMinute)));
-            const right = Math.min(100, minuteToPercent(Math.min(seg.endMinute, visibleRange.endMinute)));
-            const width = Math.max(0.45, right - left);
+          {visibleSegs.map((seg, index) => {
+            const visualLeft = Math.max(0, minuteToPercent(Math.max(seg.startMinute, visibleRange.startMinute)));
+            const visualRight = Math.min(100, minuteToPercent(Math.min(seg.endMinute, visibleRange.endMinute)));
+            const previous = visibleSegs[index - 1];
+            const next = visibleSegs[index + 1];
+            const previousRight = previous
+              ? Math.min(100, minuteToPercent(Math.min(previous.endMinute, visibleRange.endMinute)))
+              : null;
+            const nextLeft = next
+              ? Math.max(0, minuteToPercent(Math.max(next.startMinute, visibleRange.startMinute)))
+              : null;
+            const hotLeft = previousRight === null ? Math.max(0, visualLeft - 1.25) : (previousRight + visualLeft) / 2;
+            const hotRight = nextLeft === null ? Math.min(100, visualRight + 1.25) : (visualRight + nextLeft) / 2;
+            const hotWidth = Math.max(0.25, hotRight - hotLeft);
+            const fillLeft = ((visualLeft - hotLeft) / hotWidth) * 100;
+            const fillWidth = Math.max(2, ((visualRight - visualLeft) / hotWidth) * 100);
             return (
               <span
                 key={seg.key}
                 className={`seg ${seg.running ? 'running' : ''}${popover?.row.sessionId === seg.sessionId ? ' active' : ''}`}
                 data-color={seg.colorId}
-                style={{ left: `${left}%`, width: `${width}%`, '--seg-row': lane } as CSSProperties}
+                data-lane="0"
+                style={{ left: `${hotLeft}%`, width: `${hotWidth}%` }}
                 onMouseEnter={() => scheduleHoverPreview(seg)}
                 onMouseLeave={dismissHoverPreview}
               >
@@ -737,7 +737,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
                   aria-label={`${seg.displayName} ${seg.startLabel} 到 ${seg.endLabel ?? '现在'}，${formatDurationZh(seg.seconds)}`}
                   onClick={() => openPopover(seg)}
                 />
-                <span className="seg-fill" aria-hidden />
+                <span className="seg-fill" style={{ left: `${fillLeft}%`, width: `${fillWidth}%` }} aria-hidden />
               </span>
             );
           })}

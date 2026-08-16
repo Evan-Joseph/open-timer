@@ -602,7 +602,7 @@ button:focus-visible, input:focus-visible {
   max-width: 960px; margin: 0 auto;
 }
 .timeline-track {
-  position: relative; min-height: 96px; height: max(96px, calc(42px + var(--timeline-lanes, 1) * 20px));
+  position: relative; height: 96px;
   width: 100%;
   flex: none;
 }
@@ -618,17 +618,17 @@ button:focus-visible, input:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-.seg { position: absolute; top: calc(34px + var(--seg-row, 0) * 20px); height: 16px; pointer-events: none; }
+.seg { position: absolute; top: 34px; height: 20px; pointer-events: none; }
 /* 可视片段按真实比例呈现；热区单独扩展，确保短片段可点。 */
 .seg-hit {
-  position: absolute; top: -4px; bottom: -4px; left: 50%; width: 24px; transform: translateX(-50%);
+  position: absolute; inset: -4px 0;
   padding: 0; border: none; background: transparent;
   pointer-events: auto;
   border-radius: 3px;
 }
 .seg-hit:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .seg-fill {
-  position: absolute; inset: 0; border-radius: 3px;
+  position: absolute; top: 0; bottom: 0; border-radius: 3px;
   background: var(--sc);
   opacity: 0.92;
   pointer-events: none;

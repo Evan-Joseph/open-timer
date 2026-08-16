@@ -153,6 +153,24 @@ test.describe('核心流程', () => {
     await page.getByRole('button', { name: '好，继续' }).click();
   });
 
+  test('暂停后继续，同一会话的时间段保持在同一泳道', async ({ page }) => {
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数据结构' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(900);
+    await page.getByRole('button', { name: '暂停计时' }).click();
+    await page.waitForTimeout(300);
+    await page.getByRole('button', { name: '继续计时' }).click();
+    await page.waitForTimeout(900);
+
+    const lanes = await page.locator('.seg').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-lane')));
+    expect(lanes.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(lanes).size).toBe(1);
+
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+  });
+
   test('刷新后恢复运行中会话（不丢不重）', async ({ page }) => {
     await doSetup(page);
     await page.getByRole('radio', { name: '操作系统' }).click();
@@ -657,7 +675,11 @@ test.describe('离开渐进提醒', () => {
 
   test('按上一段专注时长计算休息窗口，并在临近/到期/超时提醒', async ({ page }) => {
     const beijingNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
-    test.skip(isQuietMinute(beijingNow.getUTCHours() * 60 + beijingNow.getUTCMinutes()), '静默时段与提醒升级场景互斥');
+    const currentMinute = beijingNow.getUTCHours() * 60 + beijingNow.getUTCMinutes();
+    test.skip(
+      isQuietMinute(currentMinute) || isQuietMinute(currentMinute + 20),
+      '测试窗口与静默时段相交，提醒升级场景互斥',
+    );
     await page.clock.install();
     await doSetup(page);
     await page.getByRole('radio', { name: '数据结构' }).click();
