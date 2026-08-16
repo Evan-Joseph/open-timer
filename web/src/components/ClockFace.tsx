@@ -8,6 +8,7 @@ import type { SyncAnchor } from '../lib/clock.js';
 import { useMonotonicSeconds, useDualMonotonic, useWallSeconds, useBeijingTime, formatHms, formatHmsShort, formatDurationZh, formatBeijingTime, restPlanForFocus, restStageOf, restStageLabel } from '../lib/clock.js';
 import { useSettings } from '../lib/settings.js';
 import { playFinishChime, playAwayReminder } from '../lib/sound.js';
+import { isQuietMinute } from '@clock/shared';
 
 const REDUCED = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const animationsEnabled = !REDUCED && localStorage.getItem('clock-animations') !== 'off';
@@ -80,6 +81,10 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const restPlan = restPlanForFocus(focusForRest);
   const restStage = awayActive ? restStageOf(awaySeconds, restPlan) : 'resting';
   const awayLevel = awayActive ? (restStage === 'overdue' ? 3 : restStage === 'due' ? 2 : restStage === 'due-soon' ? 1 : 0) : 0;
+  const beijingNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const quietPeriod = awayActive && isQuietMinute(beijingNow.getUTCHours() * 60 + beijingNow.getUTCMinutes());
+  const reminderLevel = quietPeriod ? 0 : awayLevel;
+  const restLabel = quietPeriod ? '静默中' : restStageLabel(restStage);
   // 离开状态复位：回到学习/开始新段后，下一轮离开重新开始提醒
   useEffect(() => {
     if (!awayActive) {
@@ -92,20 +97,28 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   }, [awayActive]);
   // 达到建议休息时长后单次轻音；浏览器需已交互，计时本身已满足 autoplay 前提。
   useEffect(() => {
+    if (quietPeriod) {
+      if (awayLevel >= 2) awayChimePlayedRef.current = true;
+      return;
+    }
     if (awayLevel >= 2 && !awayChimePlayedRef.current) {
       awayChimePlayedRef.current = true;
       playAwayReminder();
     }
-  }, [awayLevel]);
+  }, [awayLevel, quietPeriod]);
   // 进入逾期后再播放一次更明确的升级提示，避免持续循环声音造成惊扰。
   useEffect(() => {
+    if (quietPeriod) {
+      if (awayLevel >= 3) overdueChimePlayedRef.current = true;
+      return;
+    }
     if (awayLevel >= 3 && !overdueChimePlayedRef.current) {
       overdueChimePlayedRef.current = true;
       playAwayReminder(0.2);
     }
-  }, [awayLevel]);
+  }, [awayLevel, quietPeriod]);
   // 休息达到建议时长的 150% 且未推迟/未关闭 → 全屏召回
-  const showAwayRecall = awayActive && awayLevel >= 3 && !awayDismissed && Date.now() >= awaySnoozedUntil;
+  const showAwayRecall = awayActive && !quietPeriod && awayLevel >= 3 && !awayDismissed && Date.now() >= awaySnoozedUntil;
   /** 结束态"开始下一段"：延续刚才的科目 */
   const handleStartNext = () => {
     const sid = lastStopped?.subjectId ?? recentStopped?.subject_id ?? selectedSubject;
@@ -207,7 +220,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     const subj = subjectOf(lastStopped.subjectId);
     return (
       <>
-      <section className="clockface" data-away-level={awayLevel} aria-live="polite">
+      <section className="clockface" data-away-level={reminderLevel} aria-live="polite">
         <M className="finish-card">
           <div className="finish-glow" aria-hidden />
           <div className="subject-pill" data-color={subj?.color_id}>
@@ -223,10 +236,10 @@ export default function ClockFace({ store }: { store: ClockStore }) {
           {/* 离开时长：科目结束后同样进入"已离开"渐进提醒（L1 黄 / L2 红 / L3 全屏召回） */}
           <div className="away-slot" aria-live="off">
             <div
-              className={`away-line${awayLevel >= 2 ? ' strong' : awayLevel >= 1 ? ' urgent' : ''}`}
+              className={`away-line${reminderLevel >= 2 ? ' strong' : reminderLevel >= 1 ? ' urgent' : ''}`}
               data-testid="away-line"
             >
-              {restStageLabel(restStage)} · 已休息 {formatHms(awaySeconds)}
+              {restLabel} · 已休息 {formatHms(awaySeconds)}
               <span className="away-note"> · 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
             </div>
           </div>
@@ -272,7 +285,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     const subj = subjectOf(active.subject_id);
     return (
       <>
-      <section className={`clockface ${paused ? 'is-paused' : 'is-running'}`} data-away-level={awayLevel}>
+      <section className={`clockface ${paused ? 'is-paused' : 'is-running'}`} data-away-level={reminderLevel}>
         <div className="subject-pill large" data-color={subj?.color_id}>
           <span className="pill-dot" aria-hidden />
           {subj?.display_name ?? active.subject_id}
@@ -295,10 +308,10 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         <div className="away-slot" aria-live="off">
           {paused && (
             <div
-              className={`away-line${awayLevel >= 2 ? ' strong' : awayLevel >= 1 ? ' urgent' : ''}`}
+              className={`away-line${reminderLevel >= 2 ? ' strong' : reminderLevel >= 1 ? ' urgent' : ''}`}
               data-testid="away-line"
             >
-              {restStageLabel(restStage)} · 已休息 {formatHms(awaySeconds)}
+              {restLabel} · 已休息 {formatHms(awaySeconds)}
               <span className="away-note"> · 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
             </div>
           )}
@@ -372,10 +385,10 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       {recentRestAnchor && (
         <div className="away-slot idle-rest" aria-live="polite">
           <div
-            className={`away-line${awayLevel >= 2 ? ' strong' : awayLevel >= 1 ? ' urgent' : ''}`}
+            className={`away-line${reminderLevel >= 2 ? ' strong' : reminderLevel >= 1 ? ' urgent' : ''}`}
             data-testid="idle-rest-line"
           >
-            {restStageLabel(restStage)} · 已休息 {formatHms(awaySeconds)}
+            {restLabel} · 已休息 {formatHms(awaySeconds)}
             <span className="away-note">· 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
           </div>
         </div>

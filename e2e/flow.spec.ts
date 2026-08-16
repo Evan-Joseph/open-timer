@@ -603,6 +603,26 @@ test.describe('首页休息状态', () => {
 });
 
 test.describe('离开渐进提醒', () => {
+  test('午饭午睡静默期间继续计时但不升级提醒或弹出召回', async ({ page }) => {
+    await page.clock.install({ time: new Date('2026-08-16T02:58:00.000Z') }); // 北京时间 10:58
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数据结构' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1_000);
+    await page.getByRole('button', { name: '暂停计时' }).click();
+
+    // 进入 11:00–13:30 静默后，即使休息超过建议时长也不能升级为提醒或召回。
+    await page.clock.fastForward(10 * 60 * 1000);
+    await expect(page.getByTestId('away-line')).toContainText('静默中');
+    await expect(page.locator('.clockface.is-paused')).toHaveAttribute('data-away-level', '0');
+    await expect(page.getByRole('dialog', { name: '离开提醒' })).toHaveCount(0);
+
+    await page.getByRole('button', { name: '继续计时' }).click();
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    const continueBtn = page.getByRole('button', { name: '好，继续' });
+    if ((await continueBtn.count()) > 0) await continueBtn.click();
+  });
+
   test('按上一段专注时长计算休息窗口，并在临近/到期/超时提醒', async ({ page }) => {
     // 用当前时间作为虚拟时钟起点（离开时长基于墙钟 Date.now，可被 page.clock fake）
     await page.clock.install();

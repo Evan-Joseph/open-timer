@@ -6,3 +6,4 @@ export * from './shanghai.js';
 export * from './state-machine.js';
 export * from './summary.js';
 export * from './rest-policy.js';
+export * from './timeline-policy.js';
