@@ -1,6 +1,6 @@
 # 11408 沉浸时钟 · API 文档（供各科 Agent / 自动化读取学习数据）
 
-Base URL：`https://immersive-clock-11408.gaoshenzhou.workers.dev`
+Base URL：`https://clock.4c666.top`
 契约版本：v1（OpenAPI 3.1 见 `docs/openapi.yaml`）
 
 ## 认证模型
@@ -198,7 +198,7 @@ Base URL：`https://immersive-clock-11408.gaoshenzhou.workers.dev`
 ## curl 示例
 
 ```bash
-BASE="https://immersive-clock-11408.gaoshenzhou.workers.dev"
+BASE="https://clock.4c666.top"
 # 今天（北京时间）的日期
 TODAY=$(TZ=Asia/Shanghai date +%F)
 
