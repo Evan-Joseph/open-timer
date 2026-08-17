@@ -343,6 +343,7 @@ test.describe('近 7 天执行回顾', () => {
     const currentDates = new Set(Array.from({ length: 7 }, (_, index) => shift(state.today_date, -index)));
     let todaySessionCount = 1;
     let todayHasUnfinished = false;
+    let todayOpenStatus: 'running' | 'paused' = 'running';
     await page.route('**/api/v1/daily-summary?**', async (route) => {
       const date = new URL(route.request().url()).searchParams.get('date')!;
       const current = currentDates.has(date);
@@ -380,7 +381,7 @@ test.describe('近 7 天执行回顾', () => {
               started_at: segmentStartedAt,
               ended_at: segmentEndedAt,
               active_seconds: 3600,
-              status: unfinished ? 'running' : 'stopped',
+              status: unfinished ? todayOpenStatus : 'stopped',
               end_reason: unfinished ? null : 'manual',
               note: null,
               segments: [{ started_at: segmentStartedAt, ended_at: segmentEndedAt }],
@@ -428,6 +429,13 @@ test.describe('近 7 天执行回顾', () => {
     await expect(report).toHaveCount(0);
     todaySessionCount = 2;
     todayHasUnfinished = true;
+    await page.getByTestId('history-toggle').click();
+    await expect(report.locator('.history-lane').last().locator('.history-lane-segment')).toHaveCount(1);
+    await expect(report.locator('.history-lane-segment')).toHaveCount(7);
+
+    await page.getByTestId('history-toggle').click();
+    await expect(report).toHaveCount(0);
+    todayOpenStatus = 'paused';
     await page.getByTestId('history-toggle').click();
     await expect(report.locator('.history-lane').last().locator('.history-lane-segment')).toHaveCount(1);
     await expect(report.locator('.history-lane-segment')).toHaveCount(7);
