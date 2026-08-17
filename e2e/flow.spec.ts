@@ -341,6 +341,7 @@ test.describe('近 7 天执行回顾', () => {
       return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}-${String(shifted.getUTCDate()).padStart(2, '0')}`;
     };
     const currentDates = new Set(Array.from({ length: 7 }, (_, index) => shift(state.today_date, -index)));
+    let todaySessionCount = 1;
     await page.route('**/api/v1/daily-summary?**', async (route) => {
       const date = new URL(route.request().url()).searchParams.get('date')!;
       const current = currentDates.has(date);
@@ -363,25 +364,31 @@ test.describe('近 7 天执行回顾', () => {
       const date = new URL(route.request().url()).searchParams.get('date')!;
       const startedAt = `${date}T01:00:00.000Z`;
       const endedAt = `${date}T02:00:00.000Z`;
+      const sessionCount = date === state.today_date ? todaySessionCount : 1;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          sessions: [{
-            session_id: `history-${date}`,
+          sessions: Array.from({ length: sessionCount }, (_, index) => ({
+            session_id: `history-${date}-${index}`,
             subject_id: subjects[0].subject_id,
-            started_at: startedAt,
-            ended_at: endedAt,
+            started_at: new Date(Date.parse(startedAt) + index * 3_600_000).toISOString(),
+            ended_at: new Date(Date.parse(endedAt) + index * 3_600_000).toISOString(),
             active_seconds: 3600,
             status: 'stopped',
             end_reason: 'manual',
             note: null,
-            segments: [{ started_at: startedAt, ended_at: endedAt }],
-          }],
+            segments: [{
+              started_at: new Date(Date.parse(startedAt) + index * 3_600_000).toISOString(),
+              ended_at: new Date(Date.parse(endedAt) + index * 3_600_000).toISOString(),
+            }],
+          })),
         }),
       });
     });
 
+    await expect(page.getByText('睡眠结束', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('睡眠', { exact: true })).toHaveCount(0);
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.getByTestId('history-toggle').click();
     const report = page.getByTestId('history-strip');
@@ -401,6 +408,8 @@ test.describe('近 7 天执行回顾', () => {
     await expect(report.locator('.history-lane').first()).toContainText('晚饭');
     await expect(report.getByText('08:00', { exact: true })).toBeVisible();
     await expect(report.getByText('22:30', { exact: true })).toBeVisible();
+    await expect(report.getByText('睡眠结束', { exact: true })).toHaveCount(0);
+    await expect(report.getByText('睡眠', { exact: true })).toHaveCount(0);
     await expect(report.locator('.history-subject-list > span')).toHaveCount(2);
     await expect(report.locator('.history-subject-list')).toContainText('67%');
     await expect(report.getByRole('button', { name: /2026-/ })).toHaveCount(0);
@@ -411,6 +420,13 @@ test.describe('近 7 天执行回顾', () => {
     await page.waitForFunction(() => (
       window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 4
     ));
+
+    await page.getByTestId('history-toggle').click();
+    await expect(report).toHaveCount(0);
+    todaySessionCount = 2;
+    await page.getByTestId('history-toggle').click();
+    await expect(report.locator('.history-lane').last().locator('.history-lane-segment')).toHaveCount(2);
+    await expect(report.locator('.history-lane-segment')).toHaveCount(8);
   });
 });
 

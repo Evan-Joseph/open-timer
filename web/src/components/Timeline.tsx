@@ -102,6 +102,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const activeSessionId = store.state?.active_session?.session_id ?? null;
   const prevActiveIdRef = useRef<string | null>(null);
   const historyCacheRef = useRef<Map<string, SessionApi[]>>(new Map());
+  const syncedTodaySessionsRef = useRef(store.sessions);
   const historyReportRef = useRef<HTMLDivElement>(null);
   const autoScrolledHistoryRef = useRef(false);
   const hoverPreviewTimerRef = useRef<number | null>(null);
@@ -119,6 +120,11 @@ export default function Timeline({ store }: { store: ClockStore }) {
     );
     const sessions = await Promise.all(
       dates.map(async (date) => {
+        // 当天会话会继续变化，不可复用历史缓存。
+        if (date === store.todayDate) {
+          const result = await apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${date}`).catch(() => ({ sessions: [] }));
+          return [date, result.sessions] as const;
+        }
         const cached = historyCacheRef.current.get(date);
         if (cached) return [date, cached] as const;
         const result = await apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${date}`).catch(() => ({ sessions: [] }));
@@ -130,6 +136,18 @@ export default function Timeline({ store }: { store: ClockStore }) {
     setHistoryWeekSessions(new Map(sessions));
     setHistoryLoading(false);
   }, [historyLoading, store.todayDate]);
+
+  // 回顾展开期间结束、撤回或调整会话时，立即同步当天泳道。
+  useEffect(() => {
+    if (syncedTodaySessionsRef.current === store.sessions) return;
+    syncedTodaySessionsRef.current = store.sessions;
+    if (!historyOpen) return;
+    setHistoryWeekSessions((previous) => {
+      const next = new Map(previous);
+      next.set(store.todayDate, store.sessions);
+      return next;
+    });
+  }, [historyOpen, store.sessions, store.todayDate]);
 
   // 信标持续移动（30s 步进）：不触发强制滚动
   useEffect(() => {
@@ -472,7 +490,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
       const subject = store.subjects.find((item) => item.subject_id === session.subject_id);
       return session.segments.flatMap((segment, index) => {
         const start = Math.max(dayStart, Date.parse(segment.started_at));
-        const end = Math.min(dayEnd, segment.ended_at ? Date.parse(segment.ended_at) : dayEnd);
+        const end = Math.min(dayEnd, segment.ended_at ? Date.parse(segment.ended_at) : nowMs);
         if (end <= start) return [];
         const startMinute = (start - dayStart) / 60_000;
         const endMinute = (end - dayStart) / 60_000;
@@ -486,7 +504,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
       });
     });
     return { ...day, segments };
-  }), [historyModel.current, historyWeekSessions, store.subjects]);
+  }), [historyModel.current, historyWeekSessions, nowMs, store.subjects]);
 
   const visibleQuietPeriods = useMemo(() => QUIET_PERIODS.flatMap((period) => {
     const startMinute = Math.max(period.startMinute, visibleRange.startMinute);
@@ -585,11 +603,11 @@ export default function Timeline({ store }: { store: ClockStore }) {
                 <div className="history-axis" aria-hidden>
                   <span />
                   <div className="history-axis-track">
-                    <span className="history-boundary axis-start"><strong>08:00</strong><small>睡眠结束</small></span>
+                    <span className="axis-start">08:00</span>
                     <span style={{ left: '27.586%' }}>12:00</span>
                     <span style={{ left: '55.172%' }}>16:00</span>
                     <span style={{ left: '82.759%' }}>20:00</span>
-                    <span className="history-boundary axis-end"><strong>22:30</strong><small>睡眠</small></span>
+                    <span className="axis-end">22:30</span>
                   </div>
                 </div>
                 {historyLanes.map((day) => (
@@ -722,12 +740,6 @@ export default function Timeline({ store }: { store: ClockStore }) {
               title={`${period.label}静默时段`}
             >{period.label}</span>
           ))}
-          {visibleRange.startMinute === LEARNING_DAY.startMinute && (
-            <span className="learning-boundary boundary-start">睡眠结束</span>
-          )}
-          {visibleRange.endMinute === LEARNING_DAY.endMinute && (
-            <span className="learning-boundary boundary-end">睡眠</span>
-          )}
           {ticks.map((t) => (
             <div key={t.minute} className={`tick ${t.major ? 'major' : ''}`} style={{ left: `${t.leftPercent}%` }}>
               <span className="tick-label">{t.label}</span>
