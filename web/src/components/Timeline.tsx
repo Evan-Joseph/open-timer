@@ -489,8 +489,9 @@ export default function Timeline({ store }: { store: ClockStore }) {
       if (session.status === 'voided') return [];
       const subject = store.subjects.find((item) => item.subject_id === session.subject_id);
       return session.segments.flatMap((segment, index) => {
+        if (!segment.ended_at) return [];
         const start = Math.max(dayStart, Date.parse(segment.started_at));
-        const end = Math.min(dayEnd, segment.ended_at ? Date.parse(segment.ended_at) : nowMs);
+        const end = Math.min(dayEnd, Date.parse(segment.ended_at));
         if (end <= start) return [];
         const startMinute = (start - dayStart) / 60_000;
         const endMinute = (end - dayStart) / 60_000;
@@ -504,7 +505,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
       });
     });
     return { ...day, segments };
-  }), [historyModel.current, historyWeekSessions, nowMs, store.subjects]);
+  }), [historyModel.current, historyWeekSessions, store.subjects]);
 
   const visibleQuietPeriods = useMemo(() => QUIET_PERIODS.flatMap((period) => {
     const startMinute = Math.max(period.startMinute, visibleRange.startMinute);

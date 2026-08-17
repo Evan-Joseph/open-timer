@@ -342,6 +342,7 @@ test.describe('近 7 天执行回顾', () => {
     };
     const currentDates = new Set(Array.from({ length: 7 }, (_, index) => shift(state.today_date, -index)));
     let todaySessionCount = 1;
+    let todayHasUnfinished = false;
     await page.route('**/api/v1/daily-summary?**', async (route) => {
       const date = new URL(route.request().url()).searchParams.get('date')!;
       const current = currentDates.has(date);
@@ -369,20 +370,22 @@ test.describe('近 7 天执行回顾', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          sessions: Array.from({ length: sessionCount }, (_, index) => ({
-            session_id: `history-${date}-${index}`,
-            subject_id: subjects[0].subject_id,
-            started_at: new Date(Date.parse(startedAt) + index * 3_600_000).toISOString(),
-            ended_at: new Date(Date.parse(endedAt) + index * 3_600_000).toISOString(),
-            active_seconds: 3600,
-            status: 'stopped',
-            end_reason: 'manual',
-            note: null,
-            segments: [{
-              started_at: new Date(Date.parse(startedAt) + index * 3_600_000).toISOString(),
-              ended_at: new Date(Date.parse(endedAt) + index * 3_600_000).toISOString(),
-            }],
-          })),
+          sessions: Array.from({ length: sessionCount }, (_, index) => {
+            const unfinished = date === state.today_date && index === 1 && todayHasUnfinished;
+            const segmentStartedAt = new Date(Date.parse(startedAt) + index * 3_600_000).toISOString();
+            const segmentEndedAt = unfinished ? null : new Date(Date.parse(endedAt) + index * 3_600_000).toISOString();
+            return {
+              session_id: `history-${date}-${index}`,
+              subject_id: subjects[0].subject_id,
+              started_at: segmentStartedAt,
+              ended_at: segmentEndedAt,
+              active_seconds: 3600,
+              status: unfinished ? 'running' : 'stopped',
+              end_reason: unfinished ? null : 'manual',
+              note: null,
+              segments: [{ started_at: segmentStartedAt, ended_at: segmentEndedAt }],
+            };
+          }),
         }),
       });
     });
@@ -424,6 +427,14 @@ test.describe('近 7 天执行回顾', () => {
     await page.getByTestId('history-toggle').click();
     await expect(report).toHaveCount(0);
     todaySessionCount = 2;
+    todayHasUnfinished = true;
+    await page.getByTestId('history-toggle').click();
+    await expect(report.locator('.history-lane').last().locator('.history-lane-segment')).toHaveCount(1);
+    await expect(report.locator('.history-lane-segment')).toHaveCount(7);
+
+    await page.getByTestId('history-toggle').click();
+    await expect(report).toHaveCount(0);
+    todayHasUnfinished = false;
     await page.getByTestId('history-toggle').click();
     await expect(report.locator('.history-lane').last().locator('.history-lane-segment')).toHaveCount(2);
     await expect(report.locator('.history-lane-segment')).toHaveCount(8);
