@@ -99,11 +99,18 @@ test('全屏逾期时主区与时间轴共享告警状态', async ({ page }) => 
   expect(state.wash).not.toBe('transparent');
   expect(state.drawerBackground).not.toBe('rgb(255, 255, 255)');
 
+  await expect(page.locator('.timeline-drawer')).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
   const geometry = await page.evaluate(() => {
     const clock = document.querySelector('.clockface')!.getBoundingClientRect();
     const drawer = document.querySelector('.timeline-drawer')!.getBoundingClientRect();
     const controls = document.querySelector('.fs-controls')!.getBoundingClientRect();
-    return { clockBottom: clock.bottom, drawerTop: drawer.top, controlsBottom: controls.bottom };
+    const main = document.querySelector('.main')!;
+    return {
+      clockBottom: clock.bottom,
+      drawerTop: drawer.top,
+      controlsBottom: controls.bottom,
+      mainPaddingBottom: getComputedStyle(main).paddingBottom,
+    };
   });
   expect(geometry.clockBottom).toBeLessThanOrEqual(geometry.drawerTop + 1);
   expect(geometry.controlsBottom).toBeLessThanOrEqual(geometry.drawerTop);

@@ -281,6 +281,9 @@ button:focus-visible, input:focus-visible {
   --timeline-track-height: 96px;
   --main-pad-block: clamp(18px, 4dvh, 48px);
   --clock-gap: clamp(10px, 1.8dvh, 16px);
+  --alert-wash: transparent;
+  --alert-border: var(--border);
+  --alert-duration: 3.2s;
   position: relative;
   isolation: isolate;
   width: 100%;
@@ -290,6 +293,32 @@ button:focus-visible, input:focus-visible {
   grid-template-rows: var(--topbar-height) minmax(0, 1fr) auto;
   overflow: hidden;
   background: var(--bg);
+}
+.app:has(.clockface[data-away-level='2']) {
+  --alert-wash: color-mix(in srgb, var(--amber) 10%, var(--bg));
+  --alert-border: color-mix(in srgb, var(--amber) 30%, var(--border));
+}
+.app:has(.clockface[data-away-level='3']) {
+  --alert-wash: color-mix(in srgb, var(--danger) 15%, var(--bg));
+  --alert-border: color-mix(in srgb, var(--danger) 38%, var(--border));
+  --alert-duration: 1.8s;
+}
+.app::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-color: var(--alert-wash);
+  transition: background-color 280ms ease;
+}
+.app:has(.clockface[data-away-level='2'])::before,
+.app:has(.clockface[data-away-level='3'])::before {
+  animation: app-alert-breathe var(--alert-duration) ease-in-out infinite;
+}
+@keyframes app-alert-breathe {
+  0%, 100% { opacity: 0.58; }
+  50% { opacity: 1; }
 }
 
 .topbar {
@@ -325,6 +354,8 @@ button:focus-visible, input:focus-visible {
 }
 
 .main {
+  position: relative;
+  z-index: 1;
   min-width: 0;
   min-height: 0;
   display: flex; align-items: center; justify-content: center;
@@ -494,18 +525,7 @@ button:focus-visible, input:focus-visible {
 }
 .clockface[data-away-level='2']::before,
 .clockface[data-away-level='3']::before {
-  content: ''; position: absolute; inset: -28px -44px; z-index: -1;
-  border-radius: 28px; pointer-events: none;
-  background: color-mix(in srgb, var(--amber) 11%, transparent);
-  animation: rest-due-breathe 3.2s ease-in-out infinite;
-}
-.clockface[data-away-level='3']::before {
-  background: color-mix(in srgb, var(--danger) 16%, transparent);
-  animation-duration: 1.8s;
-}
-@keyframes rest-due-breathe {
-  0%, 100% { opacity: 0.45; transform: scale(0.985); }
-  50% { opacity: 1; transform: scale(1.015); }
+  content: none;
 }
 
 /* L3 全屏召回：半透明遮罩 + 毛玻璃卡片，渐入（非瞬切） */
@@ -571,10 +591,37 @@ button:focus-visible, input:focus-visible {
 
 .timeline {
   position: relative;
+  z-index: 1;
   min-height: 0;
   border-top: 1px solid var(--border);
   background: var(--bg-elevated);
   padding: 14px 16px 10px;
+}
+.main,
+.topbar,
+.timeline,
+.timeline-drawer,
+.fs-controls {
+  transition-property: background-color, border-color, box-shadow, transform, padding, opacity;
+  transition-duration: 280ms;
+  transition-timing-function: ease;
+}
+.app:has(.clockface[data-away-level='2']) .topbar,
+.app:has(.clockface[data-away-level='3']) .topbar {
+  background: color-mix(in srgb, var(--alert-wash) 64%, var(--material));
+  border-color: var(--alert-border);
+}
+.app:has(.clockface[data-away-level='2']) .timeline,
+.app:has(.clockface[data-away-level='3']) .timeline,
+.app:has(.clockface[data-away-level='2']) .timeline-drawer,
+.app:has(.clockface[data-away-level='3']) .timeline-drawer {
+  background: color-mix(in srgb, var(--alert-wash) 72%, var(--bg-elevated));
+  border-color: var(--alert-border);
+}
+.app:has(.clockface[data-away-level='2']) .fs-controls,
+.app:has(.clockface[data-away-level='3']) .fs-controls {
+  background: color-mix(in srgb, var(--alert-wash) 68%, var(--material));
+  border-color: var(--alert-border);
 }
 .timeline-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -968,8 +1015,15 @@ button:focus-visible, input:focus-visible {
    全屏沉浸模式
    ========================================================================== */
 
+.app.fullscreen-mode {
+  --drawer-height: min(45dvh, 360px);
+  grid-template-rows: minmax(0, 1fr);
+}
 .app.fullscreen-mode .topbar { display: none; }
-.app.fullscreen-mode .main { padding: clamp(28px, 6vh, 72px) 16px; }
+.app.fullscreen-mode .main {
+  padding: clamp(28px, 6vh, 72px) 16px;
+  transition: padding 260ms cubic-bezier(0.2, 0, 0, 1);
+}
 .app.fullscreen-mode .big-timer { min-height: 1.2em; }
 .app.fullscreen-mode .subject-pill.large { font-size: 22px; padding: 10px 26px; }
 /* 全屏空闲态：日期/胶囊/提示随主视觉放大，保持层级比例 */
@@ -994,20 +1048,26 @@ button:focus-visible, input:focus-visible {
 
 /* 时间轴展开时控制条移到顶部：抽屉占满底部 45vh，避免按钮遮挡时间轴内容 */
 .app.fullscreen-mode.fs-timeline-open .fs-controls { bottom: auto; top: 16px; }
-.app.fullscreen-mode.fs-timeline-open .main { transform: translateY(-10vh); }
+.app.fullscreen-mode.fs-timeline-open .main { padding-bottom: calc(var(--drawer-height) + 32px); }
 
 /* 全屏时间轴抽屉：底部滑出，收起时隐藏（visibility 同步，保证可访问性树一致） */
 .timeline-drawer {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 15;
-  max-height: 45vh; overflow-y: auto;
+  height: var(--drawer-height); max-height: none; overflow: hidden;
   background: var(--surface-1);
   border-top: 1px solid var(--border);
   box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.08);
   visibility: hidden; opacity: 0; transform: translateY(16px);
-  transition: transform 0.25s ease, opacity 0.25s ease, visibility 0.25s;
+  transition:
+    transform 260ms cubic-bezier(0.2, 0, 0, 1),
+    opacity 200ms ease,
+    visibility 0s linear 260ms,
+    background-color 280ms ease,
+    border-color 280ms ease;
 }
 .timeline-drawer[data-open='true'] {
   visibility: visible; opacity: 1; transform: translateY(0);
+  transition-delay: 0s;
 }
 
 /* ==========================================================================
@@ -1092,7 +1152,7 @@ button:active:not(:disabled) { transform: scale(0.98); }
   .timeline-scale button { height: 24px; }
 }
 
-.app:has(.history-strip) {
+.app:not(.fullscreen-mode):has(.history-strip) {
   grid-template-rows: var(--topbar-height) minmax(260px, 42dvh) minmax(0, 1fr);
 }
 .app:has(.history-strip) .main { padding-block: 6px; }
