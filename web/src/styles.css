@@ -348,7 +348,7 @@ button:focus-visible, input:focus-visible {
 /* 空闲态 */
 .idle-clock {
   font-family: var(--font-num);
-  font-size: clamp(56px, 8vw, 96px); font-weight: 300;
+  font-size: clamp(52px, 11dvh, 96px); font-weight: 300;
   font-variant-numeric: tabular-nums;
   color: var(--text-1);
   line-height: 1.15; /* 收紧行高，替代原先日期处的负 margin hack */
@@ -408,7 +408,7 @@ button:focus-visible, input:focus-visible {
 
 .big-timer {
   font-family: var(--font-num);
-  font-size: clamp(64px, 10vw, 112px); font-weight: 200;
+  font-size: clamp(58px, 12dvh, 112px); font-weight: 200;
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1; /* 双保险：等价 tnum 特征 */
   font-synthesis: none; /* 禁用合成字重，防 fallback 字体宽度变化 */
@@ -1057,6 +1057,64 @@ button:active:not(:disabled) { transform: scale(0.98); }
   .popover-actions { grid-template-columns: 1fr 1fr; }
   .popover-actions .danger-btn { grid-column: 1 / -1; }
 }
+
+@media (max-height: 760px) {
+  .app {
+    --timeline-track-height: 78px;
+    --main-pad-block: 12px;
+    --clock-gap: 9px;
+  }
+  .subject-picker { gap: 6px; margin-top: 2px; }
+  .subject-chip { padding: 6px 11px; font-size: 13px; }
+  .intent-input { padding-block: 8px; }
+  .start-btn { min-height: 44px; }
+  .control-row { margin-top: 2px; }
+  .switch-subject { margin-top: 4px; }
+  .timeline { padding-block: 9px 6px; }
+  .timeline-head { margin-bottom: 4px; }
+  .timeline-scale { margin-bottom: 4px; }
+  .quiet-period { top: 22px; height: 32px; }
+  .seg { top: 28px; }
+  .now-line { top: 22px; bottom: 8px; }
+  .overview { margin-top: 4px; }
+}
+
+@media (max-height: 660px) {
+  .app {
+    --timeline-track-height: 68px;
+    --main-pad-block: 8px;
+    --clock-gap: 6px;
+  }
+  .idle-date, .sub-line { font-size: 13px; }
+  .away-slot { min-height: 30px; }
+  .away-line { padding-block: 4px; font-size: 13px; }
+  .control-btn, .control-btn.resume { width: 48px; height: 48px; }
+  .timeline-scale button { height: 24px; }
+}
+
+.app:has(.history-strip) {
+  grid-template-rows: var(--topbar-height) minmax(260px, 42dvh) minmax(0, 1fr);
+}
+.app:has(.history-strip) .main { padding-block: 6px; }
+.app:has(.history-strip) .clockface { gap: 5px; }
+.app:has(.history-strip) .idle-clock,
+.app:has(.history-strip) .big-timer { font-size: clamp(50px, 9dvh, 82px); }
+.app:has(.history-strip) .timeline { overflow: hidden; padding-block: 6px; }
+.app:has(.history-strip) .history-strip {
+  height: auto;
+  margin-bottom: 0;
+  padding: 8px 12px;
+  overflow: hidden;
+}
+.app:has(.history-strip) .history-report { gap: 6px; margin-top: 6px; }
+.app:has(.history-strip) .history-metrics > div { padding: 4px 10px; }
+.app:has(.history-strip) .history-metrics strong { font-size: 14px; }
+.app:has(.history-strip) .history-lanes { gap: 3px; }
+.app:has(.history-strip) .history-axis { min-height: 15px; }
+.app:has(.history-strip) .history-lane { min-height: 18px; }
+.app:has(.history-strip) .history-subjects { gap: 4px; }
+.app:has(.history-strip) .history-subject-bar { height: 5px; }
+.app:has(.history-strip) .history-subject-list { gap: 3px 12px; }
 
 /* ==========================================================================
    reduced motion
