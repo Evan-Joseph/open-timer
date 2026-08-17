@@ -162,8 +162,8 @@ export function formatBeijingTime(isoOrMs: string | number): string {
   }).format(d);
 }
 
-export { restPlanForFocus, restStageOf, restStageLabel } from '@clock/shared';
-export type { RestPlan, RestStage } from '@clock/shared';
+export { focusCycleSeconds, restKindLabel, restPlanForFocus, restStageOf, restStageLabel } from '@clock/shared';
+export type { FocusInterval, RestKind, RestPlan, RestStage } from '@clock/shared';
 
 export function shanghaiTodayLocal(): string {
   return new Intl.DateTimeFormat('en-CA', {

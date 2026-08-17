@@ -230,20 +230,34 @@ export function useClockStore(): ClockStore {
     setState((prev) => {
       if (!prev?.active_session) return prev;
       let seconds = prev.active_session.active_seconds;
+      let currentSegmentSeconds = prev.active_session.current_segment_active_seconds;
+      let currentSegmentStartedAt = prev.active_session.current_segment_started_at;
       if (status === 'paused' && prev.active_session.status === 'running') {
         // 暂停：把秒数推进到当前单调时刻再冻结，避免跳回旧锚点
         const elapsed = Math.max(0, (performance.now() - perfAtStateRef.current) / 1000);
-        seconds = prev.active_session.active_seconds + Math.floor(elapsed);
+        const elapsedSeconds = Math.floor(elapsed);
+        seconds = prev.active_session.active_seconds + elapsedSeconds;
+        currentSegmentSeconds = Math.max(0, (prev.active_session.current_segment_active_seconds ?? 0) + elapsedSeconds);
+        currentSegmentStartedAt = null;
       }
       if (status === 'running' && prev.active_session.status === 'paused') {
         // 继续：重锚到"现在"，否则会把暂停时长也算进 elapsed
         perfAtStateRef.current = performance.now();
+        currentSegmentSeconds = 0;
+        currentSegmentStartedAt = new Date().toISOString();
       }
       // 乐观 paused：暂停时刻记为当前墙钟；resume/stop 时清空（以服务端为准）
       const paused_at = status === 'paused' ? prev.active_session.paused_at ?? new Date().toISOString() : null;
       return {
         ...prev,
-        active_session: status === null ? null : { ...prev.active_session, status, active_seconds: seconds, paused_at },
+        active_session: status === null ? null : {
+          ...prev.active_session,
+          status,
+          active_seconds: seconds,
+          current_segment_active_seconds: currentSegmentSeconds,
+          current_segment_started_at: currentSegmentStartedAt,
+          paused_at,
+        },
       };
     });
   }, []);

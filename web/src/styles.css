@@ -430,14 +430,14 @@ button:focus-visible, input:focus-visible {
   transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
 }
 .away-note { color: var(--text-3); font-size: 12px; }
-/* L1（≥15min）黄：强调但非警示 */
+/* L1：建议休息即将结束，强调但非警示 */
 .away-line.urgent {
   background: color-mix(in srgb, var(--amber) 14%, var(--surface-1));
   color: var(--amber);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 40%, transparent);
 }
 .away-line.urgent .away-note { color: color-mix(in srgb, var(--amber) 70%, var(--text-3)); }
-/* L2（≥20min）红：警示 */
+/* L2：建议休息已到，提醒回到下一段 */
 .away-line.strong {
   background: color-mix(in srgb, var(--danger) 10%, var(--surface-1));
   color: var(--danger);

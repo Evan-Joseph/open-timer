@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Pause, Play, Square, Flag, Undo2 } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
-import type { SyncAnchor } from '../lib/clock.js';
-import { useMonotonicSeconds, useDualMonotonic, useWallSeconds, useBeijingTime, formatHms, formatHmsShort, formatDurationZh, formatBeijingTime, restPlanForFocus, restStageOf, restStageLabel } from '../lib/clock.js';
+import type { FocusInterval, SyncAnchor } from '../lib/clock.js';
+import { useMonotonicSeconds, useDualMonotonic, useWallSeconds, useBeijingTime, formatHms, formatHmsShort, formatDurationZh, formatBeijingTime, focusCycleSeconds, restKindLabel, restPlanForFocus, restStageOf, restStageLabel } from '../lib/clock.js';
 import { useAnimationsEnabled, useSettings } from '../lib/settings.js';
 import { playFinishChime, playAwayReminder } from '../lib/sound.js';
 import { isQuietMinute } from '@clock/shared';
@@ -34,7 +34,13 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const beijing = useBeijingTime(anchor ? { serverNowMs: anchor.serverNowMs, anchorPerfMs: anchor.anchorPerfMs } : null);
 
   /* ---------- 结束反馈 state（需先于离开提醒定义，两者耦合） ---------- */
-  const [lastStopped, setLastStopped] = useState<{ sessionId: string; subjectId: string; seconds: number; focusSeconds: number } | null>(null);
+  const [lastStopped, setLastStopped] = useState<{
+    sessionId: string;
+    subjectId: string;
+    seconds: number;
+    focusSeconds: number;
+    focusEndedAtMs: number;
+  } | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
 
   // 最近一次结束会话是空闲页休息状态的可恢复来源，刷新或关闭结束卡后仍保留提示。
@@ -48,9 +54,14 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     if (!segment?.ended_at) return 0;
     return Math.max(0, Math.floor((Date.parse(segment.ended_at) - Date.parse(segment.started_at)) / 1000));
   }, [recentStopped]);
+  const recentFocusEndMs = useMemo(() => {
+    const segmentEnd = recentStopped?.segments.at(-1)?.ended_at;
+    const endedMs = Date.parse(segmentEnd ?? recentStopped?.ended_at ?? '');
+    return Number.isFinite(endedMs) ? endedMs : null;
+  }, [recentStopped]);
   const recentRestAnchor = useMemo<SyncAnchor | null>(() => {
-    if (!recentStopped?.ended_at) return null;
-    const endedMs = Date.parse(recentStopped.ended_at);
+    if (recentFocusEndMs === null) return null;
+    const endedMs = recentFocusEndMs;
     if (!Number.isFinite(endedMs)) return null;
     return {
       confirmedSeconds: Math.max(0, Math.floor((Date.now() - endedMs) / 1000)),
@@ -58,7 +69,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       anchorPerfMs: performance.now(),
       serverNowMs: Date.now(),
     };
-  }, [recentStopped?.ended_at]);
+  }, [recentFocusEndMs]);
 
   /* ---------- 离开（暂停 / 科目结束后）渐进提醒 ---------- */
   const [awaySnoozedUntil, setAwaySnoozedUntil] = useState(0); // 全屏召回推迟到的时间戳
@@ -72,11 +83,47 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   /** 离开计时锚点：暂停用服务端 paused_at；结束态用本组件在 stop 时记录的墙钟锚点 */
   const awayAnchor = awayActive ? (store.awayAnchor ?? awayAnchorOverride ?? recentRestAnchor) : null;
   const awaySeconds = useWallSeconds(awayAnchor, 1000);
-  // 休息时长随刚结束的专注段计算：1/5，5-20 分钟封顶；暂停和结束都使用同一规则。
+  // 暂停和结束都从刚结束的专注段计算；周期累计决定本轮是短休息还是长休息。
   const focusForRest = paused
     ? (active?.current_segment_active_seconds ?? 0)
     : (lastStopped?.focusSeconds ?? recentFocusSeconds);
-  const restPlan = restPlanForFocus(focusForRest);
+  const currentFocusInterval = useMemo<FocusInterval | null>(() => {
+    if (paused && active?.paused_at) {
+      const endedAtMs = Date.parse(active.paused_at);
+      if (Number.isFinite(endedAtMs)) {
+        return { startedAtMs: endedAtMs - focusForRest * 1000, endedAtMs };
+      }
+    }
+    if (lastStopped) {
+      return {
+        startedAtMs: lastStopped.focusEndedAtMs - lastStopped.focusSeconds * 1000,
+        endedAtMs: lastStopped.focusEndedAtMs,
+      };
+    }
+    const segment = recentStopped?.segments.at(-1);
+    if (!segment?.ended_at) return null;
+    const startedAtMs = Date.parse(segment.started_at);
+    const endedAtMs = Date.parse(segment.ended_at);
+    return Number.isFinite(startedAtMs) && Number.isFinite(endedAtMs)
+      ? { startedAtMs, endedAtMs }
+      : null;
+  }, [active?.paused_at, focusForRest, lastStopped, paused, recentStopped]);
+  const focusHistory = useMemo<FocusInterval[]>(() => (
+    store.sessions.flatMap((session) => session.status === 'voided'
+      ? []
+      : session.segments.flatMap((segment) => {
+          if (!segment.ended_at) return [];
+          const startedAtMs = Date.parse(segment.started_at);
+          const endedAtMs = Date.parse(segment.ended_at);
+          return Number.isFinite(startedAtMs) && Number.isFinite(endedAtMs)
+            ? [{ startedAtMs, endedAtMs }]
+            : [];
+        }))
+  ), [store.sessions]);
+  const cycleFocusSeconds = currentFocusInterval
+    ? focusCycleSeconds(currentFocusInterval, focusHistory)
+    : focusForRest;
+  const restPlan = restPlanForFocus(focusForRest, cycleFocusSeconds);
   const restStage = awayActive ? restStageOf(awaySeconds, restPlan) : 'resting';
   const awayLevel = awayActive ? (restStage === 'overdue' ? 3 : restStage === 'due' ? 2 : restStage === 'due-soon' ? 1 : 0) : 0;
   const beijingNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
@@ -115,7 +162,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       playAwayReminder(0.2);
     }
   }, [awayLevel, quietPeriod]);
-  // 休息达到建议时长的 150% 且未推迟/未关闭 → 全屏召回
+  // 休息超过建议窗口的逾期宽限且未推迟/未关闭 → 全屏召回
   const showAwayRecall = awayActive && !quietPeriod && awayLevel >= 3 && !awayDismissed && Date.now() >= awaySnoozedUntil;
   /** 结束态"开始下一段"：延续刚才的科目 */
   const handleStartNext = () => {
@@ -203,12 +250,25 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const subjectOf = (id: string | null | undefined) => subjects.find((s) => s.subject_id === id);
 
   const handleStop = async () => {
-    const snapshot = active ? { sessionId: active.session_id, subjectId: active.subject_id, seconds, focusSeconds: segmentSecs } : null;
+    const pausedAtMs = active?.paused_at ? Date.parse(active.paused_at) : Number.NaN;
+    const focusEndedAtMs = paused && Number.isFinite(pausedAtMs) ? pausedAtMs : Date.now();
+    const snapshot = active ? {
+      sessionId: active.session_id,
+      subjectId: active.subject_id,
+      seconds,
+      focusSeconds: segmentSecs,
+      focusEndedAtMs,
+    } : null;
     if (snapshot) {
       if (settings.finishSound) playFinishChime();
       setLastStopped(snapshot); // 立即呈现结束反馈（store.stop 内部乐观清空活动会话）
-      // 结束即离开起点：科目结束后同样进入"已离开"渐进提醒
-      setAwayAnchorOverride({ confirmedSeconds: 0, running: true, anchorPerfMs: performance.now(), serverNowMs: Date.now() });
+      // 从运行态结束时休息从 0 开始；从暂停态结束时沿用已经发生的休息。
+      setAwayAnchorOverride({
+        confirmedSeconds: paused ? awaySeconds : 0,
+        running: true,
+        anchorPerfMs: performance.now(),
+        serverNowMs: Date.now(),
+      });
     }
     await store.stop(null);
   };
@@ -237,7 +297,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
               className={`away-line${reminderLevel >= 2 ? ' strong' : reminderLevel >= 1 ? ' urgent' : ''}`}
               data-testid="away-line"
             >
-              {restLabel} · 已休息 {formatHms(awaySeconds)}
+              {restKindLabel(restPlan.kind)} · {restLabel} · 已休息 {formatHms(awaySeconds)}
               <span className="away-note"> · 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
             </div>
           </div>
@@ -302,14 +362,14 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         {active.intent_note && <div className="intent-line">「{active.intent_note}」</div>}
 
         {/* 离开时长：常驻占位（running 时空行），暂停/恢复瞬间不引起布局位移。
-            渐进提醒：L1 ≥15min 黄 + pill 呼吸；L2 ≥20min 红；L3 ≥30min 全屏召回 */}
+            渐进提醒：建议结束前 1 分钟预告，达到建议时长进入应回到下一段，逾期宽限后召回。 */}
         <div className="away-slot" aria-live="off">
           {paused && (
             <div
               className={`away-line${reminderLevel >= 2 ? ' strong' : reminderLevel >= 1 ? ' urgent' : ''}`}
               data-testid="away-line"
             >
-              {restLabel} · 已休息 {formatHms(awaySeconds)}
+              {restKindLabel(restPlan.kind)} · {restLabel} · 已休息 {formatHms(awaySeconds)}
               <span className="away-note"> · 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
             </div>
           )}
@@ -386,7 +446,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             className={`away-line${reminderLevel >= 2 ? ' strong' : reminderLevel >= 1 ? ' urgent' : ''}`}
             data-testid="idle-rest-line"
           >
-            {restLabel} · 已休息 {formatHms(awaySeconds)}
+            {restKindLabel(restPlan.kind)} · {restLabel} · 已休息 {formatHms(awaySeconds)}
             <span className="away-note">· 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
           </div>
         </div>
