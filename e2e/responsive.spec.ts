@@ -25,6 +25,15 @@ async function enterReadyState(page: Page) {
   await expect(page.getByTestId('idle-clock')).toBeVisible();
 }
 
+async function recordRecentSession(page: Page, subjectName: string, durationMs = 120) {
+  await page.getByRole('radio', { name: subjectName }).click();
+  await page.getByTestId('start-btn').click();
+  await page.waitForTimeout(durationMs);
+  await page.getByRole('button', { name: '结束并保存' }).click();
+  await page.getByRole('button', { name: '好，继续' }).click();
+  await expect(page.getByTestId('idle-clock')).toBeVisible();
+}
+
 async function expectDocumentFits(page: Page) {
   const dimensions = await page.evaluate(() => ({
     scrollHeight: document.documentElement.scrollHeight,
@@ -82,22 +91,37 @@ test('横屏标准视口一屏容纳主时钟与时间轴', async ({ page }) => 
 test('1024x640 中 7 天泳道不触发页面滚动', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 640 });
   await enterReadyState(page);
+  for (const subject of ['数学二', '英语二', '数据结构', '计算机组成原理', '操作系统', '计算机网络', '思想政治理论']) {
+    await recordRecentSession(page, subject, 1_050);
+  }
   await page.getByTestId('history-toggle').click();
   await expect(page.getByTestId('history-strip')).toBeVisible();
   await expect(page.locator('.history-lane')).toHaveCount(7);
+  await expect(page.locator('.history-subject-list > span')).toHaveCount(7);
   await expectDocumentFits(page);
   await expectWithinViewport(page, '.clockface');
   await expectWithinViewport(page, '.history-strip');
   const historyClearance = await page.evaluate(() => ({
     clockBottom: document.querySelector('.clockface')!.getBoundingClientRect().bottom,
     timelineTop: document.querySelector('.timeline')!.getBoundingClientRect().top,
+    historyBottom: document.querySelector('.history-strip')!.getBoundingClientRect().bottom,
+    viewportBottom: document.documentElement.clientHeight,
   }));
-  expect(historyClearance.clockBottom).toBeLessThanOrEqual(historyClearance.timelineTop);
+  expect(
+    historyClearance.clockBottom,
+    `主时钟侵入时间轴：${JSON.stringify(historyClearance)}`,
+  ).toBeLessThanOrEqual(historyClearance.timelineTop);
+  expect(
+    historyClearance.historyBottom,
+    `7 天报告越出视口：${JSON.stringify(historyClearance)}`,
+  ).toBeLessThanOrEqual(historyClearance.viewportBottom);
 });
 
 test('全屏逾期时主区与时间轴共享告警状态', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await enterReadyState(page);
+  await recordRecentSession(page, '数学二');
+  await expect(page.getByTestId('idle-rest-line')).toBeVisible();
   await page.evaluate(() => document.documentElement.requestFullscreen().catch(() => {}));
   await page.waitForTimeout(400);
   test.skip(!(await page.evaluate(() => Boolean(document.fullscreenElement))), '浏览器不支持全屏');

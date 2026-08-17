@@ -1046,8 +1046,20 @@ button:focus-visible, input:focus-visible {
 }
 .fs-hint { font-size: 12px; color: var(--text-3); }
 
-/* 抽屉占满底部 45vh；主时钟移动到剩余空间的视觉中心。 */
-.app.fullscreen-mode.fs-timeline-open .main { transform: translateY(calc(var(--drawer-height) * -0.5)); }
+/* 抽屉打开后为主时钟保留真实可用行，避免内容变高时被固定 transform 推出视口。 */
+.app.fullscreen-mode.fs-timeline-open {
+  grid-template-rows: minmax(0, calc(100dvh - var(--drawer-height))) var(--drawer-height);
+}
+.app.fullscreen-mode.fs-timeline-open .main {
+  --clock-gap: 4px;
+  grid-row: 1;
+  padding: 10px 16px;
+  transform: none;
+}
+.app.fullscreen-mode.fs-timeline-open .idle-date { font-size: 16px; }
+.app.fullscreen-mode.fs-timeline-open .subject-picker { gap: 6px; margin-top: 2px; }
+.app.fullscreen-mode.fs-timeline-open .subject-chip { padding: 6px 11px; font-size: 13px; }
+.app.fullscreen-mode.fs-timeline-open .away-slot { min-height: 28px; }
 
 /* 全屏时间轴抽屉：底部滑出，收起时隐藏（visibility 同步，保证可访问性树一致） */
 .timeline-drawer {
@@ -1153,12 +1165,14 @@ button:active:not(:disabled) { transform: scale(0.98); }
 }
 
 .app:not(.fullscreen-mode):has(.history-strip) {
-  grid-template-rows: var(--topbar-height) minmax(256px, 40.4dvh) minmax(0, 1fr);
+  grid-template-rows: var(--topbar-height) minmax(260px, calc(40.4dvh + 4px)) minmax(0, 1fr);
 }
 .app:has(.history-strip) .main { padding-block: 6px; }
-.app:has(.history-strip) .clockface { max-width: 760px; gap: 5px; }
+.app:has(.history-strip) .clockface { max-width: 760px; gap: 2px; }
 .app:has(.history-strip) .idle-clock,
-.app:has(.history-strip) .big-timer { font-size: clamp(50px, 9dvh, 82px); }
+.app:has(.history-strip) .big-timer { font-size: clamp(46px, 7.8dvh, 72px); }
+.app:has(.history-strip) .idle-rest { min-height: 26px; }
+.app:has(.history-strip) .away-line { padding-block: 3px; font-size: 12px; }
 .app:has(.history-strip) .timeline { overflow: hidden; padding-block: 6px; }
 .app:has(.history-strip) .history-strip {
   height: auto;
@@ -1170,11 +1184,11 @@ button:active:not(:disabled) { transform: scale(0.98); }
 .app:has(.history-strip) .history-metrics > div { padding: 4px 10px; }
 .app:has(.history-strip) .history-metrics strong { font-size: 14px; }
 .app:has(.history-strip) .history-lanes { gap: 3px; }
-.app:has(.history-strip) .history-axis { min-height: 15px; }
+.app:has(.history-strip) .history-axis { min-height: 13px; }
 .app:has(.history-strip) .history-lane { min-height: 18px; }
 .app:has(.history-strip) .history-subjects { gap: 4px; }
 .app:has(.history-strip) .history-subject-bar { height: 5px; }
-.app:has(.history-strip) .history-subject-list { gap: 3px 12px; }
+.app:has(.history-strip) .history-subject-list { gap: 2px 12px; line-height: 1; }
 
 /* ==========================================================================
    reduced motion
