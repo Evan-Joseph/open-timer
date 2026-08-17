@@ -229,6 +229,7 @@ export function useClockStore(): ClockStore {
   const optimisticSetStatus = useCallback((status: 'running' | 'paused' | null) => {
     setState((prev) => {
       if (!prev?.active_session) return prev;
+      const projectedServerNowMs = prev.server_now_ms + Math.max(0, performance.now() - perfAtStateRef.current);
       let seconds = prev.active_session.active_seconds;
       let currentSegmentSeconds = prev.active_session.current_segment_active_seconds;
       let currentSegmentStartedAt = prev.active_session.current_segment_started_at;
@@ -244,10 +245,12 @@ export function useClockStore(): ClockStore {
         // 继续：重锚到"现在"，否则会把暂停时长也算进 elapsed
         perfAtStateRef.current = performance.now();
         currentSegmentSeconds = 0;
-        currentSegmentStartedAt = new Date().toISOString();
+        currentSegmentStartedAt = new Date(projectedServerNowMs).toISOString();
       }
-      // 乐观 paused：暂停时刻记为当前墙钟；resume/stop 时清空（以服务端为准）
-      const paused_at = status === 'paused' ? prev.active_session.paused_at ?? new Date().toISOString() : null;
+      // 乐观时间戳同样以服务端锚点外推，避免客户端墙钟偏差触发错误的休息逾期。
+      const paused_at = status === 'paused'
+        ? prev.active_session.paused_at ?? new Date(projectedServerNowMs).toISOString()
+        : null;
       return {
         ...prev,
         active_session: status === null ? null : {

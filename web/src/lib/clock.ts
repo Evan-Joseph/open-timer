@@ -38,12 +38,7 @@ export function useMonotonicSeconds(anchor: SyncAnchor | null, tickMs = 1000): n
   return seconds;
 }
 
-/**
- * 墙钟推进的秒数（基于 Date.now，而非 performance.now）：
- * 供"离开时长"这类墙钟语义使用——便于测试（page.clock 可 fake Date.now），
- * 且离开时长本身锚定服务端 paused_at（墙钟），语义一致。
- * 核心计时（总累计/本段）仍走 performance.now 单调时钟，不受系统时间调整影响。
- */
+/** 离开时长：服务端确认值加单调增量，客户端墙钟变化不能制造休息时长。 */
 export function useWallSeconds(anchor: SyncAnchor | null, tickMs = 1000): number {
   const [seconds, setSeconds] = useState(0);
   const anchorRef = useRef(anchor);
@@ -54,12 +49,10 @@ export function useWallSeconds(anchor: SyncAnchor | null, tickMs = 1000): number
       setSeconds(0);
       return;
     }
-    // 锚定时刻的墙钟毫秒 = 服务端时间 −（单调 elapsed）
-    const anchorWallMs = anchor.serverNowMs - Math.round(performance.now() - anchor.anchorPerfMs);
     const compute = () => {
       const a = anchorRef.current;
       if (!a) return 0;
-      const elapsed = a.running ? Math.max(0, (Date.now() - anchorWallMs) / 1000) : 0;
+      const elapsed = a.running ? Math.max(0, (performance.now() - a.anchorPerfMs) / 1000) : 0;
       return Math.max(0, Math.floor(a.confirmedSeconds + elapsed));
     };
     setSeconds(compute());

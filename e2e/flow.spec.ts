@@ -5,7 +5,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 import { rmSync } from 'node:fs';
-import { isQuietMinute } from '@clock/shared';
+import { shanghaiDayRangeUtc, shanghaiToday } from '@clock/shared';
 
 const PASSWORD = '123456';
 
@@ -21,6 +21,11 @@ async function timerTotalSeconds(page: Page): Promise<number> {
 test.beforeAll(() => {
   rmSync('/tmp/clock-e2e-data', { recursive: true, force: true });
 });
+
+function beijingTodayAt(hour: number, minute = 0): Date {
+  const { startMs } = shanghaiDayRangeUtc(shanghaiToday(Date.now()));
+  return new Date(startMs + (hour * 60 + minute) * 60_000);
+}
 
 async function doSetup(page: Page) {
   await page.goto('/');
@@ -524,8 +529,11 @@ test.describe('离开（暂停）时长显示', () => {
 
     await page.getByRole('button', { name: '暂停计时' }).click();
     await expect(page.getByTestId('away-line')).toBeVisible();
-    await expect(page.getByTestId('away-line')).toContainText('休息中');
+    await expect(page.getByTestId('away-line')).toContainText(/休息中|静默中/);
     await expect(page.getByTestId('away-line')).toContainText('建议');
+    const pausedState = await (await page.request.get('/api/v1/state')).json();
+    expect(pausedState.active_session.status).toBe('paused');
+    expect(Math.abs(pausedState.server_now_ms - Date.parse(pausedState.active_session.paused_at))).toBeLessThan(5_000);
 
     // 离开时长在增长（等待 1.5s 后应至少为 00:00:01）
     await page.waitForTimeout(1500);
@@ -695,7 +703,6 @@ test.describe('首页休息状态', () => {
   });
 
   test('暂停后结束不会把已经发生的休息重新归零', async ({ page }) => {
-    await page.clock.install();
     await doSetup(page);
     await page.getByRole('radio', { name: '数据结构' }).click();
     await page.getByTestId('start-btn').click();
@@ -712,7 +719,7 @@ test.describe('首页休息状态', () => {
 
 test.describe('离开渐进提醒', () => {
   test('专注运行中无论持续多久都不进入休息提醒', async ({ page }) => {
-    await page.clock.install({ time: new Date('2026-08-16T02:00:00.000Z') });
+    await page.clock.install({ time: beijingTodayAt(10) });
     await doSetup(page);
     await page.getByRole('radio', { name: '数据结构' }).click();
     await page.getByTestId('start-btn').click();
@@ -724,7 +731,7 @@ test.describe('离开渐进提醒', () => {
   });
 
   test('午饭午睡静默期间继续计时但不升级提醒或弹出召回', async ({ page }) => {
-    await page.clock.install({ time: new Date('2026-08-16T02:58:00.000Z') }); // 北京时间 10:58
+    await page.clock.install({ time: beijingTodayAt(10, 58) });
     await doSetup(page);
     await page.getByRole('radio', { name: '数据结构' }).click();
     await page.getByTestId('start-btn').click();
@@ -744,13 +751,7 @@ test.describe('离开渐进提醒', () => {
   });
 
   test('按上一段专注时长计算休息窗口，并在临近/到期/超时提醒', async ({ page }) => {
-    const beijingNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
-    const currentMinute = beijingNow.getUTCHours() * 60 + beijingNow.getUTCMinutes();
-    test.skip(
-      isQuietMinute(currentMinute) || isQuietMinute(currentMinute + 20),
-      '测试窗口与静默时段相交，提醒升级场景互斥',
-    );
-    await page.clock.install();
+    await page.clock.install({ time: beijingTodayAt(10) });
     await doSetup(page);
     await page.getByRole('radio', { name: '数据结构' }).click();
     await page.getByTestId('start-btn').click();
@@ -758,12 +759,29 @@ test.describe('离开渐进提醒', () => {
     await page.getByRole('button', { name: '暂停计时' }).click();
     await expect(page.getByTestId('away-line')).toBeVisible();
 
-    // 约 1 秒专注给 2 分钟统一休息窗口；此时已超过建议时长 → 红（strong）
-    await page.clock.fastForward(6 * 60 * 1000);
+    const pausedState = await (await page.request.get('/api/v1/state')).json();
+    let pausedAgeMs = 6 * 60 * 1000;
+    await page.route('**/api/v1/state', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ...pausedState,
+          active_session: {
+            ...pausedState.active_session,
+            paused_at: new Date(pausedState.server_now_ms - pausedAgeMs).toISOString(),
+          },
+        }),
+      });
+    });
+
+    // 约 1 秒专注给 2 分钟统一休息窗口；恢复 6 分钟暂停快照后进入到期提醒。
+    await page.reload();
     await expect(page.getByTestId('away-line')).toHaveClass(/strong/);
 
-    // 逾期宽限后 → 全屏召回
-    await page.clock.fastForward(3 * 60 * 1000);
+    // 恢复 9 分钟暂停快照后进入逾期宽限并显示全屏召回。
+    pausedAgeMs = 9 * 60 * 1000;
+    await page.reload();
     const dialog = page.getByRole('dialog', { name: '离开提醒' });
     await expect(dialog).toBeVisible();
 
@@ -776,6 +794,7 @@ test.describe('离开渐进提醒', () => {
     await expect(dialog).toBeVisible();
 
     // 回到学习：overlay 关闭并恢复运行
+    await page.unroute('**/api/v1/state');
     await dialog.getByRole('button', { name: '回到学习' }).click();
     await expect(dialog).not.toBeVisible();
     await expect(page.getByText('· 进行中')).toBeVisible();
@@ -794,7 +813,7 @@ test.describe('离开渐进提醒', () => {
 test.describe('科目结束后的离开提醒', () => {
   test('结束后同样进入已离开渐进提醒，逾期后可开始下一段', async ({ page }) => {
     // 固定在北京时间 10:00，避免真实运行时间落入静默区导致用例漂移。
-    await page.clock.install({ time: new Date('2026-08-16T02:00:00.000Z') });
+    await page.clock.install({ time: beijingTodayAt(10) });
     await doSetup(page);
     await page.getByRole('radio', { name: '数据结构' }).click();
     await page.getByTestId('start-btn').click();

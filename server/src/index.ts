@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { SqliteStorage } from './repo/sqlite-storage.js';
+import { shanghaiDayRangeUtc, shanghaiToday } from '@clock/shared';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -17,9 +18,17 @@ mkdirSync(dirname(config.dbPath), { recursive: true });
 const storage = new SqliteStorage(config.dbPath);
 storage.migrate();
 
+const bootRealNowMs = Date.now();
+const e2eDaytimeBaseMs = process.env.NODE_ENV === 'test' && process.env.CLOCK_E2E_DAYTIME === '1'
+  ? shanghaiDayRangeUtc(shanghaiToday(bootRealNowMs)).startMs + 10 * 60 * 60_000
+  : null;
+
 const app = createApp({
   storage,
   config,
+  now: e2eDaytimeBaseMs === null
+    ? undefined
+    : () => e2eDaytimeBaseMs + (Date.now() - bootRealNowMs),
   rateLimits: process.env.NODE_ENV === 'production' ? undefined : { loginMaxPerMin: 60, apiMaxPerMin: 600 },
 });
 

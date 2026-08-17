@@ -22,6 +22,11 @@ export default defineConfig({
     url: `http://127.0.0.1:${PORT}/api/v1/health`,
     reuseExistingServer: false,
     timeout: 30_000,
-    env: { CLOCK_DATA_DIR: '/tmp/clock-e2e-data', CLOCK_PORT: String(PORT) },
+    env: {
+      CLOCK_DATA_DIR: '/tmp/clock-e2e-data',
+      CLOCK_PORT: String(PORT),
+      CLOCK_E2E_DAYTIME: '1',
+      NODE_ENV: 'test',
+    },
   },
 });

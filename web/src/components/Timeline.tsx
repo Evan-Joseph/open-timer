@@ -78,7 +78,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const [viewDate, setViewDate] = useState(store.todayDate);
   const [popover, setPopover] = useState<{ row: SessionRow; containerX: number } | null>(null);
   const [hoverPreview, setHoverPreview] = useState<{ row: SessionRow; containerX: number } | null>(null);
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [nowMs, setNowMs] = useState(() => store.state?.server_now_ms ?? Date.now());
   const [scale, setScale] = useState<TimelineScale>(() => {
     const saved = localStorage.getItem('clock-timeline-scale');
     return saved === 'full-day' ? saved : 'default';
@@ -149,11 +149,19 @@ export default function Timeline({ store }: { store: ClockStore }) {
     });
   }, [historyOpen, store.sessions, store.todayDate]);
 
-  // 信标持续移动（30s 步进）：不触发强制滚动
+  const readServerNowMs = useCallback(() => {
+    if (store.anchor) {
+      return store.anchor.serverNowMs + Math.max(0, performance.now() - store.anchor.anchorPerfMs);
+    }
+    return store.state?.server_now_ms ?? Date.now();
+  }, [store.anchor, store.state?.server_now_ms]);
+
+  // 信标持续移动（30s 步进）：服务端时间外推，不触发强制滚动。
   useEffect(() => {
-    const t = window.setInterval(() => setNowMs(Date.now()), NOW_TICK_MS);
+    setNowMs(readServerNowMs());
+    const t = window.setInterval(() => setNowMs(readServerNowMs()), NOW_TICK_MS);
     return () => window.clearInterval(t);
-  }, []);
+  }, [readServerNowMs]);
 
   // 跨午夜：若用户停留在"旧的今天"，跟随到新的今天
   useEffect(() => {
@@ -256,7 +264,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
   /** 会话级分组：一个 session 的所有段合并为一行（弹窗/流水账共用数据源）。 */
   const sessionRows: SessionRow[] = useMemo(() => {
     const out: SessionRow[] = [];
-    const nowClamped = Math.min(Date.now(), endMs);
+    const nowClamped = Math.min(nowMs, endMs);
     for (const s of dateSessions) {
       if (s.status === 'voided') continue;
       const subj = store.subjects.find((x) => x.subject_id === s.subject_id);
