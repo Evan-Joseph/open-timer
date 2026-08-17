@@ -50,6 +50,14 @@ async function expectWithinViewport(page: Page, selector: string) {
 
 test('横屏标准视口一屏容纳主时钟与时间轴', async ({ page }) => {
   await enterReadyState(page);
+  const state = await (await page.request.get('/api/v1/state')).json();
+  const expectedTime = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(state.server_now_ms));
+  await expect(page.getByTestId('idle-clock')).toHaveText(expectedTime);
 
   for (const viewport of [
     { width: 1024, height: 640 },

@@ -32,6 +32,10 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   // 本段活跃秒（running 增长 / paused 冻结）：与总累计用同一 tick 同源计算，杜绝抢秒抖动
   const { total: totalSecs, seg: segmentSecs, prev: prevSecs } = useDualMonotonic(anchor, store.segmentAnchor, 1000);
   const beijing = useBeijingTime(anchor ? { serverNowMs: anchor.serverNowMs, anchorPerfMs: anchor.anchorPerfMs } : null);
+  const readServerNowMs = useCallback(() => {
+    if (anchor) return anchor.serverNowMs + Math.max(0, performance.now() - anchor.anchorPerfMs);
+    return state?.server_now_ms ?? Date.now();
+  }, [anchor, state?.server_now_ms]);
 
   /* ---------- 结束反馈 state（需先于离开提醒定义，两者耦合） ---------- */
   const [lastStopped, setLastStopped] = useState<{
@@ -63,13 +67,14 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     if (recentFocusEndMs === null) return null;
     const endedMs = recentFocusEndMs;
     if (!Number.isFinite(endedMs)) return null;
+    const serverNowMs = readServerNowMs();
     return {
-      confirmedSeconds: Math.max(0, Math.floor((Date.now() - endedMs) / 1000)),
+      confirmedSeconds: Math.max(0, Math.floor((serverNowMs - endedMs) / 1000)),
       running: true,
       anchorPerfMs: performance.now(),
-      serverNowMs: Date.now(),
+      serverNowMs,
     };
-  }, [recentFocusEndMs]);
+  }, [recentFocusEndMs, readServerNowMs]);
 
   /* ---------- 离开（暂停 / 科目结束后）渐进提醒 ---------- */
   const [awaySnoozedUntil, setAwaySnoozedUntil] = useState(0); // 全屏召回推迟到的时间戳
@@ -90,7 +95,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const restPlan = restPlanForFocus(focusForRest);
   const restStage = awayActive ? restStageOf(awaySeconds, restPlan) : 'resting';
   const awayLevel = awayActive ? (restStage === 'overdue' ? 3 : restStage === 'due' ? 2 : restStage === 'due-soon' ? 1 : 0) : 0;
-  const beijingNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const beijingNow = new Date(readServerNowMs() + 8 * 60 * 60 * 1000);
   const quietPeriod = awayActive && isQuietMinute(beijingNow.getUTCHours() * 60 + beijingNow.getUTCMinutes());
   const reminderLevel = quietPeriod ? 0 : awayLevel;
   const restLabel = quietPeriod ? '静默中' : restStageLabel(restStage);
@@ -176,11 +181,12 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     ) : null;
 
   // 空闲态北京时间与"距上次专注"间隔（5s 步进，共用一个 interval）
-  const [idleNowMs, setIdleNowMs] = useState(() => Date.now());
+  const [idleNowMs, setIdleNowMs] = useState(readServerNowMs);
   useEffect(() => {
-    const t = window.setInterval(() => setIdleNowMs(Date.now()), 5000);
+    setIdleNowMs(readServerNowMs());
+    const t = window.setInterval(() => setIdleNowMs(readServerNowMs()), 5000);
     return () => window.clearInterval(t);
-  }, []);
+  }, [readServerNowMs]);
   const idleTime = formatBeijingTime(idleNowMs);
 
   /* ---------- 结束反馈 ---------- */
@@ -215,7 +221,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
 
   const handleStop = async () => {
     const pausedAtMs = active?.paused_at ? Date.parse(active.paused_at) : Number.NaN;
-    const focusEndedAtMs = paused && Number.isFinite(pausedAtMs) ? pausedAtMs : Date.now();
+    const focusEndedAtMs = paused && Number.isFinite(pausedAtMs) ? pausedAtMs : readServerNowMs();
     const snapshot = active ? {
       sessionId: active.session_id,
       subjectId: active.subject_id,
@@ -401,7 +407,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         {idleTime}
       </div>
       <div className="idle-date">
-        {new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', dateStyle: 'full' }).format(new Date())}
+        {new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', dateStyle: 'full' }).format(new Date(idleNowMs))}
       </div>
 
       {recentRestAnchor && (
