@@ -565,26 +565,29 @@ button:focus-visible, input:focus-visible {
 .timeline-scale button.selected { color: var(--text-1); background: var(--surface-1); box-shadow: var(--shadow-sm); }
 .history-strip { max-width: 960px; margin: 0 auto 14px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--shadow-sm); }
 .history-strip-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; color: var(--text-3); font-size: 11px; }
-.history-strip-head > div { display: flex; gap: 8px; align-items: baseline; }
-.history-strip-head strong { color: var(--text-1); font-size: 14px; }
+.history-strip-head strong { color: var(--text-2); font-family: var(--font-num); font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .history-report { display: grid; gap: 16px; margin-top: 14px; }
-.history-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-block: 1px solid var(--border); }
+.history-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid var(--border); }
 .history-metrics > div { display: grid; gap: 1px; padding: 10px 12px; border-right: 1px solid var(--border); }
 .history-metrics > div:last-child { border-right: 0; }
 .history-metrics span { color: var(--text-3); font-size: 11px; }
 .history-metrics strong { color: var(--text-1); font-family: var(--font-num); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.history-metrics strong small { color: var(--text-3); font-size: 11px; font-weight: 400; }
-.history-metrics .trend-up { color: var(--success); }
-.history-metrics .trend-down { color: var(--danger); }
 .history-lanes { display: grid; gap: 7px; }
-.history-axis { display: grid; grid-template-columns: 120px repeat(5, 1fr); align-items: end; color: var(--text-3); font-family: var(--font-num); font-size: 10px; font-variant-numeric: tabular-nums; }
-.history-axis span:not(:first-child) { text-align: right; }
+.history-axis { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; min-height: 25px; color: var(--text-3); font-family: var(--font-num); font-size: 10px; font-variant-numeric: tabular-nums; }
+.history-axis-track { position: relative; }
+.history-axis-track > span { position: absolute; bottom: 0; transform: translateX(-50%); white-space: nowrap; }
+.history-axis-track .axis-start { left: 0; align-items: start; transform: none; }
+.history-axis-track .axis-end { right: 0; align-items: end; transform: none; text-align: right; }
+.history-boundary { display: grid; gap: 1px; }
+.history-boundary strong { color: var(--text-2); font-size: 10px; font-weight: 500; }
+.history-boundary small { color: var(--text-3); font-family: var(--font-ui); font-size: 8px; font-weight: 400; }
 .history-lane { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; align-items: center; min-height: 28px; }
 .history-lane-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
 .history-lane-label strong { color: var(--text-1); font-size: 11px; white-space: nowrap; }
 .history-lane-label span { overflow: hidden; color: var(--text-3); font-family: var(--font-num); font-size: 10px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
-.history-lane-track { position: relative; height: 12px; overflow: hidden; border-radius: 4px; background: repeating-linear-gradient(90deg, var(--surface-2) 0 calc(27.59% - 1px), var(--border) calc(27.59% - 1px) 27.59%); }
-.history-lane-segment { position: absolute; top: 2px; bottom: 2px; min-width: 2px; border-radius: 2px; background: var(--sc); transition: width 220ms var(--ease-standard, ease), left 220ms var(--ease-standard, ease); }
+.history-lane-track { position: relative; height: 18px; overflow: hidden; border-radius: 4px; background: repeating-linear-gradient(90deg, var(--surface-2) 0 calc(27.59% - 1px), var(--border) calc(27.59% - 1px) 27.59%); }
+.history-quiet-period { position: absolute; inset-block: 0; display: grid; place-items: center; overflow: hidden; border-inline: 1px solid color-mix(in srgb, var(--text-3) 18%, transparent); color: var(--text-3); background: color-mix(in srgb, var(--text-3) 7%, transparent); font-size: 8px; line-height: 1; white-space: nowrap; }
+.history-lane-segment { position: absolute; z-index: 1; top: 5px; bottom: 5px; min-width: 2px; border-radius: 2px; background: var(--sc); transition: width 220ms var(--ease-standard, ease), left 220ms var(--ease-standard, ease); }
 .history-subjects { display: grid; gap: 9px; }
 .history-subject-bar { display: flex; height: 7px; overflow: hidden; border-radius: 999px; background: var(--surface-2); }
 .history-subject-bar > span { min-width: 2px; }
@@ -606,6 +609,16 @@ button:focus-visible, input:focus-visible {
   width: 100%;
   flex: none;
 }
+.quiet-period {
+  position: absolute; z-index: 0; top: 26px; height: 40px;
+  display: flex; align-items: flex-end; justify-content: center; padding-bottom: 2px;
+  overflow: hidden; border-inline: 1px solid color-mix(in srgb, var(--text-3) 18%, transparent);
+  color: var(--text-3); background: color-mix(in srgb, var(--text-3) 7%, transparent);
+  font-size: 9px; line-height: 1; white-space: nowrap; pointer-events: none;
+}
+.learning-boundary { position: absolute; top: 70px; color: var(--text-3); font-size: 9px; white-space: nowrap; pointer-events: none; }
+.boundary-start { left: 0; }
+.boundary-end { right: 0; }
 
 .tick {
   position: absolute; top: 0; bottom: 0; width: 1px;
@@ -618,7 +631,7 @@ button:focus-visible, input:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-.seg { position: absolute; top: 34px; height: 20px; pointer-events: none; }
+.seg { position: absolute; z-index: 2; top: 34px; height: 20px; pointer-events: none; }
 /* 可视片段按真实比例呈现；热区单独扩展，确保短片段可点。 */
 .seg-hit {
   position: absolute; inset: -4px 0;
@@ -1009,9 +1022,7 @@ button:active:not(:disabled) { transform: scale(0.98); }
   .main { padding: 24px 16px; }
   .history-strip-head { display: grid; gap: 2px; }
   .history-strip { padding: 14px 10px; }
-  .history-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .history-metrics > div:nth-child(2) { border-right: 0; }
-  .history-metrics > div:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+  .history-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .history-chart { gap: 2px; }
   .history-day { padding-inline: 2px; }
   .history-bar-track { width: min(22px, 80%); }

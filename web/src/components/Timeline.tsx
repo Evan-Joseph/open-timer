@@ -19,7 +19,7 @@ import type { DailySummaryApi, SessionApi } from '../lib/api.js';
 import { apiGet } from '../lib/api.js';
 import { formatBeijingTime, formatDurationZh } from '../lib/clock.js';
 import { useAnimationsEnabled } from '../lib/settings.js';
-import { LEARNING_DAY, shanghaiDayRangeUtc, timelineRange, type TimelineScale } from '@clock/shared';
+import { LEARNING_DAY, QUIET_PERIODS, shanghaiDayRangeUtc, timelineRange, type TimelineScale } from '@clock/shared';
 
 const NOW_TICK_MS = 30_000;
 
@@ -109,8 +109,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const loadHistory = useCallback(async () => {
     if (historyLoading) return;
     setHistoryLoading(true);
-    // 同时读取前一周期，仅用于事实型环比；缺失日保留为 0，避免图表列数跳动。
-    const dates = Array.from({ length: 14 }, (_, index) => shiftDate(store.todayDate, -index));
+    const dates = Array.from({ length: 7 }, (_, index) => shiftDate(store.todayDate, -index));
     const rows = await Promise.all(
       dates.map((date) => apiGet<DailySummaryApi>(`/api/v1/daily-summary?date=${date}&timezone=Asia%2FShanghai`).catch(() => ({
         date,
@@ -118,9 +117,8 @@ export default function Timeline({ store }: { store: ClockStore }) {
         by_subject: [],
       }))),
     );
-    const weekDates = dates.slice(0, 7);
     const sessions = await Promise.all(
-      weekDates.map(async (date) => {
+      dates.map(async (date) => {
         const cached = historyCacheRef.current.get(date);
         if (cached) return [date, cached] as const;
         const result = await apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${date}`).catch(() => ({ sessions: [] }));
@@ -437,13 +435,9 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const totalSeconds = overview.reduce((a, b) => a + b.seconds, 0);
 
   const historyModel = useMemo(() => {
-    const current = historySummaries.slice(0, 7).sort((a, b) => a.date.localeCompare(b.date));
-    const previous = historySummaries.slice(7, 14);
+    const current = [...historySummaries].sort((a, b) => a.date.localeCompare(b.date));
     const total = current.reduce((sum, day) => sum + day.total_active_seconds, 0);
-    const previousTotal = previous.reduce((sum, day) => sum + day.total_active_seconds, 0);
-    const activeDays = current.filter((day) => day.total_active_seconds > 0).length;
-    const maxDay = Math.max(1, ...current.map((day) => day.total_active_seconds));
-    const change = previousTotal > 0 ? (total - previousTotal) / previousTotal : null;
+    const maxDay = Math.max(0, ...current.map((day) => day.total_active_seconds));
     const subjectSeconds = new Map<string, number>();
     for (const day of current) {
       for (const item of day.by_subject) {
@@ -463,7 +457,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
         };
       })
       .sort((a, b) => b.seconds - a.seconds);
-    return { current, total, activeDays, activeAverage: activeDays > 0 ? total / activeDays : 0, maxDay, change, subjects };
+    return { current, total, dailyAverage: Math.round(total / 7), maxDay, subjects };
   }, [historySummaries, store.subjects]);
 
   const weekdayLabel = (date: string) => {
@@ -494,6 +488,17 @@ export default function Timeline({ store }: { store: ClockStore }) {
     return { ...day, segments };
   }), [historyModel.current, historyWeekSessions, store.subjects]);
 
+  const visibleQuietPeriods = useMemo(() => QUIET_PERIODS.flatMap((period) => {
+    const startMinute = Math.max(period.startMinute, visibleRange.startMinute);
+    const endMinute = Math.min(period.endMinute, visibleRange.endMinute);
+    if (endMinute <= startMinute) return [];
+    return [{
+      ...period,
+      left: minuteToPercent(startMinute),
+      width: minuteToPercent(endMinute) - minuteToPercent(startMinute),
+    }];
+  }), [minuteToPercent, visibleRange.endMinute, visibleRange.startMinute]);
+
   useEffect(() => {
     if (!historyOpen || historyLoading || autoScrolledHistoryRef.current) return;
     autoScrolledHistoryRef.current = true;
@@ -510,7 +515,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
       <div className="timeline-head">
         <h2 className="timeline-title">
           {historyOpen ? '近 7 天执行回顾' : `时间轴 · ${viewDate}`}
-          {totalSeconds > 0 && <span className="timeline-total"> · 共 {formatDurationZh(totalSeconds)}</span>}
+          {!historyOpen && totalSeconds > 0 && <span className="timeline-total"> · 共 {formatDurationZh(totalSeconds)}</span>}
         </h2>
         <div className="timeline-nav">
           {!historyOpen && <button
@@ -567,28 +572,25 @@ export default function Timeline({ store }: { store: ClockStore }) {
         >
         <div className="history-strip" data-testid="history-strip" ref={historyReportRef}>
           <div className="history-strip-head">
-            <div>
-              <strong>近 7 天执行时间</strong>
-              <span>{historyModel.current[0]?.date.slice(5)} – {historyModel.current.at(-1)?.date.slice(5)}</span>
-            </div>
-            <span>仅记录时间事实</span>
+            <strong>{historyModel.current[0]?.date.slice(5)} – {historyModel.current.at(-1)?.date.slice(5)}</strong>
           </div>
           {historyLoading ? <div className="history-empty">正在读取…</div> : (
             <div className="history-report">
               <div className="history-metrics" aria-label="近 7 天汇总">
                 <div><span>总计</span><strong>{formatDurationZh(historyModel.total)}</strong></div>
-                <div><span>活跃天数</span><strong>{historyModel.activeDays}<small> / 7 天</small></strong></div>
-                <div><span>活跃日均</span><strong>{formatDurationZh(historyModel.activeAverage)}</strong></div>
-                <div>
-                  <span>较前 7 天</span>
-                  <strong className={historyModel.change === null ? '' : historyModel.change >= 0 ? 'trend-up' : 'trend-down'}>
-                    {historyModel.change === null ? '暂无基线' : `${historyModel.change >= 0 ? '+' : '−'}${Math.abs(historyModel.change * 100).toFixed(0)}%`}
-                  </strong>
-                </div>
+                <div><span>日均</span><strong>{formatDurationZh(historyModel.dailyAverage)}</strong></div>
+                <div><span>最长一天</span><strong>{formatDurationZh(historyModel.maxDay)}</strong></div>
               </div>
               <div className="history-lanes" role="list" aria-label="近 7 天固定全天泳道">
                 <div className="history-axis" aria-hidden>
-                  <span>08:00</span><span>12:00</span><span>16:00</span><span>20:00</span><span>22:30</span>
+                  <span />
+                  <div className="history-axis-track">
+                    <span className="history-boundary axis-start"><strong>08:00</strong><small>睡眠结束</small></span>
+                    <span style={{ left: '27.586%' }}>12:00</span>
+                    <span style={{ left: '55.172%' }}>16:00</span>
+                    <span style={{ left: '82.759%' }}>20:00</span>
+                    <span className="history-boundary axis-end"><strong>22:30</strong><small>睡眠</small></span>
+                  </div>
                 </div>
                 {historyLanes.map((day) => (
                   <div key={day.date} className="history-lane" role="listitem" aria-label={`${day.date}，执行 ${formatDurationZh(day.total_active_seconds)}`}>
@@ -597,6 +599,17 @@ export default function Timeline({ store }: { store: ClockStore }) {
                       <span>{day.date.slice(5)} · {formatHistoryDuration(day.total_active_seconds)}</span>
                     </div>
                     <div className="history-lane-track">
+                      {QUIET_PERIODS.map((period) => (
+                        <span
+                          key={period.id}
+                          className="history-quiet-period"
+                          style={{
+                            left: `${((period.startMinute - LEARNING_DAY.startMinute) / (LEARNING_DAY.endMinute - LEARNING_DAY.startMinute)) * 100}%`,
+                            width: `${((period.endMinute - period.startMinute) / (LEARNING_DAY.endMinute - LEARNING_DAY.startMinute)) * 100}%`,
+                          }}
+                          title={`${period.label}静默时段`}
+                        >{period.label}</span>
+                      ))}
                       {day.segments.map((segment) => (
                         <span key={segment.key} className="history-lane-segment" data-color={segment.colorId} style={{ left: `${segment.left}%`, width: `${segment.width}%` }} />
                       ))}
@@ -701,6 +714,20 @@ export default function Timeline({ store }: { store: ClockStore }) {
         /* 轨道始终渲染：空日也保留刻度与信标（时间感） */
         <div className="timeline-scroll" data-testid="timeline-scroll">
           <div className="timeline-track" ref={trackRef} data-scale={scale}>
+          {visibleQuietPeriods.map((period) => (
+            <span
+              key={period.id}
+              className="quiet-period"
+              style={{ left: `${period.left}%`, width: `${period.width}%` }}
+              title={`${period.label}静默时段`}
+            >{period.label}</span>
+          ))}
+          {visibleRange.startMinute === LEARNING_DAY.startMinute && (
+            <span className="learning-boundary boundary-start">睡眠结束</span>
+          )}
+          {visibleRange.endMinute === LEARNING_DAY.endMinute && (
+            <span className="learning-boundary boundary-end">睡眠</span>
+          )}
           {ticks.map((t) => (
             <div key={t.minute} className={`tick ${t.major ? 'major' : ''}`} style={{ left: `${t.leftPercent}%` }}>
               <span className="tick-label">{t.label}</span>

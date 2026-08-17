@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { isQuietMinute, timelineRange } from './timeline-policy.js';
+import { QUIET_PERIODS, isQuietMinute, timelineRange } from './timeline-policy.js';
 
 describe('静默时段', () => {
+  it('以结构化规则分别描述午饭、午睡和晚饭', () => {
+    expect(QUIET_PERIODS).toEqual([
+      { id: 'lunch', label: '午饭', startMinute: 11 * 60, endMinute: 12 * 60 },
+      { id: 'nap', label: '午睡', startMinute: 12 * 60, endMinute: 13 * 60 + 30 },
+      { id: 'dinner', label: '晚饭', startMinute: 17 * 60, endMinute: 18 * 60 },
+    ]);
+  });
+
   it('覆盖午饭午睡、晚饭与跨午夜睡眠，边界外立即恢复提醒', () => {
     expect(isQuietMinute(10 * 60 + 59)).toBe(false);
     expect(isQuietMinute(11 * 60)).toBe(true);
