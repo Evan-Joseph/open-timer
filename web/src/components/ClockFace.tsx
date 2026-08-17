@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Pause, Play, Square, Flag, Undo2 } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
-import type { FocusInterval, SyncAnchor } from '../lib/clock.js';
-import { useMonotonicSeconds, useDualMonotonic, useWallSeconds, useBeijingTime, formatHms, formatHmsShort, formatDurationZh, formatBeijingTime, focusCycleSeconds, restKindLabel, restPlanForFocus, restStageOf, restStageLabel } from '../lib/clock.js';
+import type { SyncAnchor } from '../lib/clock.js';
+import { useMonotonicSeconds, useDualMonotonic, useWallSeconds, useBeijingTime, formatHms, formatHmsShort, formatDurationZh, formatBeijingTime, restPlanForFocus, restStageOf, restStageLabel } from '../lib/clock.js';
 import { useAnimationsEnabled, useSettings } from '../lib/settings.js';
 import { playFinishChime, playAwayReminder } from '../lib/sound.js';
 import { isQuietMinute } from '@clock/shared';
@@ -83,47 +83,11 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   /** 离开计时锚点：暂停用服务端 paused_at；结束态用本组件在 stop 时记录的墙钟锚点 */
   const awayAnchor = awayActive ? (store.awayAnchor ?? awayAnchorOverride ?? recentRestAnchor) : null;
   const awaySeconds = useWallSeconds(awayAnchor, 1000);
-  // 暂停和结束都从刚结束的专注段计算；周期累计决定本轮是短休息还是长休息。
+  // 暂停和结束都只按刚结束的单段专注计算休息预算。
   const focusForRest = paused
     ? (active?.current_segment_active_seconds ?? 0)
     : (lastStopped?.focusSeconds ?? recentFocusSeconds);
-  const currentFocusInterval = useMemo<FocusInterval | null>(() => {
-    if (paused && active?.paused_at) {
-      const endedAtMs = Date.parse(active.paused_at);
-      if (Number.isFinite(endedAtMs)) {
-        return { startedAtMs: endedAtMs - focusForRest * 1000, endedAtMs };
-      }
-    }
-    if (lastStopped) {
-      return {
-        startedAtMs: lastStopped.focusEndedAtMs - lastStopped.focusSeconds * 1000,
-        endedAtMs: lastStopped.focusEndedAtMs,
-      };
-    }
-    const segment = recentStopped?.segments.at(-1);
-    if (!segment?.ended_at) return null;
-    const startedAtMs = Date.parse(segment.started_at);
-    const endedAtMs = Date.parse(segment.ended_at);
-    return Number.isFinite(startedAtMs) && Number.isFinite(endedAtMs)
-      ? { startedAtMs, endedAtMs }
-      : null;
-  }, [active?.paused_at, focusForRest, lastStopped, paused, recentStopped]);
-  const focusHistory = useMemo<FocusInterval[]>(() => (
-    store.sessions.flatMap((session) => session.status === 'voided'
-      ? []
-      : session.segments.flatMap((segment) => {
-          if (!segment.ended_at) return [];
-          const startedAtMs = Date.parse(segment.started_at);
-          const endedAtMs = Date.parse(segment.ended_at);
-          return Number.isFinite(startedAtMs) && Number.isFinite(endedAtMs)
-            ? [{ startedAtMs, endedAtMs }]
-            : [];
-        }))
-  ), [store.sessions]);
-  const cycleFocusSeconds = currentFocusInterval
-    ? focusCycleSeconds(currentFocusInterval, focusHistory)
-    : focusForRest;
-  const restPlan = restPlanForFocus(focusForRest, cycleFocusSeconds);
+  const restPlan = restPlanForFocus(focusForRest);
   const restStage = awayActive ? restStageOf(awaySeconds, restPlan) : 'resting';
   const awayLevel = awayActive ? (restStage === 'overdue' ? 3 : restStage === 'due' ? 2 : restStage === 'due-soon' ? 1 : 0) : 0;
   const beijingNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
@@ -297,7 +261,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
               className={`away-line${reminderLevel >= 2 ? ' strong' : reminderLevel >= 1 ? ' urgent' : ''}`}
               data-testid="away-line"
             >
-              {restKindLabel(restPlan.kind)} · {restLabel} · 已休息 {formatHms(awaySeconds)}
+              {restLabel} · 已休息 {formatHms(awaySeconds)}
               <span className="away-note"> · 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
             </div>
           </div>
@@ -369,7 +333,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
               className={`away-line${reminderLevel >= 2 ? ' strong' : reminderLevel >= 1 ? ' urgent' : ''}`}
               data-testid="away-line"
             >
-              {restKindLabel(restPlan.kind)} · {restLabel} · 已休息 {formatHms(awaySeconds)}
+              {restLabel} · 已休息 {formatHms(awaySeconds)}
               <span className="away-note"> · 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
             </div>
           )}
@@ -446,7 +410,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             className={`away-line${reminderLevel >= 2 ? ' strong' : reminderLevel >= 1 ? ' urgent' : ''}`}
             data-testid="idle-rest-line"
           >
-            {restKindLabel(restPlan.kind)} · {restLabel} · 已休息 {formatHms(awaySeconds)}
+            {restLabel} · 已休息 {formatHms(awaySeconds)}
             <span className="away-note">· 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
           </div>
         </div>

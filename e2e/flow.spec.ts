@@ -723,7 +723,7 @@ test.describe('离开渐进提醒', () => {
     await page.getByRole('button', { name: '暂停计时' }).click();
     await expect(page.getByTestId('away-line')).toBeVisible();
 
-    // 约 1 秒专注给 2 分钟短暂离开窗口；此时已超过建议时长 → 红（strong）
+    // 约 1 秒专注给 2 分钟统一休息窗口；此时已超过建议时长 → 红（strong）
     await page.clock.fastForward(6 * 60 * 1000);
     await expect(page.getByTestId('away-line')).toHaveClass(/strong/);
 
@@ -772,7 +772,7 @@ test.describe('科目结束后的离开提醒', () => {
     await expect(page.getByTestId('away-line')).toContainText('休息中');
     await expect(page.getByTestId('away-line')).toContainText('建议 2 分钟');
 
-    // 约 1 秒专注给 2 分钟短暂离开窗口；达到建议休息时长 → 红（strong）
+    // 约 1 秒专注给 2 分钟统一休息窗口；达到建议休息时长 → 红（strong）
     await page.clock.fastForward(6 * 60 * 1000);
     await expect(page.getByTestId('away-line')).toHaveClass(/strong/);
 
