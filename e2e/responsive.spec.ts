@@ -70,6 +70,12 @@ test('横屏标准视口一屏容纳主时钟与时间轴', async ({ page }) => 
     await expect(page.getByTestId('timeline-scroll')).toBeVisible();
     await expectWithinViewport(page, '.clockface');
     await expectWithinViewport(page, '.timeline');
+    const compactTrack = await page.evaluate(() => {
+      const empty = document.querySelector('.timeline-empty-inline')?.getBoundingClientRect();
+      const track = document.querySelector('.timeline-track')!.getBoundingClientRect();
+      return empty ? { emptyBottom: empty.bottom, trackBottom: track.bottom } : null;
+    });
+    if (compactTrack) expect(compactTrack.emptyBottom).toBeLessThanOrEqual(compactTrack.trackBottom);
   }
 });
 
@@ -82,6 +88,11 @@ test('1024x640 中 7 天泳道不触发页面滚动', async ({ page }) => {
   await expectDocumentFits(page);
   await expectWithinViewport(page, '.clockface');
   await expectWithinViewport(page, '.history-strip');
+  const historyClearance = await page.evaluate(() => ({
+    clockBottom: document.querySelector('.clockface')!.getBoundingClientRect().bottom,
+    timelineTop: document.querySelector('.timeline')!.getBoundingClientRect().top,
+  }));
+  expect(historyClearance.clockBottom).toBeLessThanOrEqual(historyClearance.timelineTop);
 });
 
 test('全屏逾期时主区与时间轴共享告警状态', async ({ page }) => {
@@ -114,13 +125,27 @@ test('全屏逾期时主区与时间轴共享告警状态', async ({ page }) => 
     const controls = document.querySelector('.fs-controls')!.getBoundingClientRect();
     const main = document.querySelector('.main')!;
     return {
+      clockTop: clock.top,
       clockBottom: clock.bottom,
       drawerTop: drawer.top,
+      controlsTop: controls.top,
+      controlsRight: controls.right,
       controlsBottom: controls.bottom,
+      controlsLeft: controls.left,
+      clockRight: clock.right,
+      clockLeft: clock.left,
       mainPaddingBottom: getComputedStyle(main).paddingBottom,
     };
   });
+  expect(geometry.clockTop).toBeGreaterThanOrEqual(0);
   expect(geometry.clockBottom).toBeLessThanOrEqual(geometry.drawerTop + 1);
   expect(geometry.controlsBottom).toBeLessThanOrEqual(geometry.drawerTop);
+  const controlsOverlapClock = !(
+    geometry.controlsRight <= geometry.clockLeft
+    || geometry.controlsLeft >= geometry.clockRight
+    || geometry.controlsBottom <= geometry.clockTop
+    || geometry.controlsTop >= geometry.clockBottom
+  );
+  expect(controlsOverlapClock).toBe(false);
   await expectDocumentFits(page);
 });

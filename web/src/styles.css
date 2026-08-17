@@ -1033,7 +1033,7 @@ button:focus-visible, input:focus-visible {
 .app.fullscreen-mode .today-hint { font-size: 15px; }
 
 .fs-controls {
-  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  position: fixed; top: 16px; right: 16px;
   z-index: 30;
   display: flex; align-items: center; gap: 14px;
   padding: 8px 16px; border-radius: 999px;
@@ -1042,13 +1042,12 @@ button:focus-visible, input:focus-visible {
   -webkit-backdrop-filter: blur(20px) saturate(1.8);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
-  transition: top 0.25s ease, bottom 0.25s ease, opacity 0.25s ease;
+  transition: opacity 0.25s ease, background-color 0.28s ease, border-color 0.28s ease;
 }
 .fs-hint { font-size: 12px; color: var(--text-3); }
 
-/* 时间轴展开时控制条移到顶部：抽屉占满底部 45vh，避免按钮遮挡时间轴内容 */
-.app.fullscreen-mode.fs-timeline-open .fs-controls { bottom: auto; top: 16px; }
-.app.fullscreen-mode.fs-timeline-open .main { transform: translateY(calc(var(--drawer-height) * -0.5 - 20px)); }
+/* 抽屉占满底部 45vh；主时钟移动到剩余空间的视觉中心。 */
+.app.fullscreen-mode.fs-timeline-open .main { transform: translateY(calc(var(--drawer-height) * -0.5)); }
 
 /* 全屏时间轴抽屉：底部滑出，收起时隐藏（visibility 同步，保证可访问性树一致） */
 .timeline-drawer {
@@ -1150,13 +1149,14 @@ button:active:not(:disabled) { transform: scale(0.98); }
   .away-line { padding-block: 4px; font-size: 13px; }
   .control-btn, .control-btn.resume { width: 48px; height: 48px; }
   .timeline-scale button { height: 24px; }
+  .timeline-empty-inline { top: 46px; }
 }
 
 .app:not(.fullscreen-mode):has(.history-strip) {
   grid-template-rows: var(--topbar-height) minmax(256px, 40.4dvh) minmax(0, 1fr);
 }
 .app:has(.history-strip) .main { padding-block: 6px; }
-.app:has(.history-strip) .clockface { gap: 5px; }
+.app:has(.history-strip) .clockface { max-width: 760px; gap: 5px; }
 .app:has(.history-strip) .idle-clock,
 .app:has(.history-strip) .big-timer { font-size: clamp(50px, 9dvh, 82px); }
 .app:has(.history-strip) .timeline { overflow: hidden; padding-block: 6px; }

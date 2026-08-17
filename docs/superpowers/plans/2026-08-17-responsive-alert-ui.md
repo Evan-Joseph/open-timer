@@ -481,7 +481,7 @@ git commit -m "feat: unify overdue alert across clock and timeline"
 .app.fullscreen-mode { --drawer-height: min(45dvh, 360px); }
 .timeline-drawer { height: var(--drawer-height); max-height: none; }
 .app.fullscreen-mode.fs-timeline-open .main {
-  transform: translateY(calc(var(--drawer-height) * -0.5 - 20px));
+  transform: translateY(calc(var(--drawer-height) * -0.5));
 }
 ```
 
