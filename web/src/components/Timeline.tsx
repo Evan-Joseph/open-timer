@@ -880,7 +880,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
           )}
           {!popover.row.stopped && popover.row.note && <div className="popover-note">「{popover.row.note}」</div>}
           {popover.row.stopped && (
-            <div className="popover-actions">
+            <div className="popover-actions action-row">
               <button
                 className="primary-btn popover-save"
                 onClick={() => void handleSaveNote()}

@@ -23,10 +23,10 @@ docs/     API、设计、审计、交接
 | 语义色 | `--accent`(systemBlue) `--danger`(systemRed) `--success`(systemGreen) `--amber` | HIG 语义色，浅/深各一套 |
 | 边框/阴影 | `--border` `--shadow` `--shadow-sm` `--shadow-up` `--shadow-hover` `--shadow-knob` | 分层阴影，向上用 `--shadow-up`，悬停抬升用 `--shadow-hover`，分段控件滑块用 `--shadow-knob` |
 | 材质 | `--material`(顶栏/浮层 0.72) `--popover-surface`(弹层 0.96) `--overlay-scrim`(遮罩 0.44) | backdrop-filter 只用于顶栏与浮层 |
-| 圆角 | `--radius-sm`6 `--radius`10 `--radius-lg`12 `--radius-xl`14；胶囊 999px | 控件 ≤ 卡片 ≤ 浮层 |
-| 间距 | `--space-1..7` = 4/8/12/16/24/32/48 | 4pt 底、8pt 节奏 |
-| 字级 | `--fs-xs..3xl` = 11/12/13/14/15/17/22/28 | 大数字不用此表，用 dvh clamp |
-| 动效 | `--ease-standard`(0.2,0,0,1) `--dur-press`0.1 `--dur-hover`0.15 `--dur-enter`0.25 `--dur-state`0.28 | 全部过渡取此组 |
+| 圆角 | `--radius-xs`3（微图形：时间轴片段/信标旗） `--radius-sm`6 `--radius`10 `--radius-lg`12 `--radius-xl`14；胶囊 999px | 控件 ≤ 卡片 ≤ 浮层 |
+| 间距 | `--space-1..7` = 4/8/12/16/24/32/48 | 4pt 底、8pt 节奏；gap/padding/margin 一律取此组（分段控件内 2px 微间距除外） |
+| 字级 | `--fs-xs..3xl` = 11/12/13/14/15/17/22/28；`--fs-mini`10 | 大数字不用此表，用 dvh clamp；10px 是注记字号下限，禁止更小 |
+| 动效 | `--ease-standard`(0.2,0,0,1) `--ease-expo`(0.16,1,0.3,1)；`--dur-press`0.1 `--dur-hover`0.15 `--dur-enter`0.25 `--dur-state`0.28 `--dur-shake`0.4 `--dur-wash`0.5 `--dur-glide`0.9(linear) `--dur-pulse`1.2 `--dur-breathe`2.4 `--dur-breathe-slow`2.8 `--dur-breathe-pill`3.2 | 全部过渡取此组；振荡呼吸动画用 ease-in-out（频率下限 2.4s，WCAG 2.3.1）；`--dur-wash`+`--ease-expo` 专属全视口洗色；`--dur-glide` 专属信标匀速漂移 |
 
 科目色：`[data-color=amber|teal|blue|indigo|violet|cyan|coral]` → `--sc`/`--sc-bg`，浅/深两套，色相分散避免蓝紫扎堆。
 
@@ -41,9 +41,13 @@ docs/     API、设计、审计、交接
 | 危险 | `.danger-btn` | 36 / radius | 撤回、退出登录 |
 | 图标 | `.icon-btn` | 32 / radius-sm | 顶栏设置、时间轴导航 |
 | 文字 | `.text-btn` | 32 / radius-sm | 「现在」「回今天」 |
-| 分段控件 | `.seg-control`（默认）/ `.timeline-scale`（紧凑） | 项高 32/24 | 设置内单选、时间轴尺度 |
+| 分段控件 | `.seg-control`（默认，项高 32）/ `.timeline-scale`（工具栏紧凑，项高 26 → 容器 32） | 与同行控件等高 | 设置内单选、时间轴尺度 |
 
 规范：禁用统一 opacity 0.4；focus-visible 统一 2px accent 环；press 统一 scale；图标按钮必须有 `aria-label` 与 `title`；文字圆角胶囊不替代熟悉图标。
+
+**工具栏契约**（2026-08-20，参考 HIG toolbars / Radix SegmentedControl 单一 size 下发）：同一工具栏行只允许一个高度档（时间轴工具栏 = 32px 行），行内控件 `align-items: center`、间距统一 `--space-2`（8px），中心 Y 共线（E2E 断言 ±1px）。
+
+**动作行契约**：弹层/卡片内的动作行（`.action-row`：结束反馈、召回卡片、时间轴详情）按钮等高 44px，层级用填充/颜色区分而非尺寸差，间距 `--space-3`。
 
 ## 4. 弹层与遮罩
 
@@ -63,7 +67,14 @@ docs/     API、设计、审计、交接
 | 逾期 L3（overdue） | 达 150% 或 +2min 宽限 | 红色洗色覆盖全 app，全屏召回卡片 |
 | 静默（quiet） | 午饭/午睡/晚饭/夜间窗口 | 继续计时但 `reminderLevel` 归 0，不升级提醒 |
 
-约束：告警只作为背景氛围与边界强调，文字/科目色/片段色/时间 Flag 保持可读；呼吸动画只挂在一个全视口层，避免频率相位分裂；`prefers-reduced-motion` 或应用内关动画时保留静态告警色、停止呼吸。
+三态参数（2026-08-20 调研校准，来源见交接手册参考资料）：
+- 洗色过渡：全视口色彩变化用 `--dur-wash` 0.5s + `--ease-expo`（FocusTide 背景层参数），比组件级过渡慢，避免闪变。
+- L2 呼吸 3.2s / L3 呼吸 2.6s，opacity 0.75↔1（原 1.8s / 0.58↔1 过快过深，是焦虑感主源；WCAG 2.3.1 闪烁约束 + Super Productivity 呼吸基准）。
+- 深色主题 L3 洗色 mix 比例 12%（浅 15%）：深色下红感知更刺眼（FocusTide dark 降饱和思路）。
+- 召回卡片比洗色晚 `--dur-enter` 进场（wash 先铺垫、卡片是结论），一次性出现不循环弹；主按钮「回到学习/开始下一段」向前看，次按钮「再等 5 分钟」可打盹（Super Productivity take-a-break 模型）。
+- 洗色只做 opacity 呼吸，不做 transform scale（大面缩放 = 整屏重绘 + 晃屏）。
+
+约束：告警只作为背景氛围与边界强调，文字/科目色/片段色/时间 Flag 保持可读；呼吸动画只挂在一个全视口层，避免频率相位分裂；`prefers-reduced-motion` 或应用内关动画时保留静态告警色（wash 层 `animation: none`，全量终态）、停止呼吸。
 
 ## 6. 布局骨架与响应式
 

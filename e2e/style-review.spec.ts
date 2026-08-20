@@ -42,6 +42,7 @@ test('视觉审计样式断言', async ({ page }) => {
   console.log('intent-input:', JSON.stringify(input));
   expect(input.radius).toBe('10px');
   expect(input.fontSize).toBe('15px');
+  expect(input.padding).toBe('12px');
 
   // 4. 运行态控制按钮 24px 图标 + 56 圆
   await page.getByRole('radio', { name: '数学二' }).click();
@@ -219,4 +220,102 @@ test('深色模式对比度与材质 token', async ({ page }) => {
   const dialogBg = await page.locator('.dialog-content').evaluate((el) => getComputedStyle(el).backgroundColor);
   expect(dialogBg).toBe('rgba(36, 36, 38, 0.96)');
   await page.keyboard.press('Escape');
+});
+
+/**
+ * 工具栏对齐契约（2026-08-20 统一）：
+ * - 时间轴标题与右侧工具栏同一行、垂直中心对齐；
+ * - 工具栏行高 32px：分段控件容器与图标按钮等高（32），行内所有控件中心共线（±1px）；
+ * - 行内间距统一 --space-2（8px）；
+ * - 动作行（.action-row）按钮等高 44px：结束反馈卡与时间轴详情弹窗逐一验证。
+ */
+test('工具栏对齐与动作行等高契约', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await setup(page);
+  await page.waitForTimeout(500);
+
+  const head = await page.evaluate(() => {
+    const title = document.querySelector('.timeline-title')!.getBoundingClientRect();
+    const nav = document.querySelector('.timeline-nav')!;
+    const navRect = nav.getBoundingClientRect();
+    const children = Array.from(nav.children).map((c) => c.getBoundingClientRect());
+    return {
+      titleCenterY: title.top + title.height / 2,
+      navCenterY: navRect.top + navRect.height / 2,
+      childCenterYs: children.map((r) => r.top + r.height / 2),
+      childHeights: children.map((r) => r.height),
+      scaleHeight: document.querySelector('.timeline-scale')!.getBoundingClientRect().height,
+      iconHeight: document.querySelector('.timeline-nav .icon-btn')!.getBoundingClientRect().height,
+      gap: getComputedStyle(nav).gap,
+    };
+  });
+  expect(Math.abs(head.titleCenterY - head.navCenterY)).toBeLessThanOrEqual(1);
+  expect(head.scaleHeight).toBe(32); // 2padding + 2border + 26 项高
+  expect(head.iconHeight).toBe(32);
+  for (const y of head.childCenterYs) expect(Math.abs(y - head.navCenterY)).toBeLessThanOrEqual(1);
+  for (const h of head.childHeights) {
+    expect(h).toBeGreaterThanOrEqual(26);
+    expect(h).toBeLessThanOrEqual(32);
+  }
+  expect(head.gap).toBe('8px');
+
+  // 动作行等高：结束反馈卡（撤回 36 档 ghost 与 44 档 primary 必须拉平）
+  await page.getByRole('radio', { name: '英语二' }).click();
+  await page.getByTestId('start-btn').click();
+  await page.waitForTimeout(600);
+  await page.getByRole('button', { name: '结束并保存' }).click();
+  await page.waitForTimeout(400);
+  const finishHeights = await page
+    .locator('.finish-actions.action-row > button')
+    .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
+  expect(finishHeights.length).toBe(2);
+  for (const h of finishHeights) expect(h).toBe(44);
+  await page.getByRole('button', { name: '好，继续' }).click();
+
+  // 动作行等高：时间轴详情弹窗（保存备注/更新起点/撤回）
+  await page.locator('.seg-hit:visible').last().click();
+  const popHeights = await page
+    .locator('.popover-actions.action-row > button')
+    .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
+  expect(popHeights.length).toBe(3);
+  for (const h of popHeights) expect(h).toBe(44);
+  await page.keyboard.press('Escape');
+});
+
+/**
+ * 动效时长白名单（docs/DESIGN.md §2 动效行；参照 Spectrum/M3 命名档位实践）：
+ * 页面任何元素的 transition/animation 时长只允许取 token 档位值，
+ * 禁止组件另写近似时长（此前存在 120/160/220ms 离群值）。
+ */
+test('动效时长白名单', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await setup(page);
+  await page.getByRole('radio', { name: '数学二' }).click();
+  await page.getByTestId('start-btn').click();
+  await page.waitForTimeout(600);
+  await page.getByRole('button', { name: '设置' }).click();
+  await page.waitForTimeout(400);
+
+  const allowed = [0, 0.00001, 0.1, 0.15, 0.25, 0.28, 0.4, 0.5, 0.9, 1.2, 2.4, 2.6, 2.8, 3.2];
+  const violations = await page.evaluate((allow: number[]) => {
+    const bad: string[] = [];
+    const els = document.querySelectorAll('body *');
+    for (const el of els) {
+      const s = getComputedStyle(el);
+      const durations = `${s.transitionDuration},${s.animationDuration}`.split(',');
+      for (const d of durations) {
+        const sec = d.trim().endsWith('ms') ? parseFloat(d) / 1000 : parseFloat(d);
+        if (!Number.isFinite(sec)) continue;
+        if (!allow.some((a) => Math.abs(sec - a) < 0.005)) {
+          bad.push(`${(el as HTMLElement).tagName}.${(el as HTMLElement).className}: ${d.trim()}`);
+        }
+      }
+    }
+    return bad.slice(0, 10);
+  }, allowed);
+  expect(violations).toEqual([]);
+
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: '结束并保存' }).click();
+  await page.getByRole('button', { name: '好，继续' }).click();
 });

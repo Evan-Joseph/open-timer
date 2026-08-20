@@ -157,7 +157,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         <div className="away-overlay-card" onClick={(e) => e.stopPropagation()}>
           <div className="away-overlay-title">已离开 {formatHms(awaySeconds)}</div>
           <p className="away-overlay-text">建议休息 {formatDurationZh(restPlan.recommendedSeconds)}。现在开始下一段吗？</p>
-          <div className="away-overlay-actions">
+          <div className="away-overlay-actions action-row">
             <button className="primary-btn" onClick={handleStartNext} disabled={busy}>
               <Flag size={18} aria-hidden /> 开始下一段
             </button>
@@ -170,7 +170,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         <div className="away-overlay-card" onClick={(e) => e.stopPropagation()}>
           <div className="away-overlay-title">已离开 {formatHms(awaySeconds)}</div>
           <p className="away-overlay-text">建议休息 {formatDurationZh(restPlan.recommendedSeconds)}。现在回到这一段吗？</p>
-          <div className="away-overlay-actions">
+          <div className="away-overlay-actions action-row">
             <button className="primary-btn" onClick={() => { setAwayDismissed(true); void store.resume(); }} disabled={busy}>
               <Play size={18} aria-hidden /> 回到学习
             </button>
@@ -279,7 +279,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             onChange={(e) => setNoteDraft(e.target.value)}
             aria-label="结束备注"
           />
-          <div className="finish-actions">
+          <div className="finish-actions action-row">
             <button
               className="ghost-btn"
               data-testid="finish-withdraw-btn"

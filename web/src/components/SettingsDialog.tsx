@@ -60,7 +60,7 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
 
           <div className="setting-row">
             <span className="setting-label">结束提示音</span>
-            <div className="seg-control" role="radiogroup" aria-label="结束计时提示音">
+            <div className="seg-control" role="radiogroup" aria-label="结束提示音">
               {[
                 ['off', '关闭'],
                 ['on', '开启'],
