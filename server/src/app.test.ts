@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createApp } from '../src/app.js';
 import type { AppConfig } from '../src/config.js';
 import { SqliteStorage } from '../src/repo/sqlite-storage.js';
+import Database from 'better-sqlite3';
 
 const PASSWORD = '246813';
 
@@ -207,6 +208,63 @@ describe('API 集成', () => {
 
     const segments = await ctx.storage.getSegments(created.session_id);
     expect(segments[0].startedAtMs).toBe(Date.parse(earlier));
+  });
+
+  it('审计语义：adjust-start 与 retime 由 audit action 与 before/after 形态区分（kind 统一 retime）', async () => {
+    // 决策（2026-08-20 接手审计）：manual_adjustment.kind 的 CHECK 约束固定为
+    // retime/void/note，扩展约束需在 D1 生产库重建表，风险大于收益，故保持现状；
+    // 两类修正的权威区分字段是 audit_log.action（'retime' vs 'session_start_adjust'）
+    // 与 before_json 形态（active_seconds vs started_at_ms）。本测试固定该契约。
+    const headers = { 'content-type': 'application/json', cookie: ctx.cookie };
+    const start = await ctx.app.request('/api/v1/sessions', {
+      method: 'POST',
+      headers: { ...headers, 'idempotency-key': 'audit-sem-create' },
+      body: JSON.stringify({ subject_id: 'politics' }),
+    });
+    expect(start.status).toBe(201);
+    const created = await start.json();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await ctx.app.request(`/api/v1/sessions/${created.session_id}/stop`, {
+      method: 'POST',
+      headers: { ...headers, 'idempotency-key': 'audit-sem-stop' },
+      body: JSON.stringify({}),
+    });
+
+    const retimeRes = await ctx.app.request(`/api/v1/sessions/${created.session_id}/retime`, {
+      method: 'POST',
+      headers: { ...headers, 'idempotency-key': 'audit-sem-retime' },
+      body: JSON.stringify({ delta_seconds: -30, reason: '审计语义测试' }),
+    });
+    expect(retimeRes.status).toBe(200);
+
+    const earlier = new Date(Date.parse(created.started_at) - 5 * 60_000).toISOString();
+    const adjustRes = await ctx.app.request(`/api/v1/sessions/${created.session_id}/adjust-start`, {
+      method: 'POST',
+      headers: { ...headers, 'idempotency-key': 'audit-sem-adjust' },
+      body: JSON.stringify({ started_at: earlier, reason: '补录' }),
+    });
+    expect(adjustRes.status).toBe(200);
+
+    const db = new Database(join(tmp, 'clock.sqlite'), { readonly: true });
+    try {
+      const adjustments = db
+        .prepare('SELECT kind, before_json FROM manual_adjustment WHERE session_id = ? ORDER BY id')
+        .all(created.session_id) as Array<{ kind: string; before_json: string }>;
+      // schema 约束下两类修正都落 kind='retime'
+      expect(adjustments.filter((a) => a.kind === 'retime').length).toBe(2);
+      // before_json 形态区分：retime → active_seconds；adjust-start → started_at_ms
+      expect(adjustments.some((a) => JSON.parse(a.before_json).active_seconds !== undefined)).toBe(true);
+      expect(adjustments.some((a) => JSON.parse(a.before_json).started_at_ms !== undefined)).toBe(true);
+
+      const actions = (
+        db.prepare('SELECT action FROM audit_log WHERE target = ? ORDER BY id').all(created.session_id) as Array<{ action: string }>
+      ).map((a) => a.action);
+      // audit_log.action 是权威区分字段
+      expect(actions).toContain('retime');
+      expect(actions).toContain('session_start_adjust');
+    } finally {
+      db.close();
+    }
   });
 
   it('幂等：同 key 重复 start 回放原响应，不创建第二个会话', async () => {

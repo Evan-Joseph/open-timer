@@ -130,3 +130,93 @@ test('视觉审计样式断言', async ({ page }) => {
 
   console.log('ALL STYLE ASSERTIONS PASSED');
 });
+
+/**
+ * 深色模式契约（docs/DESIGN.md §2/§4）：
+ * - 文字 token 对比度：text-1/text-2 ≥4.5:1，text-3 ≥3:1（仅非关键信息），
+ *   在 --bg / --bg-elevated / --surface-2 三个表面上逐一验证；
+ * - 语义色（accent/danger/success）对底色 ≥3:1；
+ * - 弹层材质固定 --popover-surface 深色值 rgba(36, 36, 38, 0.96)。
+ */
+test('深色模式对比度与材质 token', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await setup(page);
+  await page.getByRole('button', { name: '设置' }).click();
+  await page.getByRole('radio', { name: '深色' }).click();
+  await expect(page.locator('html[data-theme="dark"]')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+
+  const report = await page.evaluate(() => {
+    const root = getComputedStyle(document.documentElement);
+    const tok = (name: string) => root.getPropertyValue(name).trim();
+    const hexToRgb = (hex: string): [number, number, number] => {
+      const h = hex.replace('#', '');
+      return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) as [number, number, number];
+    };
+    /** 颜色 token 归一化为 [r,g,b,a]：浏览器可能把自定义属性序列化为
+        legacy rgba(…)、modern rgb(… / …) 或 #rrggbb(aa)，全部兼容。 */
+    const colorOf = (value: string): [number, number, number, number] => {
+      if (value.startsWith('#')) {
+        const h = value.slice(1);
+        const rgb = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+        const a = h.length === 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1;
+        return [rgb[0], rgb[1], rgb[2], a];
+      }
+      const nums = value.match(/[\d.]+/g)!.map(Number);
+      return [nums[0], nums[1], nums[2], nums.length > 3 ? nums[3] : 1];
+    };
+    const lin = (c: number) => {
+      c /= 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    };
+    const lum = ([r, g, b]: [number, number, number]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    const ratio = (a: [number, number, number], b: [number, number, number]) => {
+      const la = lum(a);
+      const lb = lum(b);
+      return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+    };
+    const text1 = hexToRgb(tok('--text-1'));
+    const text2 = hexToRgb(tok('--text-2'));
+    const text3 = hexToRgb(tok('--text-3'));
+    const surfaces: Array<[string, [number, number, number]]> = [
+      ['bg', hexToRgb(tok('--bg'))],
+      ['elevated', hexToRgb(tok('--bg-elevated'))],
+      ['surface-2', hexToRgb(tok('--surface-2'))],
+    ];
+    const pairs: Record<string, number> = {};
+    for (const [sn, sc] of surfaces) {
+      pairs[`text-1/${sn}`] = ratio(text1, sc);
+      pairs[`text-2/${sn}`] = ratio(text2, sc);
+      pairs[`text-3/${sn}`] = ratio(text3, sc);
+    }
+    const bg = hexToRgb(tok('--bg'));
+    for (const name of ['--accent', '--danger', '--success', '--amber']) {
+      pairs[`${name}/bg`] = ratio(hexToRgb(tok(name)), bg);
+    }
+    pairs['white/accent'] = ratio([255, 255, 255], hexToRgb(tok('--accent')));
+    return {
+      ratios: pairs,
+      popoverSurface: colorOf(tok('--popover-surface')),
+      overlayScrim: colorOf(tok('--overlay-scrim')),
+    };
+  });
+
+  for (const [pair, value] of Object.entries(report.ratios)) {
+    console.log(`contrast ${pair}: ${value.toFixed(2)}:1`);
+    const min = pair.startsWith('text-3/') ? 3 : pair.includes('/bg') || pair.startsWith('white/') ? 3 : 4.5;
+    expect(value, pair).toBeGreaterThanOrEqual(min);
+  }
+  // 材质 token：深色弹层 rgba(36,36,38,0.96)；遮罩 rgba(0,0,0,0.44)（序列化格式不定，按分量比较）
+  expect(report.popoverSurface.slice(0, 3)).toEqual([36, 36, 38]);
+  expect(report.popoverSurface[3]).toBeCloseTo(0.96, 1);
+  expect(report.overlayScrim.slice(0, 3)).toEqual([0, 0, 0]);
+  expect(report.overlayScrim[3]).toBeCloseTo(0.44, 1);
+
+  // 深色弹窗材质实测：设置对话框背景取 --popover-surface
+  await page.getByRole('button', { name: '设置' }).click();
+  await page.waitForTimeout(500);
+  const dialogBg = await page.locator('.dialog-content').evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(dialogBg).toBe('rgba(36, 36, 38, 0.96)');
+  await page.keyboard.press('Escape');
+});

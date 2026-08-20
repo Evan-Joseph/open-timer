@@ -126,7 +126,7 @@ Base URL：`https://clock.4c666.top`
 | `sessions[].status` | `stopped`=正常结束。`voided` 会话被**完全排除**，不会出现在 `sessions` 数组与任何汇总中，仅通过 `adjustments_or_revocations` 可见 |
 | `sessions[].active_seconds` | 该会话在**当日窗口内**的净秒数（跨午夜会话两侧分别入账） |
 | `running_session` | 存在时表示当前正在计时，`active_seconds` 为截至 `generated_at` 的暂算值 |
-| `adjustments_or_revocations` | 审计摘要：仅收录**会话开始于查询日窗口内**的撤回/改时条目（跨日会话的次日修正不出现在任一日，引用时以 events.jsonl 为全量依据） |
+| `adjustments_or_revocations` | 审计摘要：仅收录**会话开始于查询日窗口内**的撤回/改时条目（跨日会话的次日修正不出现在任一日，引用时以 events.jsonl 为全量依据）。`kind` 取值 `void`/`retime`/`note`；**起点补录（adjust-start）同样落 `kind='retime'`**（schema 约束），区分依据是审计日志 action（`retime` vs `session_start_adjust`）与 `before_json` 形态（`active_seconds` vs `started_at_ms`） |
 
 ### 5. `GET /api/v1/sessions?date=YYYY-MM-DD`
 

@@ -275,6 +275,62 @@ test.describe('截图矩阵与视觉', () => {
     await page.getByRole('button', { name: '好，继续' }).click();
   });
 
+  test('深色模式截图矩阵（空闲/运行/暂停/结束反馈）', async ({ page }) => {
+    await doSetup(page);
+    await page.getByRole('button', { name: '设置' }).click();
+    await page.getByRole('radio', { name: '深色' }).click();
+    await expect(page.locator('html[data-theme="dark"]')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: 'e2e/screens/idle-dark.png', fullPage: true });
+
+    await page.getByRole('radio', { name: '数据结构' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: 'e2e/screens/running-dark-matrix.png', fullPage: true });
+
+    await page.getByRole('button', { name: '暂停计时' }).click();
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: 'e2e/screens/paused-dark.png', fullPage: true });
+
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: 'e2e/screens/finish-dark.png', fullPage: true });
+    await page.getByRole('button', { name: '好，继续' }).click();
+  });
+
+  test('reduced-motion：动画归零但布局与告警色保留（含截图）', async ({ browser }) => {
+    const context = await browser.newContext({ reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    await doSetup(page);
+    // 系统 prefers-reduced-motion 时应用自动挂 animations-off
+    await expect(page.locator('html.animations-off')).toHaveCount(1);
+    await page.screenshot({ path: 'e2e/screens/idle-reduced-motion.png', fullPage: true });
+
+    await page.getByRole('radio', { name: '操作系统' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(800);
+    await page.screenshot({ path: 'e2e/screens/running-reduced-motion.png', fullPage: true });
+
+    // 全部 transition/animation 时长归零（0.01ms 兜底写法 → ≤0.001s）
+    const maxDuration = await page.evaluate(() => {
+      const els = document.querySelectorAll('.start-btn, .control-btn, .idle-clock, .topbar, .timeline-track, .subject-chip');
+      let max = 0;
+      for (const el of els) {
+        const s = getComputedStyle(el);
+        for (const part of `${s.transitionDuration},${s.animationDuration}`.split(',')) {
+          const sec = part.endsWith('ms') ? parseFloat(part) / 1000 : parseFloat(part);
+          if (Number.isFinite(sec)) max = Math.max(max, sec);
+        }
+      }
+      return max;
+    });
+    expect(maxDuration).toBeLessThanOrEqual(0.001);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+    await context.close();
+  });
+
   test('DOM 非空与关键区域无重叠', async ({ page }) => {
     await doSetup(page);
     // DOM 非空

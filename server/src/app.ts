@@ -18,6 +18,7 @@ import {
 } from './auth.js';
 import { RateLimiter } from './rate-limit.js';
 import { applySecurityHeaders, clientIp } from './headers.js';
+import { eventToLine } from './backup.js';
 import { ulid } from './util/ulid.js';
 import { hashPassword, verifyPassword } from './password.js';
 import {
@@ -618,16 +619,7 @@ export function createApp(deps: AppDeps): Hono {
   /* ---------- 导出（owner） ---------- */
 
   app.get('/api/v1/export/events.jsonl', requireOwner(storage), async (c) => {
-    const lines = (await storage.allEvents()).map((e) =>
-      JSON.stringify({
-        event_id: e.id,
-        session_id: e.sessionId,
-        kind: e.kind,
-        idempotency_key: e.idempotencyKey,
-        server_time_ms: e.serverTimeMs,
-        payload: e.payloadJson ? JSON.parse(e.payloadJson) : null,
-      }),
-    );
+    const lines = (await storage.allEvents()).map(eventToLine);
     c.header('Content-Type', 'application/x-ndjson; charset=utf-8');
     c.header('Content-Disposition', 'attachment; filename="clock-events.jsonl"');
     return c.body(lines.join('\n') + (lines.length ? '\n' : ''));

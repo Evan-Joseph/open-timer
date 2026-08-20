@@ -60,6 +60,7 @@ npm run test:e2e        # Playwright（自动起服务，端口 4390）
 - 刷新/休眠/后台节流不丢不重：净时长 = Σ(服务端段端点差)。
 - 会话跨北京时间 00:00 不拆分；日报按窗口裁剪入账。
 - 作废/修正保留事件链与 manual_adjustment 审计，不抹历史。
+- 每日备份：Cron Triggers（北京 23:00）把 `events.jsonl`（与导出端点同格式，可重放）与 `sessions.jsonl` 写入 R2 `clock-11408-backup`，滚动保留 30 天（`server/src/backup.ts`）。
 
 ## 迁移
 

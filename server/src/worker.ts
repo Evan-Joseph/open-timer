@@ -5,6 +5,7 @@
 
 import { createApp } from './app.js';
 import { applySecurityHeaders } from './headers.js';
+import { runBackup, type BackupBucket } from './backup.js';
 import { D1Storage, type D1Database } from './repo/d1-storage.js';
 import type { AppConfig } from './config.js';
 import migrationSql from '../../migrations/0001_init.sql';
@@ -15,17 +16,38 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
+interface ScheduledEvent {
+  cron: string;
+  scheduledTime: number;
+}
+
 interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
+  BACKUP: BackupBucket;
 }
 
 /** 同一 Worker isolate 内共享：迁移完成后不再探测数据库 */
 let migrated = false;
 
+async function ensureMigrated(env: Env, storage: D1Storage): Promise<void> {
+  if (migrated) return;
+  const ready = await env.DB.prepare('SELECT COUNT(*) AS c FROM schema_migrations').first().catch(() => null);
+  if (!ready) await storage.migrate();
+  migrated = true;
+}
+
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     return handle(request, env);
+  },
+
+  /** Cron Triggers（wrangler.jsonc：15:00 UTC = 北京 23:00）：每日备份到 R2。 */
+  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+    const storage = new D1Storage(env.DB, migrationSql);
+    await ensureMigrated(env, storage);
+    const result = await runBackup(storage, env.BACKUP, Date.now());
+    console.log(`backup done: date=${result.date} wrote=${result.written.join(',')} pruned=${result.pruned.length}`);
   },
 };
 
@@ -41,11 +63,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
   };
   const storage = new D1Storage(env.DB, migrationSql);
   // 模块级标志：同一 isolate 内只探测/执行一次迁移，避免每请求一次 D1 查询
-  if (!migrated) {
-    const ready = await env.DB.prepare('SELECT COUNT(*) AS c FROM schema_migrations').first().catch(() => null);
-    if (!ready) await storage.migrate();
-    migrated = true;
-  }
+  await ensureMigrated(env, storage);
 
   const app = createApp({ storage, config });
 
