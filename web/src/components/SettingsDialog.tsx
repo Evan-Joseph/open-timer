@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { X } from 'lucide-react';
+import { Maximize, X } from 'lucide-react';
 import { setAnimationsEnabled, useAnimationsEnabled, useSettings, updateSettings } from '../lib/settings.js';
 import { AMBIENT_LABELS } from '../lib/ambient.js';
 
@@ -15,6 +16,19 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
   const settings = useSettings();
   const animationsOn = useAnimationsEnabled();
   const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /** 进入全屏被浏览器拒绝时的可理解反馈（权限、iframe 沙箱或不支持） */
+  const [fullscreenError, setFullscreenError] = useState<string | null>(null);
+
+  const enterFullscreen = async () => {
+    setFullscreenError(null);
+    try {
+      if (!document.fullscreenEnabled) throw new Error('fullscreen-disabled');
+      await document.documentElement.requestFullscreen();
+      onOpenChange(false);
+    } catch {
+      setFullscreenError('浏览器拒绝了全屏请求。请改用 F11 或浏览器菜单进入全屏，应用会自动切换布局。');
+    }
+  };
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -115,6 +129,21 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
               ))}
             </div>
             {reduced && <p className="setting-hint">系统开启了「减弱动态效果」，动画已自动关闭。</p>}
+          </div>
+
+          <div className="setting-row">
+            <span className="setting-label">全屏</span>
+            <div>
+              <button
+                className="ghost-btn"
+                data-testid="settings-fullscreen-btn"
+                onClick={() => void enterFullscreen()}
+              >
+                <Maximize size={15} aria-hidden /> 进入全屏
+              </button>
+            </div>
+            {fullscreenError && <p className="setting-hint setting-hint-error" role="status">{fullscreenError}</p>}
+            <p className="setting-hint">外部进入全屏（F11 或系统手势）同样会被自动识别。</p>
           </div>
 
           <div className="setting-row">

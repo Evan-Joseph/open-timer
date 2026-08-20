@@ -4,6 +4,7 @@
  */
 
 import { createApp } from './app.js';
+import { applySecurityHeaders } from './headers.js';
 import { D1Storage, type D1Database } from './repo/d1-storage.js';
 import type { AppConfig } from './config.js';
 import migrationSql from '../../migrations/0001_init.sql';
@@ -66,5 +67,8 @@ async function handle(request: Request, env: Env): Promise<Response> {
   } else {
     headers.set('Cache-Control', 'no-cache, must-revalidate');
   }
+  // 安全头与 API 同源：静态响应（尤其 HTML 外壳）同样必须携带 CSP/XFO/HSTS，
+  // 与 app.ts 的 '*' 中间件共用 headers.ts 单一实现，覆盖全部响应（含 404）。
+  applySecurityHeaders((name, value) => headers.set(name, value), { isProduction: config.isProduction });
   return new Response(assetRes.body, { status: assetRes.status, statusText: assetRes.statusText, headers });
 }

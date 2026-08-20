@@ -44,11 +44,12 @@ npm run test:e2e        # Playwright（自动起服务，端口 4390）
 | --- | --- |
 | `GET /api/v1/health` | 健康检查 |
 | `GET /api/v1/subjects` | 7 科目固定表 |
+| `GET /api/v1/state` | 实时状态：是否在计时、今日累计、本段秒数（公开只读） |
 | `GET /api/v1/sessions?date=YYYY-MM-DD` | 当日会话与段（含运行中） |
 | `GET /api/v1/daily-summary?date=YYYY-MM-DD&timezone=Asia%2FShanghai` | 日报口径汇总，支持 ETag/If-None-Match |
 | `GET /api/v1/export/events.jsonl` | owner-only 事件导出（可重放重建一切） |
 
-写路径（owner cookie）：`POST /api/v1/sessions`（start）、`/:id/pause|resume|stop|switch|void|retime`、`PATCH /:id/note`。所有写请求必须携带 `Idempotency-Key`。
+写路径（owner cookie）：`POST /api/v1/sessions`（start）、`/:id/pause|resume|stop|switch|void|retime|adjust-start`、`PATCH /:id/note`。所有**会话写操作**必须携带 `Idempotency-Key`（8–64 字符）；同键重试回放原状态码与原响应体，并返回 `Idempotent-Replay: true`。auth/credentials 端点是连接与凭据管理，不要求幂等键，由限流保护。
 
 契约见 `docs/openapi.yaml`。
 
@@ -62,10 +63,10 @@ npm run test:e2e        # Playwright（自动起服务，端口 4390）
 
 ## 迁移
 
-- Cloudflare：`server/` 同一 Hono 代码换 Workers 入口 + D1 适配器（migrations 已用 SQL 交集）；前端静态走 Pages。
+- Cloudflare（当前生产形态）：`server/` 同一 Hono 代码经 Workers 入口（`server/dist/worker.mjs`）+ D1 适配器（migrations 已用 SQL 交集）；前端静态由 **Worker Static Assets** 托管（`ASSETS` 绑定 + `run_worker_first`，SPA fallback 与安全头在 Worker 内统一处理），不使用 Pages。
 - CloudBase：云函数 Node 运行时适配 Hono；数据库 adapter 换 MySQL 方言。
 - 迁移前用 `GET /api/v1/export/events.jsonl` 全量导出重放对账。
 
 ## 安全清单
 
-CSP / X-Frame-Options: DENY / nosniff / no-referrer；写请求 Origin 同源校验（CSRF）；登录与 API 限流；日志不含 token/cookie/备注全文；公网错误不泄漏栈与路径。
+CSP（`script-src 'self'`，防闪白脚本已外置，无内联脚本）/ X-Frame-Options: DENY / nosniff / no-referrer / 生产 HSTS，统一覆盖 **API 与静态资源的所有响应**（含 404/500，实现见 `server/src/headers.ts`）；写请求 Origin 同源校验（CSRF）；登录与 API 限流（客户端 IP 优先取 Cloudflare 边缘写入、不可伪造的 `CF-Connecting-IP`，`X-Forwarded-For` 仅作非边缘环境降级）；日志不含 token/cookie/备注全文；公网错误不泄漏栈与路径。

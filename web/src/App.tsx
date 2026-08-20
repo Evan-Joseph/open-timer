@@ -112,7 +112,8 @@ export default function App() {
   return (
     <div className={`app ${isFullscreen ? 'fullscreen-mode' : ''} ${fsShowTimeline ? 'fs-timeline-open' : ''}`}>
       <header className="topbar material">
-        <span className="topbar-title">沉浸时钟</span>
+        {/* 品牌名已按 2026-08-20 决策隐藏：顶栏只保留状态点与日期；
+            标签页标题（document.title）与 index.html <title> 仍承担识别职责 */}
         <span className={`topbar-status-dot ${store.state?.active_session?.status === 'running' ? 'live' : ''}`} aria-hidden />
         <span className="topbar-date">{store.todayDate} · 北京时间</span>
         <button className="icon-btn" aria-label="设置" onClick={() => setSettingsOpen(true)}>

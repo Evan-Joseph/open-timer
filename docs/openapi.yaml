@@ -1,11 +1,22 @@
 openapi: 3.1.0
 info:
   title: 11408 Immersive Clock API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     单用户学习计时器的版本化 HTTP API。
     所有持久化时间戳为 UTC；自然日、显示与汇总一律 Asia/Shanghai（固定 UTC+8）。
     API 只返回时长事实，不输出掌握、完成度或评价。
+
+    ## 幂等契约
+    所有会话写操作（start / pause / resume / stop / switch / void / note / retime /
+    adjust-start）必须携带 `Idempotency-Key` 请求头（8–64 字符，客户端生成 UUID）。
+    服务端按「端点:键」保存响应 24h；同键重试回放原状态码与原响应体，并返回
+    `Idempotent-Replay: true`。缺失键返回 400 `IDEMPOTENCY_KEY_REQUIRED`。
+    auth 与 credentials 端点是连接与凭据管理而非资源变更，不要求幂等键，由限流保护。
+
+    ## 安全头
+    所有响应（含静态资源与错误响应）统一携带 CSP（script-src 'self'，无内联脚本）、
+    X-Frame-Options: DENY、nosniff、Referrer-Policy: no-referrer；生产环境追加 HSTS。
 servers:
   - url: /api/v1
 
@@ -19,8 +30,16 @@ components:
       in: cookie
       name: clock_session
       description: owner 登录后下发的 HttpOnly 会话 cookie；仅写操作需要。
-    # 注意：只读端点（GET subjects/state/sessions/daily-summary）完全公开，无需任何凭据，
+    # 注意：只读端点（GET health/subjects/state/sessions/daily-summary）完全公开，无需任何凭据，
     # 各端点处显式标注 security: []。
+
+  parameters:
+    idempotency-key:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: 客户端生成的唯一键（UUID）；同键重试回放原状态码与原响应体。
+      schema: { type: string, minLength: 8, maxLength: 64 }
 
   schemas:
     SubjectEntry:
@@ -50,6 +69,21 @@ components:
         end_reason: { type: [string, 'null'], enum: [manual, subject_switch, void, null] }
         note: { type: [string, 'null'] }
 
+    SessionWriteResult:
+      type: object
+      description: 写操作成功后的会话快照
+      required: [session_id, subject_id, status, started_at, active_seconds]
+      properties:
+        session_id: { type: string }
+        subject_id: { type: string }
+        status: { type: string, enum: [running, paused, stopped, voided] }
+        intent_note: { type: [string, 'null'] }
+        end_note: { type: [string, 'null'] }
+        end_reason: { type: [string, 'null'] }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: [string, 'null'], format: date-time }
+        active_seconds: { type: integer, description: 会话总净秒数（不按日裁剪） }
+
     RunningSessionEntry:
       type: object
       required: [session_id, subject_id, started_at, status, active_seconds]
@@ -60,6 +94,10 @@ components:
         status: { type: string, enum: [running, paused] }
         active_seconds: { type: integer, description: 截至 generated_at 的暂算净秒数 }
         current_segment_started_at: { type: [string, 'null'], format: date-time }
+        current_segment_active_seconds:
+          type: [integer, 'null']
+          description: 本段秒数：running 持续增长，paused 冻结为末段净秒
+        paused_at: { type: [string, 'null'], format: date-time, description: 暂停（离开）开始时刻 }
         intent_note: { type: [string, 'null'] }
 
     AdjustmentEntry:
@@ -67,7 +105,7 @@ components:
       required: [session_id, kind, at]
       properties:
         session_id: { type: string }
-        kind: { type: string, enum: [retime, void, note] }
+        kind: { type: string, enum: [retime, void, note], description: adjust-start 以 retime 类别入账 }
         reason: { type: [string, 'null'] }
         at: { type: string, format: date-time }
 
@@ -101,18 +139,27 @@ components:
               active_seconds: { type: integer }
         sessions:
           type: array
+          description: voided 会话完全排除，不出现在本数组；仅经 adjustments_or_revocations 可见
           items: { $ref: '#/components/schemas/SessionEntry' }
         running_session:
           oneOf: [{ $ref: '#/components/schemas/RunningSessionEntry' }, { type: 'null' }]
         adjustments_or_revocations:
           type: array
+          description: 仅收录会话开始于查询日窗口内的条目
           items: { $ref: '#/components/schemas/AdjustmentEntry' }
 
     Error:
       type: object
       required: [error]
       properties:
-        error: { type: string }
+        error:
+          type: string
+          description: |
+            错误码：INVALID_BODY / INVALID_DATE / INVALID_ID / INVALID_DELTA /
+            TIMEZONE_MUST_BE_ASIA_SHANGHAI / UNAUTHORIZED / INVALID_CREDENTIALS /
+            SESSION_NOT_FOUND / ACTIVE_SESSION_EXISTS / ILLEGAL_TRANSITION /
+            ALREADY_SETUP / NOT_SETUP / NOT_ACTIVE_SESSION / INVALID_START /
+            IDEMPOTENCY_KEY_REQUIRED / RATE_LIMITED / CSRF_REJECTED / NOT_FOUND / INTERNAL
 
 paths:
   /health:
@@ -203,15 +250,39 @@ paths:
       responses:
         '200': { description: 会话列表 }
         '400': { description: date 非法 }
+    post:
+      summary: 开始计时（幂等）
+      parameters:
+        - $ref: '#/components/parameters/idempotency-key'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject_id]
+              properties:
+                subject_id: { type: string }
+                intent_note: { type: [string, 'null'], maxLength: 200 }
+      responses:
+        '201':
+          description: 新会话
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionWriteResult' }
+        '400': { description: 参数非法或缺 Idempotency-Key }
+        '409': { description: 已有活动会话（ACTIVE_SESSION_EXISTS） }
 
   /sessions/{id}/pause:
     post:
-      summary: 暂停（幂等；需要 Idempotency-Key）
+      summary: 暂停（幂等）
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 8, maxLength: 64 } }
+        - $ref: '#/components/parameters/idempotency-key'
       responses:
         '200': { description: 已暂停 }
+        '400': { description: 缺 Idempotency-Key 或 id 非法 }
+        '404': { description: 会话不存在 }
         '409': { description: 非法状态转移 }
 
   /sessions/{id}/resume:
@@ -219,9 +290,11 @@ paths:
       summary: 继续（幂等）
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/idempotency-key'
       responses:
         '200': { description: 已继续 }
+        '400': { description: 缺 Idempotency-Key 或 id 非法 }
+        '404': { description: 会话不存在 }
         '409': { description: 非法状态转移 }
 
   /sessions/{id}/stop:
@@ -229,31 +302,215 @@ paths:
       summary: 结束并保存（幂等）
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/idempotency-key'
       requestBody:
         content:
           application/json:
             schema:
               type: object
               properties:
-                end_note: { type: string, maxLength: 200 }
+                end_note: { type: [string, 'null'], maxLength: 200 }
       responses:
         '200': { description: 已结束 }
+        '400': { description: 缺 Idempotency-Key 或 id 非法 }
+        '404': { description: 会话不存在 }
         '409': { description: 非法状态转移 }
+
+  /sessions/{id}/switch:
+    post:
+      summary: 换科目（幂等）：结束当前会话（subject_switch）并开启新会话
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/idempotency-key'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject_id]
+              properties:
+                subject_id: { type: string }
+                intent_note: { type: [string, 'null'], maxLength: 200 }
+      responses:
+        '200':
+          description: "{ stopped: 旧会话快照, started: 新会话快照 }"
+        '400': { description: 缺 Idempotency-Key 或参数非法 }
+        '409': { description: 该会话不是当前活动会话（NOT_ACTIVE_SESSION） }
 
   /sessions/{id}/void:
     post:
-      summary: 作废已停止会话（保留审计）
+      summary: 作废已停止会话（幂等；保留审计，汇总排除）
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
-        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/idempotency-key'
       requestBody:
         content:
           application/json:
             schema:
               type: object
               properties:
-                reason: { type: string, maxLength: 200 }
+                reason: { type: [string, 'null'], maxLength: 200 }
       responses:
         '200': { description: 已作废 }
-        '409': { description: 非法状态转移 }
+        '400': { description: 缺 Idempotency-Key 或 id 非法 }
+        '404': { description: 会话不存在 }
+        '409': { description: 仅 stopped 可作废 }
+
+  /sessions/{id}/note:
+    patch:
+      summary: 更新已停止会话备注（幂等）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/idempotency-key'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note: { type: string, maxLength: 200 }
+      responses:
+        '200': { description: 已更新 }
+        '400': { description: 缺 Idempotency-Key 或参数非法 }
+        '404': { description: 会话不存在 }
+        '409': { description: 仅 stopped 可改备注 }
+
+  /sessions/{id}/retime:
+    post:
+      summary: 修正时长（幂等；审计留痕，±24h 内）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/idempotency-key'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [delta_seconds, reason]
+              properties:
+                delta_seconds: { type: integer, minimum: -86400, maximum: 86400 }
+                reason: { type: [string, 'null'], maxLength: 200 }
+      responses:
+        '200': { description: 已修正 }
+        '400': { description: 缺 Idempotency-Key 或参数非法 }
+        '404': { description: 会话不存在 }
+        '409': { description: 仅 stopped 可修正 }
+
+  /sessions/{id}/adjust-start:
+    post:
+      summary: 起点补录（幂等）：把已停止会话的开始时间向前调整，同步首段与净时长
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - $ref: '#/components/parameters/idempotency-key'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [started_at, reason]
+              properties:
+                started_at: { type: string, format: date-time, description: 必须早于首段结束时刻 }
+                reason: { type: [string, 'null'], maxLength: 200 }
+      responses:
+        '200': { description: 已补录 }
+        '400': { description: 缺 Idempotency-Key、参数非法或起点无效（INVALID_START） }
+        '404': { description: 会话不存在 }
+        '409': { description: 仅 stopped 可补录 }
+
+  /auth/setup:
+    post:
+      summary: 首次设置 owner PIN（6 位数字；成功后直接登录）
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string, pattern: '^\d{6}$' }
+      responses:
+        '200': { description: 已设置并下发会话 cookie }
+        '400': { description: PIN 格式非法 }
+        '409': { description: 已设置过（ALREADY_SETUP） }
+
+  /auth/login:
+    post:
+      summary: 登录（限流保护，不要求幂等键）
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string }
+      responses:
+        '200': { description: 登录成功 }
+        '401': { description: 密码错误 }
+        '409': { description: 尚未设置（NOT_SETUP） }
+        '429': { description: 尝试过频 }
+
+  /auth/logout:
+    post:
+      summary: 登出（删除服务端会话记录）
+      responses:
+        '200': { description: 已登出 }
+        '401': { description: 未登录 }
+
+  /auth/me:
+    get:
+      summary: 鉴权探测（公开）：是否已登录、是否已完成初始设置
+      security: []
+      responses:
+        '200':
+          description: "{ authenticated: boolean, setup_done: boolean }"
+
+  /credentials:
+    get:
+      summary: 列出总控只读凭据（owner；token 本体不返回）
+      responses:
+        '200': { description: 凭据列表 }
+        '401': { description: 未登录 }
+    post:
+      summary: 创建总控只读凭据（owner；token 只显示一次，不要求幂等键）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 64 }
+      responses:
+        '201': { description: "{ id, name, token }" }
+        '401': { description: 未登录 }
+
+  /credentials/{id}/revoke:
+    post:
+      summary: 撤销总控凭据（owner；轮换 = 新建 + 撤销）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: 已撤销 }
+        '401': { description: 未登录 }
+
+  /export/events.jsonl:
+    get:
+      summary: 事件级全量导出（owner；可重放重建一切）
+      responses:
+        '200':
+          description: NDJSON 事件流
+          content:
+            application/x-ndjson:
+              schema: { type: string }
+        '401': { description: 未登录 }

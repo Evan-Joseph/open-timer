@@ -641,13 +641,20 @@ test.describe('时间轴尺度与流水账视图', () => {
 });
 
 test.describe('全屏沉浸模式', () => {
-  test('无应用内全屏按钮；外部进入全屏后自动切换布局', async ({ page }) => {
+  test('设置内入口可进入全屏；主 UI 无全屏按钮；布局自动切换', async ({ page }) => {
     await doSetup(page);
+    // 主界面没有全屏按钮（2026-08-20 起入口只在设置内）
     await expect(page.getByRole('button', { name: '全屏沉浸模式' })).toHaveCount(0);
-    await page.evaluate(() => document.documentElement.requestFullscreen().catch(() => {}));
+    await expect(page.getByTestId('settings-fullscreen-btn')).toHaveCount(0);
+
+    await page.getByRole('button', { name: '设置' }).click();
+    await expect(page.getByTestId('settings-fullscreen-btn')).toBeVisible();
+    await page.getByTestId('settings-fullscreen-btn').click();
     await page.waitForTimeout(600);
     const fs = await page.evaluate(() => Boolean(document.fullscreenElement));
     if (fs) {
+      // 成功后设置弹窗关闭，布局切换为全屏模式
+      await expect(page.getByTestId('settings-fullscreen-btn')).toHaveCount(0);
       // display:none 隐藏但保留 DOM：断言不可见而非不存在
       await expect(page.locator('.timeline')).not.toBeVisible();
       await expect(page.locator('.topbar')).not.toBeVisible();
@@ -656,6 +663,10 @@ test.describe('全屏沉浸模式', () => {
       await page.waitForTimeout(600);
       const stillFs = await page.evaluate(() => Boolean(document.fullscreenElement));
       if (!stillFs) await expect(page.locator('.topbar')).toBeVisible();
+    } else {
+      // 浏览器拒绝全屏时必须给出可理解的反馈，而不是静默失败
+      await expect(page.getByText('浏览器拒绝了全屏请求')).toBeVisible();
+      await page.keyboard.press('Escape');
     }
   });
 });
@@ -708,6 +719,11 @@ test.describe('首页休息状态', () => {
     await page.getByTestId('start-btn').click();
     await page.waitForTimeout(1_000);
     await page.getByRole('button', { name: '暂停计时' }).click();
+    // 先等暂停到达服务端再快进时钟，避免与轮询校准竞态导致休息锚点漂移
+    await expect.poll(async () => {
+      const res = await page.request.get('/api/v1/state');
+      return ((await res.json()).active_session as { status?: string } | null)?.status;
+    }, { timeout: 5_000 }).toBe('paused');
     await page.clock.fastForward(3 * 60 * 1000);
     await expect(page.getByTestId('away-line')).toContainText('已休息 00:03');
 

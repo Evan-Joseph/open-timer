@@ -13,9 +13,10 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${PORT}`,
     headless: true,
   },
+  // 2026-08-20 决策：产品只覆盖 Pad/Desktop 横屏，移动端（原 Pixel 7 project）退役。
+  // Pad/Desktop 验收必须使用下方真实断点，不得由手机视口代替。
   projects: [
     { name: 'desktop-light', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
-    { name: 'mobile', use: { ...devices['Pixel 7'], viewport: { width: 375, height: 812 } } },
   ],
   webServer: {
     command: `CLOCK_DATA_DIR=/tmp/clock-e2e-data CLOCK_PORT=${PORT} npm run start -w server`,

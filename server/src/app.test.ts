@@ -197,7 +197,7 @@ describe('API 集成', () => {
     const earlier = new Date(Date.parse(created.started_at) - 10 * 60_000).toISOString();
     const adjusted = await ctx.app.request(`/api/v1/sessions/${created.session_id}/adjust-start`, {
       method: 'POST',
-      headers,
+      headers: { ...headers, 'idempotency-key': 'adjust-start-apply' },
       body: JSON.stringify({ started_at: earlier, reason: '补录' }),
     });
     expect(adjusted.status).toBe(200);
@@ -234,7 +234,8 @@ describe('API 集成', () => {
       headers: h,
       body: JSON.stringify({ subject_id: 'english' }),
     });
-    expect(second.status).toBe(200);
+    // 回放保持原状态码（201），并标记 Idempotent-Replay
+    expect(second.status).toBe(201);
     expect(second.headers.get('idempotent-replay')).toBe('true');
     const secondBody = await second.json();
     expect(secondBody.session_id).toBe(firstBody.session_id);
@@ -392,5 +393,86 @@ describe('API 集成', () => {
     expect(kinds).toContain('created');
     expect(kinds).toContain('stopped');
     expect(kinds).toContain('voided');
+  });
+
+  it('幂等统一：note/retime/adjust-start 缺键 400，同键回放原响应', async () => {
+    const h = { 'content-type': 'application/json', cookie: ctx.cookie };
+    // 造一个已停止会话
+    const start = await ctx.app.request('/api/v1/sessions', {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'idem-unify-start' },
+      body: JSON.stringify({ subject_id: 'math' }),
+    });
+    const id = (await start.json()).session_id;
+    await ctx.app.request(`/api/v1/sessions/${id}/stop`, {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'idem-unify-stop' },
+    });
+
+    // 缺 Idempotency-Key 一律 400
+    for (const [method, path, body] of [
+      ['PATCH', `/api/v1/sessions/${id}/note`, { note: '第一次' }],
+      ['POST', `/api/v1/sessions/${id}/retime`, { delta_seconds: 0, reason: null }],
+      ['POST', `/api/v1/sessions/${id}/adjust-start`, { started_at: new Date().toISOString(), reason: null }],
+    ] as const) {
+      const res = await ctx.app.request(path, { method, headers: h, body: JSON.stringify(body) });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe('IDEMPOTENCY_KEY_REQUIRED');
+    }
+
+    // note：首次写入生效
+    const first = await ctx.app.request(`/api/v1/sessions/${id}/note`, {
+      method: 'PATCH',
+      headers: { ...h, 'idempotency-key': 'idem-unify-note1' },
+      body: JSON.stringify({ note: '第一次' }),
+    });
+    expect(first.status).toBe(200);
+    expect((await first.json()).end_note).toBe('第一次');
+
+    // 同键重试（即使 body 不同）必须回放原响应，不执行第二次写入
+    const replay = await ctx.app.request(`/api/v1/sessions/${id}/note`, {
+      method: 'PATCH',
+      headers: { ...h, 'idempotency-key': 'idem-unify-note1' },
+      body: JSON.stringify({ note: '第二次不应生效' }),
+    });
+    expect(replay.status).toBe(200);
+    expect(replay.headers.get('idempotent-replay')).toBe('true');
+    expect((await replay.json()).end_note).toBe('第一次');
+
+    const after = await ctx.app.request(`/api/v1/sessions/${id}/note`, {
+      method: 'PATCH',
+      headers: { ...h, 'idempotency-key': 'idem-unify-note2' },
+      body: JSON.stringify({ note: '第三次' }),
+    });
+    expect((await after.json()).end_note).toBe('第三次');
+  });
+
+  it('未知 API 路径返回 JSON NOT_FOUND', async () => {
+    const res = await ctx.app.request('/api/v1/definitely-missing');
+    expect(res.status).toBe(404);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    expect((await res.json()).error).toBe('NOT_FOUND');
+  });
+
+  it('CORS：公开端点 OPTIONS 预检返回 204 与跨域头', async () => {
+    const res = await ctx.app.request('/api/v1/daily-summary?date=2026-01-01&timezone=Asia%2FShanghai', {
+      method: 'OPTIONS',
+      headers: { origin: 'https://other-agent.example' },
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    expect(res.headers.get('access-control-allow-methods')).toContain('GET');
+  });
+
+  it('安全头：API 响应携带统一 CSP/XFO/nosniff/referrer', async () => {
+    const res = await ctx.app.request('/api/v1/health');
+    expect(res.headers.get('x-frame-options')).toBe('DENY');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('referrer-policy')).toBe('no-referrer');
+    const csp = res.headers.get('content-security-policy')!;
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).toContain("frame-ancestors 'none'");
+    // 测试环境 isProduction=false：不带 HSTS
+    expect(res.headers.get('strict-transport-security')).toBeNull();
   });
 });

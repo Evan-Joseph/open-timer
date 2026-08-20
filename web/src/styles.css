@@ -6,6 +6,17 @@
    - 材质（毛玻璃）只用于顶栏与浮层；数字场景 tabular-nums
    - 字体：中文走 Noto Sans SC（OFL 1.1，scripts/font-subset.py 子集化）；
      数字/时间走 --font-num（系统 SF，保 tabular 对齐）
+
+   单一视觉 token 表（2026-08-20 统一，禁止组件另写近似值）：
+   - 背景/表面：--bg / --bg-elevated / --surface-1 / --surface-2
+   - 文字层级：--text-1 / --text-2 / --text-3（≥3:1）
+   - 边框/阴影：--border / --shadow / --shadow-sm / --shadow-up
+   - 语义色：--accent / --accent-press / --danger / --success / --amber
+   - 材质：--material（顶栏/控制条）/ --popover-surface（弹层，0.96）
+     / --overlay-scrim（遮罩，0.44）
+   - 圆角：--radius-sm 6 / --radius 10 / --radius-lg 12 / --radius-xl 14
+   - 动效：--ease-standard；--dur-press 0.1s / --dur-hover 0.15s
+     / --dur-enter 0.25s / --dur-state 0.28s（状态切换）
    ========================================================================== */
 
 /* 项目子集化的 Noto Sans SC（OFL 1.1；GB2312 一级 + UI 文案，自由文本缺字回退系统黑体）。
@@ -44,14 +55,23 @@
   --amber: #f59e0b;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.06);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --shadow-up: 0 -8px 24px rgba(0, 0, 0, 0.08);
   --material: rgba(255, 255, 255, 0.72);
   --popover-surface: rgba(255, 255, 255, 0.96);
+  --overlay-scrim: rgba(0, 0, 0, 0.44);
 
   /* 圆角档位：控件 ≤ 卡片 ≤ 浮层 */
   --radius-sm: 6px;
   --radius: 10px;
   --radius-lg: 12px;
   --radius-xl: 14px;
+
+  /* 动效 token：全部过渡从这组取值，组件不得另写近似时长/曲线 */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --dur-press: 0.1s;
+  --dur-hover: 0.15s;
+  --dur-enter: 0.25s;
+  --dur-state: 0.28s;
 
   /* 中文优先 Noto Sans SC（跨平台一致）；数字/时间用 --font-num 保持系统 SF + tabular */
   --font: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', sans-serif;
@@ -163,7 +183,7 @@ button:focus-visible, input:focus-visible {
   border-radius: var(--radius-lg);
   background: var(--accent); color: #fff;
   font-size: 15px; font-weight: 600;
-  transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+  transition: background var(--dur-hover) ease, transform var(--dur-press) ease, box-shadow var(--dur-hover) ease;
 }
 .start-btn { min-height: 48px; padding: 0 40px; font-size: 17px; box-shadow: var(--shadow); }
 .control-btn.resume { min-height: 0; width: 56px; height: 56px; padding: 0; border-radius: 50%; }
@@ -180,7 +200,7 @@ button:focus-visible, input:focus-visible {
   border-radius: var(--radius);
   border: 1px solid var(--border); background: transparent;
   color: var(--text-2); font-size: 14px;
-  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+  transition: color var(--dur-hover) ease, border-color var(--dur-hover) ease, background var(--dur-hover) ease, transform var(--dur-press) ease;
 }
 .ghost-btn:hover { color: var(--text-1); background: var(--surface-2); }
 .ghost-btn:active:not(:disabled) { transform: scale(0.97); }
@@ -196,7 +216,7 @@ button:focus-visible, input:focus-visible {
   border: 1px solid var(--border); background: var(--surface-1);
   color: var(--text-1);
   box-shadow: var(--shadow);
-  transition: transform 0.1s ease, background 0.15s ease;
+  transition: transform var(--dur-press) ease, background var(--dur-hover) ease;
 }
 .control-btn:hover { background: var(--surface-2); }
 .control-btn:active:not(:disabled) { transform: scale(0.96); }
@@ -208,7 +228,7 @@ button:focus-visible, input:focus-visible {
   display: inline-grid; place-items: center;
   border-radius: var(--radius-sm);
   color: var(--text-2); background: transparent;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--dur-hover) ease, color var(--dur-hover) ease;
 }
 .icon-btn:hover { background: var(--surface-2); color: var(--text-1); }
 .icon-btn:active:not(:disabled) { opacity: 0.6; }
@@ -219,7 +239,7 @@ button:focus-visible, input:focus-visible {
   min-height: 32px; padding: 0 10px;
   border-radius: var(--radius-sm);
   font-size: 13px; font-weight: 500; color: var(--accent);
-  transition: background 0.15s ease;
+  transition: background var(--dur-hover) ease;
 }
 .text-btn:hover { background: var(--surface-2); }
 .text-btn:active:not(:disabled) { opacity: 0.6; }
@@ -231,7 +251,7 @@ button:focus-visible, input:focus-visible {
   min-height: 32px; padding: 0 12px;
   border-radius: var(--radius-sm);
   font-size: 13px; color: var(--text-1);
-  transition: background 0.15s ease;
+  transition: background var(--dur-hover) ease;
 }
 .fs-control-btn:hover { background: var(--surface-2); }
 
@@ -243,7 +263,7 @@ button:focus-visible, input:focus-visible {
   font-size: 13px; color: var(--text-2);
   background: transparent; border: none;
   border-radius: var(--radius-sm);
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--dur-hover) ease, color var(--dur-hover) ease;
 }
 .seg-item:hover:not(.active),
 .ambient-item:hover:not(.active) { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
@@ -258,7 +278,7 @@ button:focus-visible, input:focus-visible {
 /* 科目选择胶囊 / 换科按钮 */
 .subject-chip, .switch-btn {
   display: inline-flex; align-items: center; gap: 6px;
-  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+  transition: border-color var(--dur-hover) ease, background var(--dur-hover) ease, transform var(--dur-press) ease;
 }
 .subject-chip:active:not(:disabled), .switch-btn:active:not(:disabled) { transform: scale(0.97); }
 
@@ -327,7 +347,6 @@ button:focus-visible, input:focus-visible {
   height: 44px; padding: 0 16px;
   border-bottom: 1px solid var(--border);
 }
-.topbar-title { font-weight: 600; font-size: 15px; }
 .topbar-date { color: var(--text-2); font-size: 13px; flex: 1; text-align: right; margin-right: 4px; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 
 /* 顶栏状态指示点：运行中为 success 色呼吸 */
@@ -361,7 +380,7 @@ button:focus-visible, input:focus-visible {
   display: flex; align-items: center; justify-content: center;
   overflow: hidden;
   padding: var(--main-pad-block) 16px;
-  transition: transform 0.25s ease, padding 0.25s ease;
+  transition: transform var(--dur-enter) ease, padding var(--dur-enter) ease;
 }
 
 /* ==========================================================================
@@ -403,7 +422,6 @@ button:focus-visible, input:focus-visible {
   padding: 8px 14px; border-radius: 999px;
   background: var(--surface-1); border: 1px solid var(--border);
   font-size: 14px; color: var(--text-1);
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.1s ease;
 }
 .subject-chip:hover { border-color: var(--sc); }
 .subject-chip.selected {
@@ -416,7 +434,7 @@ button:focus-visible, input:focus-visible {
   padding: 11px 12px; border-radius: var(--radius);
   border: 1px solid var(--border); background: var(--surface-2);
   color: var(--text-1); font-size: 15px; font-family: inherit;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--dur-hover) ease, box-shadow var(--dur-hover) ease;
 }
 .intent-input, .finish-note { width: 100%; max-width: 400px; }
 .intent-input:focus, .finish-note:focus {
@@ -487,7 +505,7 @@ button:focus-visible, input:focus-visible {
   padding: 6px 14px; border-radius: 999px;
   background: var(--surface-2); color: var(--text-1);
   font-family: var(--font-num); font-size: 14px; font-variant-numeric: tabular-nums;
-  transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
+  transition: background var(--dur-state) ease, color var(--dur-state) ease, box-shadow var(--dur-state) ease;
 }
 .away-note { color: var(--text-3); font-size: 12px; }
 /* L1：建议休息即将结束，强调但非警示 */
@@ -603,7 +621,7 @@ button:focus-visible, input:focus-visible {
 .timeline-drawer,
 .fs-controls {
   transition-property: background-color, border-color, box-shadow, transform, padding, opacity;
-  transition-duration: 280ms;
+  transition-duration: var(--dur-state);
   transition-timing-function: ease;
 }
 .app:has(.clockface[data-away-level='2']) .topbar,
@@ -631,12 +649,12 @@ button:focus-visible, input:focus-visible {
 .timeline-title { font-size: 14px; font-weight: 600; margin: 0; }
 .timeline-scale {
   display: flex; width: max-content; margin: 0 auto 10px; padding: 2px;
-  border: 1px solid var(--border); border-radius: 7px; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: calc(var(--radius-sm) + 2px); background: var(--surface-2);
 }
 .timeline-scale button {
-  min-width: 68px; height: 28px; padding: 0 10px; border: 0; border-radius: 5px;
+  min-width: 68px; height: 28px; padding: 0 10px; border: 0; border-radius: var(--radius-sm);
   color: var(--text-2); background: transparent; font: inherit; font-size: 12px;
-  transition: color 160ms var(--ease-standard, ease), background-color 160ms var(--ease-standard, ease), box-shadow 160ms var(--ease-standard, ease);
+  transition: color 160ms var(--ease-standard), background-color 160ms var(--ease-standard), box-shadow 160ms var(--ease-standard);
 }
 .timeline-scale button:hover { color: var(--text-1); }
 .timeline-scale button.selected { color: var(--text-1); background: var(--surface-1); box-shadow: var(--shadow-sm); }
@@ -661,7 +679,7 @@ button:focus-visible, input:focus-visible {
 .history-lane-label span { overflow: hidden; color: var(--text-3); font-family: var(--font-num); font-size: 10px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .history-lane-track { position: relative; height: 18px; overflow: hidden; border-radius: 4px; background: repeating-linear-gradient(90deg, var(--surface-2) 0 calc(27.59% - 1px), var(--border) calc(27.59% - 1px) 27.59%); }
 .history-quiet-period { position: absolute; inset-block: 0; display: grid; place-items: center; overflow: hidden; border-inline: 1px solid color-mix(in srgb, var(--text-3) 18%, transparent); color: var(--text-3); background: color-mix(in srgb, var(--text-3) 7%, transparent); font-size: 8px; line-height: 1; white-space: nowrap; }
-.history-lane-segment { position: absolute; z-index: 1; top: 5px; bottom: 5px; min-width: 2px; border-radius: 2px; background: var(--sc); transition: width 220ms var(--ease-standard, ease), left 220ms var(--ease-standard, ease); }
+.history-lane-segment { position: absolute; z-index: 1; top: 5px; bottom: 5px; min-width: 2px; border-radius: 2px; background: var(--sc); transition: width 220ms var(--ease-standard), left 220ms var(--ease-standard); }
 .history-subjects { display: grid; gap: 9px; }
 .history-subject-bar { display: flex; height: 7px; overflow: hidden; border-radius: 999px; background: var(--surface-2); }
 .history-subject-bar > span { min-width: 2px; }
@@ -789,7 +807,7 @@ button:focus-visible, input:focus-visible {
   border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--popover-surface); box-shadow: var(--shadow-sm);
   backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2);
-  pointer-events: none; animation: preview-in 160ms var(--ease-standard, ease) both;
+  pointer-events: none; animation: preview-in 160ms var(--ease-standard) both;
 }
 .seg-preview-title { display: flex; align-items: center; gap: 6px; color: var(--text-1); font-size: 13px; }
 .seg-preview-title .pill-dot { background: var(--sc); }
@@ -934,7 +952,7 @@ button:focus-visible, input:focus-visible {
    ========================================================================== */
 
 .dialog-overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.44); z-index: 40;
+  position: fixed; inset: 0; background: var(--overlay-scrim); z-index: 40;
 }
 .dialog-content {
   position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
@@ -962,6 +980,7 @@ button:focus-visible, input:focus-visible {
 .setting-row { display: flex; flex-direction: column; gap: 8px; }
 .setting-label { font-size: 13px; font-weight: 600; color: var(--text-2); }
 .setting-hint { font-size: 12px; color: var(--text-3); margin: 0; }
+.setting-hint-error { color: var(--danger); }
 
 /* 分段控件容器：iOS Settings 风格（中性底 + 白色滑块 + 阴影） */
 .seg-control {
@@ -1022,7 +1041,7 @@ button:focus-visible, input:focus-visible {
 .app.fullscreen-mode .topbar { display: none; }
 .app.fullscreen-mode .main {
   padding: clamp(28px, 6vh, 72px) 16px;
-  transition: transform 260ms cubic-bezier(0.2, 0, 0, 1), padding 260ms cubic-bezier(0.2, 0, 0, 1);
+  transition: transform 260ms var(--ease-standard), padding 260ms var(--ease-standard);
 }
 .app.fullscreen-mode .big-timer { min-height: 1.2em; }
 .app.fullscreen-mode .subject-pill.large { font-size: 22px; padding: 10px 26px; }
@@ -1042,7 +1061,7 @@ button:focus-visible, input:focus-visible {
   -webkit-backdrop-filter: blur(20px) saturate(1.8);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
-  transition: opacity 0.25s ease, background-color 0.28s ease, border-color 0.28s ease;
+  transition: opacity var(--dur-enter) ease, background-color var(--dur-state) ease, border-color var(--dur-state) ease;
 }
 .fs-hint { font-size: 12px; color: var(--text-3); }
 
@@ -1067,14 +1086,14 @@ button:focus-visible, input:focus-visible {
   height: var(--drawer-height); max-height: none; overflow: hidden;
   background: var(--surface-1);
   border-top: 1px solid var(--border);
-  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-up);
   visibility: hidden; opacity: 0; transform: translateY(16px);
   transition:
-    transform 260ms cubic-bezier(0.2, 0, 0, 1),
+    transform 260ms var(--ease-standard),
     opacity 200ms ease,
     visibility 0s linear 260ms,
-    background-color 280ms ease,
-    border-color 280ms ease;
+    background-color var(--dur-state) ease,
+    border-color var(--dur-state) ease;
 }
 .timeline-drawer[data-open='true'] {
   visibility: visible; opacity: 1; transform: translateY(0);

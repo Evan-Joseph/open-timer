@@ -17,6 +17,7 @@ import {
   sha256hex,
 } from './auth.js';
 import { RateLimiter } from './rate-limit.js';
+import { applySecurityHeaders, clientIp } from './headers.js';
 import { ulid } from './util/ulid.js';
 import { hashPassword, verifyPassword } from './password.js';
 import {
@@ -56,17 +57,13 @@ export function createApp(deps: AppDeps): Hono {
 
   app.use('*', async (c, next) => {
     await next();
-    c.header('X-Content-Type-Options', 'nosniff');
-    c.header('X-Frame-Options', 'DENY');
-    c.header('Referrer-Policy', 'no-referrer');
-    c.header('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'");
-    if (config.isProduction) c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    applySecurityHeaders((name, value) => c.header(name, value), { isProduction: config.isProduction });
   });
 
   app.use('/api/*', async (c, next) => {
     const owner = await getOwnerAuth(c, storage);
     const api = owner ?? (await getApiAuth(c, storage));
-    const actor = api?.actor ?? c.req.header('x-forwarded-for') ?? 'anon';
+    const actor = api?.actor ?? clientIp((name) => c.req.header(name));
     if (!apiLimiter.allow(actor, now())) return c.json({ error: 'RATE_LIMITED' }, 429);
     await next();
   });
@@ -85,8 +82,9 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   // CSRF：写请求必须来自同源（Origin 与 Host 匹配）。
+  // OPTIONS 预检不变更状态且真实请求会单独受检，显式豁免，保证公开只读端点的跨域预检可用。
   app.use('/api/*', async (c, next) => {
-    if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
+    if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && c.req.method !== 'OPTIONS') {
       const origin = c.req.header('origin');
       if (origin) {
         const host = c.req.header('host');
@@ -108,7 +106,30 @@ export function createApp(deps: AppDeps): Hono {
     return typeof id === 'string' && id.length > 0 ? id : null;
   }
 
-  /* ---------- 幂等辅助 ---------- */
+  /* ---------- 幂等辅助 ----------
+   * 契约（与 docs/API.md、openapi.yaml 对齐）：
+   * - 所有会话写操作（start/pause/resume/stop/switch/void/note/retime/adjust-start）
+   *   必须携带 Idempotency-Key（8–64 字符），缺失返回 400 IDEMPOTENCY_KEY_REQUIRED。
+   * - 服务端按「端点:键」保存响应 24h；同键重试回放原状态码与原响应体，
+   *   并带 Idempotent-Replay: true（参考 IETF idempotency-key 草案与 Stripe 语义）。
+   * - auth/credentials 端点是连接与凭据管理，不是资源变更，不要求幂等键，
+   *   由限流保护（见 README 安全清单）。
+   */
+
+  const IDEMPOTENCY_TTL_MS = 24 * 3600 * 1000;
+
+  /** 存储格式 v2：{"v":2,"status":N,"body":...}；v1（裸 body）按 200 回放兼容。 */
+  function decodeStoredResponse(responseJson: string): { status: number; body: string } {
+    try {
+      const parsed = JSON.parse(responseJson) as { v?: number; status?: number; body?: unknown };
+      if (parsed && typeof parsed === 'object' && parsed.v === 2 && typeof parsed.status === 'number') {
+        return { status: parsed.status, body: JSON.stringify(parsed.body) };
+      }
+    } catch {
+      /* 非 JSON 的旧记录按 v1 处理 */
+    }
+    return { status: 200, body: responseJson };
+  }
 
   async function withIdempotency(
     c: Context,
@@ -121,15 +142,18 @@ export function createApp(deps: AppDeps): Hono {
     const key = `${endpoint}:${parsed.data}`;
     const existing = await storage.getIdempotentResponse(key);
     if (existing && existing.endpoint === endpoint) {
-      c.status(200);
+      const stored = decodeStoredResponse(existing.responseJson);
+      c.status(stored.status as 200);
       c.header('Idempotent-Replay', 'true');
-      return c.body(existing.responseJson);
+      return c.body(stored.body);
     }
     const result = await fn();
-    const json = JSON.stringify(result.body);
+    const json = JSON.stringify({ v: 2, status: result.status, body: result.body });
     await storage.saveIdempotentResponse(key, endpoint, json, now());
+    // 每次写入顺带清理过期键，避免清理频率依赖 start 单一入口
+    await storage.purgeIdempotentBefore(now() - IDEMPOTENCY_TTL_MS);
     c.status(result.status as 200);
-    return c.body(json);
+    return c.body(JSON.stringify(result.body));
   }
 
   /* ---------- 公共 ---------- */
@@ -157,7 +181,7 @@ export function createApp(deps: AppDeps): Hono {
   const LoginSchema = z.object({ password: z.string().min(1).max(64) });
 
   app.post('/api/v1/auth/login', async (c) => {
-    const ip = c.req.header('x-forwarded-for') ?? 'local';
+    const ip = clientIp((name) => c.req.header(name));
     if (!loginLimiter.allow(ip, now())) return c.json({ error: 'RATE_LIMITED' }, 429);
     const stored = await storage.getOwnerPasswordHash();
     if (stored === null) return c.json({ error: 'NOT_SETUP' }, 409);
@@ -204,8 +228,19 @@ export function createApp(deps: AppDeps): Hono {
   const publicCors = async (c: Context, next: Next) => {
     c.header('Access-Control-Allow-Origin', '*');
     c.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    c.header('Access-Control-Allow-Headers', 'If-None-Match');
     await next();
   };
+
+  // CORS 预检：GET-only 路由不会匹配 OPTIONS，单独注册统一 204。
+  // 产品上跨域仅开放公开只读，Allow-Methods 固定 GET/OPTIONS。
+  app.options('/api/v1/*', (c) => {
+    c.header('Access-Control-Allow-Origin', '*');
+    c.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    c.header('Access-Control-Allow-Headers', 'If-None-Match');
+    c.header('Access-Control-Max-Age', '86400');
+    return c.body(null, 204);
+  });
 
   app.get('/api/v1/subjects', publicCors, (c) =>
     c.json(
@@ -294,7 +329,6 @@ export function createApp(deps: AppDeps): Hono {
         return { status: 409, body: { error: 'ACTIVE_SESSION_EXISTS' } };
       }
       await storage.appendAudit('owner', 'session_start', id, JSON.stringify({ subject_id: session.subjectId }), nowMs);
-      await storage.purgeIdempotentBefore(nowMs - 24 * 3600 * 1000);
       return { status: 201, body: sessionResponse(session) };
     });
   });
@@ -406,53 +440,60 @@ export function createApp(deps: AppDeps): Hono {
 
   const NotePatchSchema = z.object({ note: NoteSchema });
 
-  app.patch('/api/v1/sessions/:id/note', requireOwner(storage), async (c) => {
-    const id0 = paramId(c);
-    if (!id0) return c.json({ error: 'INVALID_ID' }, 400);
-    const id = id0;
-    const body = NotePatchSchema.safeParse(await c.req.json().catch(() => null));
-    if (!body.success) return c.json({ error: 'INVALID_BODY' }, 400);
-    const session = await storage.getSession(id);
-    if (!session) return c.json({ error: 'SESSION_NOT_FOUND' }, 404);
-    if (session.status !== 'stopped') return c.json({ error: 'ILLEGAL_TRANSITION' }, 409);
-    await storage.setSessionNote(id, body.data.note, now());
-    await storage.appendAudit('owner', 'session_note', id, null, now());
-    return c.json(sessionResponse((await storage.getSession(id))!));
-  });
+  app.patch('/api/v1/sessions/:id/note', requireOwner(storage), (c) =>
+    withIdempotency(c, 'note', async () => {
+      const id0 = paramId(c);
+      if (!id0) return { status: 400, body: { error: 'INVALID_ID' } };
+      const id = id0;
+      const body = NotePatchSchema.safeParse(await c.req.json().catch(() => null));
+      if (!body.success) return { status: 400, body: { error: 'INVALID_BODY' } };
+      const session = await storage.getSession(id);
+      if (!session) return { status: 404, body: { error: 'SESSION_NOT_FOUND' } };
+      if (session.status !== 'stopped') return { status: 409, body: { error: 'ILLEGAL_TRANSITION' } };
+      await storage.setSessionNote(id, body.data.note, now());
+      await storage.appendAudit('owner', 'session_note', id, null, now());
+      return { status: 200, body: sessionResponse((await storage.getSession(id))!) };
+    }),
+  );
 
   const RetimeSchema = z.object({ delta_seconds: z.number().int().min(-86400).max(86400), reason: NoteSchema.nullable() });
 
-  app.post('/api/v1/sessions/:id/retime', requireOwner(storage), async (c) => {
-    const id0 = paramId(c);
-    if (!id0) return c.json({ error: 'INVALID_ID' }, 400);
-    const id = id0;
-    const body = RetimeSchema.safeParse(await c.req.json().catch(() => null));
-    if (!body.success) return c.json({ error: 'INVALID_BODY' }, 400);
-    const session = await storage.getSession(id);
-    if (!session) return c.json({ error: 'SESSION_NOT_FOUND' }, 404);
-    if (session.status !== 'stopped') return c.json({ error: 'ILLEGAL_TRANSITION' }, 409);
-    await storage.applyRetime(id, body.data.delta_seconds, body.data.reason, now());
-    return c.json(sessionResponse((await storage.getSession(id))!));
-  });
+  app.post('/api/v1/sessions/:id/retime', requireOwner(storage), (c) =>
+    withIdempotency(c, 'retime', async () => {
+      const id0 = paramId(c);
+      if (!id0) return { status: 400, body: { error: 'INVALID_ID' } };
+      const id = id0;
+      const body = RetimeSchema.safeParse(await c.req.json().catch(() => null));
+      if (!body.success) return { status: 400, body: { error: 'INVALID_BODY' } };
+      const session = await storage.getSession(id);
+      if (!session) return { status: 404, body: { error: 'SESSION_NOT_FOUND' } };
+      if (session.status !== 'stopped') return { status: 409, body: { error: 'ILLEGAL_TRANSITION' } };
+      await storage.applyRetime(id, body.data.delta_seconds, body.data.reason, now());
+      return { status: 200, body: sessionResponse((await storage.getSession(id))!) };
+    }),
+  );
 
   const AdjustStartSchema = z.object({ started_at: z.iso.datetime({ offset: true }), reason: NoteSchema.nullable() });
 
-  app.post('/api/v1/sessions/:id/adjust-start', requireOwner(storage), async (c) => {
-    const id = paramId(c);
-    if (!id) return c.json({ error: 'INVALID_ID' }, 400);
-    const body = AdjustStartSchema.safeParse(await c.req.json().catch(() => null));
-    if (!body.success) return c.json({ error: 'INVALID_BODY' }, 400);
-    const session = await storage.getSession(id);
-    if (!session) return c.json({ error: 'SESSION_NOT_FOUND' }, 404);
-    if (session.status !== 'stopped') return c.json({ error: 'ILLEGAL_TRANSITION' }, 409);
-    try {
-      await storage.adjustSessionStart(id, Date.parse(body.data.started_at), body.data.reason, now());
-    } catch (error) {
-      if ((error as Error).message === 'INVALID_START') return c.json({ error: 'INVALID_START' }, 400);
-      throw error;
-    }
-    return c.json(sessionResponse((await storage.getSession(id))!));
-  });
+  app.post('/api/v1/sessions/:id/adjust-start', requireOwner(storage), (c) =>
+    withIdempotency(c, 'adjust-start', async () => {
+      const id0 = paramId(c);
+      if (!id0) return { status: 400, body: { error: 'INVALID_ID' } };
+      const id = id0;
+      const body = AdjustStartSchema.safeParse(await c.req.json().catch(() => null));
+      if (!body.success) return { status: 400, body: { error: 'INVALID_BODY' } };
+      const session = await storage.getSession(id);
+      if (!session) return { status: 404, body: { error: 'SESSION_NOT_FOUND' } };
+      if (session.status !== 'stopped') return { status: 409, body: { error: 'ILLEGAL_TRANSITION' } };
+      try {
+        await storage.adjustSessionStart(id, Date.parse(body.data.started_at), body.data.reason, now());
+      } catch (error) {
+        if ((error as Error).message === 'INVALID_START') return { status: 400, body: { error: 'INVALID_START' } };
+        throw error;
+      }
+      return { status: 200, body: sessionResponse((await storage.getSession(id))!) };
+    }),
+  );
 
   /* ---------- 查询（公开只读） ---------- */
 
@@ -591,6 +632,10 @@ export function createApp(deps: AppDeps): Hono {
     c.header('Content-Disposition', 'attachment; filename="clock-events.jsonl"');
     return c.body(lines.join('\n') + (lines.length ? '\n' : ''));
   });
+
+  /* ---------- 统一 404：未匹配路径一律 JSON 错误体（含 /api/* 未知端点） ---------- */
+
+  app.notFound((c) => c.json({ error: 'NOT_FOUND' }, 404));
 
   function sessionResponse(s: import('@clock/shared').SessionRow) {
     return {

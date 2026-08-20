@@ -68,8 +68,12 @@ test('横屏标准视口一屏容纳主时钟与时间轴', async ({ page }) => 
   }).format(new Date(state.server_now_ms));
   await expect(page.getByTestId('idle-clock')).toHaveText(expectedTime);
 
+  // Pad/Desktop 横屏共用一套布局：手册要求的四个关键断点全部覆盖，
+  // 首屏不得产生文档滚动，时钟与时间轴都必须完整可见。
   for (const viewport of [
     { width: 1024, height: 640 },
+    { width: 1024, height: 768 },
+    { width: 1180, height: 820 },
     { width: 1280, height: 720 },
     { width: 1440, height: 900 },
   ]) {

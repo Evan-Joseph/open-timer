@@ -32,7 +32,7 @@ const app = createApp({
   rateLimits: process.env.NODE_ENV === 'production' ? undefined : { loginMaxPerMin: 60, apiMaxPerMin: 600 },
 });
 
-// 生产模式托管前端静态产物
+// 生产模式托管前端静态产物；未匹配路径的 JSON 404 由 createApp 内 notFound 统一提供
 const webDist = join(__dirname, '..', '..', 'web', 'dist');
 app.use(
   '/*',
@@ -41,16 +41,9 @@ app.use(
     rewriteRequestPath: (path) => path,
   }),
 );
-app.notFound((c) => {
-  if (c.req.path.startsWith('/api/')) return c.json({ error: 'NOT_FOUND' }, 404);
-  return c.json({ error: 'NOT_FOUND' }, 404);
-});
 
-app.onError((err, c) => {
-  if (c.req.path.startsWith('/api/')) {
-    // 公网错误页不泄漏栈与路径
-    return c.json({ error: 'INTERNAL' }, 500);
-  }
+app.onError((_err, c) => {
+  // 公网错误页不泄漏栈与路径
   return c.json({ error: 'INTERNAL' }, 500);
 });
 

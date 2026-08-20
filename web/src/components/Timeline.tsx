@@ -554,7 +554,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
           >
             {mode === 'track' ? <List size={16} /> : <GanttChart size={16} />}
           </button>}
-          {!historyOpen && <button className="icon-btn" aria-label="前一天" onClick={() => setViewDate(shiftDate(viewDate, -1))}>
+          {!historyOpen && <button className="icon-btn" aria-label="前一天" title="前一天" onClick={() => setViewDate(shiftDate(viewDate, -1))}>
             <ChevronLeft size={16} />
           </button>}
           {!historyOpen && (isToday ? (
@@ -566,7 +566,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
               回今天
             </button>
           ))}
-          {!historyOpen && <button className="icon-btn" aria-label="后一天" onClick={() => setViewDate(shiftDate(viewDate, 1))} disabled={isToday}>
+          {!historyOpen && <button className="icon-btn" aria-label="后一天" title="后一天" onClick={() => setViewDate(shiftDate(viewDate, 1))} disabled={isToday}>
             <ChevronRight size={16} />
           </button>}
           <button

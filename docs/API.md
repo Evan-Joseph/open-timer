@@ -9,7 +9,7 @@ Base URL：`https://clock.4c666.top`
 - **写操作：必须登录。** 调用 `POST /api/v1/auth/login`（6 位 PIN）换取 `clock_session` cookie，之后所有写请求携带该 cookie（`fetch` 用 `credentials: 'same-origin'` / `curl -b cookies.txt`）。未登录写操作一律 `401 UNAUTHORIZED`。
 - ⚠️ **公开只读意味着公网上任何人可读该数据**：学习时长/科目/备注不是机密，但请勿在备注中写入敏感信息。
 - 时间口径：所有存储为 UTC；日期参数与汇总一律按 **Asia/Shanghai（固定 UTC+8）**。客户端不要自行换算。
-- 幂等性：所有写操作要求请求头 `Idempotency-Key`（客户端生成的任意唯一串）。同 key 重试不会产生重复副作用，并返回 `Idempotent-Replay: true`。
+- 幂等性：所有**会话写操作**（start / pause / resume / stop / switch / void / note / retime / adjust-start）要求请求头 `Idempotency-Key`（8–64 字符，客户端生成 UUID）。服务端按「端点:键」保存响应 24h；同键重试不产生重复副作用，回放**原状态码与原响应体**，并返回 `Idempotent-Replay: true`；缺键返回 400 `IDEMPOTENCY_KEY_REQUIRED`。auth/credentials 端点（setup/login/logout、凭据创建与撤销）是连接与凭据管理，不要求幂等键，由限流保护。
 - 缓存：`daily-summary` 支持 `If-None-Match` + ETag，数据未变返回 `304`，避免重复拉取。
 
 ## 只读端点（公开）
@@ -123,10 +123,10 @@ Base URL：`https://clock.4c666.top`
 | `revision` | 事件序号快照；同 date/revision 响应字节级确定，可作缓存键 |
 | `by_subject[].active_seconds` | 该科目当日净学习秒数（已按 Asia/Shanghai 日窗裁剪） |
 | `aggregates` | math / english / **408（四模块之和）** / politics |
-| `sessions[].status` | `stopped`=正常结束；`voided`=已撤回（不计入任何汇总） |
+| `sessions[].status` | `stopped`=正常结束。`voided` 会话被**完全排除**，不会出现在 `sessions` 数组与任何汇总中，仅通过 `adjustments_or_revocations` 可见 |
 | `sessions[].active_seconds` | 该会话在**当日窗口内**的净秒数（跨午夜会话两侧分别入账） |
 | `running_session` | 存在时表示当前正在计时，`active_seconds` 为截至 `generated_at` 的暂算值 |
-| `adjustments_or_revocations` | 当日撤回/改时审计摘要 |
+| `adjustments_or_revocations` | 审计摘要：仅收录**会话开始于查询日窗口内**的撤回/改时条目（跨日会话的次日修正不出现在任一日，引用时以 events.jsonl 为全量依据） |
 
 ### 5. `GET /api/v1/sessions?date=YYYY-MM-DD`
 
@@ -170,20 +170,23 @@ Base URL：`https://clock.4c666.top`
 | POST | `/api/v1/sessions/:id/switch` | 换科目：结束当前段并开启同会话新科目段，body `{ "subject_id": "..." }` |
 | POST | `/api/v1/sessions/:id/void` | 撤回（误记），body `{ "reason": "可选" }` |
 | PATCH | `/api/v1/sessions/:id/note` | 更新备注，body `{ "note": "..." }`（≤200 字） |
-| POST | `/api/v1/sessions/:id/retime` | 修正时长（审计留痕），body `{ "delta_seconds": -300, "reason": "可选" }` |
+| POST | `/api/v1/sessions/:id/retime` | 修正时长（审计留痕），body `{ "delta_seconds": -300, "reason": "文字或 null" }`（±24h 内；reason 键必须存在，可为 null） |
+| POST | `/api/v1/sessions/:id/adjust-start` | 起点补录：把已停止会话的开始时间向前调整（同步首段与净时长），body `{ "started_at": "ISO8601", "reason": "文字或 null" }`；必须早于首段结束时刻，否则 400 `INVALID_START` |
 | POST | `/api/v1/auth/logout` | 登出 |
 
-所有写请求都需携带 `Idempotency-Key` 头（示例：`curl -H "Idempotency-Key: $(uuidgen)"`）。
+上表会话写操作都需携带 `Idempotency-Key` 头（示例：`curl -H "Idempotency-Key: $(uuidgen)"`）。auth 与 credentials 端点不要求该头。
 
 ## 错误码
 
 | 状态码 | error | 含义 |
 |---|---|---|
-| 400 | `INVALID_BODY` / `INVALID_DATE` / `TIMEZONE_MUST_BE_ASIA_SHANGHAI` / `INVALID_ID` / `INVALID_DELTA` | 参数不合法 |
+| 400 | `INVALID_BODY` / `INVALID_DATE` / `INVALID_ID` / `TIMEZONE_MUST_BE_ASIA_SHANGHAI` / `IDEMPOTENCY_KEY_REQUIRED` / `INVALID_START` | 参数不合法或缺幂等键；起点补录时刻无效 |
 | 401 | `UNAUTHORIZED` / `INVALID_CREDENTIALS` | 未登录 / 密码错误 |
-| 404 | `SESSION_NOT_FOUND` | 会话不存在 |
-| 409 | `ACTIVE_SESSION_EXISTS` / `ILLEGAL_TRANSITION` / `ALREADY_SETUP` / `NOT_SETUP` | 状态冲突 |
-| 429 | `RATE_LIMITED` | 登录尝试过频 |
+| 403 | `CSRF_REJECTED` | 写请求 Origin 与 Host 不同源 |
+| 404 | `SESSION_NOT_FOUND` / `NOT_FOUND` | 会话不存在 / 未知路径 |
+| 409 | `ACTIVE_SESSION_EXISTS` / `ILLEGAL_TRANSITION` / `ALREADY_SETUP` / `NOT_SETUP` / `NOT_ACTIVE_SESSION` | 状态冲突 |
+| 429 | `RATE_LIMITED` | 登录或 API 请求过频 |
+| 500 | `INTERNAL` | 服务端内部错误（不泄漏栈与路径） |
 
 错误响应体：`{ "error": "CODE" }`。
 
