@@ -641,9 +641,9 @@ test.describe('时间轴尺度与流水账视图', () => {
 });
 
 test.describe('全屏沉浸模式', () => {
-  test('设置内入口可进入全屏；主 UI 无全屏按钮；布局自动切换', async ({ page }) => {
+  test('设置内入口可进入全屏；全屏与窗口模式共用同一套布局', async ({ page }) => {
     await doSetup(page);
-    // 主界面没有全屏按钮（2026-08-20 起入口只在设置内）
+    // 主界面没有全屏按钮（入口只在设置内）
     await expect(page.getByRole('button', { name: '全屏沉浸模式' })).toHaveCount(0);
     await expect(page.getByTestId('settings-fullscreen-btn')).toHaveCount(0);
 
@@ -653,11 +653,14 @@ test.describe('全屏沉浸模式', () => {
     await page.waitForTimeout(600);
     const fs = await page.evaluate(() => Boolean(document.fullscreenElement));
     if (fs) {
-      // 成功后设置弹窗关闭，布局切换为全屏模式
+      // 成功后设置弹窗关闭
       await expect(page.getByTestId('settings-fullscreen-btn')).toHaveCount(0);
-      // display:none 隐藏但保留 DOM：断言不可见而非不存在
-      await expect(page.locator('.timeline')).not.toBeVisible();
-      await expect(page.locator('.topbar')).not.toBeVisible();
+      // 共用一套代码：全屏只是视口变大，顶栏与时间轴原样保留，
+      // 不存在第二套全屏 UI（无控制条、无抽屉）
+      await expect(page.locator('.topbar')).toBeVisible();
+      await expect(page.locator('.timeline')).toBeVisible();
+      await expect(page.locator('.fs-controls')).toHaveCount(0);
+      await expect(page.locator('.timeline-drawer')).toHaveCount(0);
       // headless 下 Esc 可能不触发退出，用程序化退出
       await page.evaluate(() => document.exitFullscreen().catch(() => {}));
       await page.waitForTimeout(600);
@@ -668,35 +671,6 @@ test.describe('全屏沉浸模式', () => {
       await expect(page.getByText('浏览器拒绝了全屏请求')).toBeVisible();
       await page.keyboard.press('Escape');
     }
-  });
-});
-
-test.describe('全屏时间轴开关', () => {
-  test('全屏下默认隐藏时间轴，可通过控制条展开与收起', async ({ page }) => {
-    await doSetup(page);
-    await page.evaluate(() => document.documentElement.requestFullscreen().catch(() => {}));
-    await page.waitForTimeout(600);
-    const fs = await page.evaluate(() => Boolean(document.fullscreenElement));
-    if (!fs) return; // headless 不支持全屏则跳过断言
-
-    // 默认隐藏时间轴，显示控制条
-    await expect(page.locator('.timeline')).not.toBeVisible();
-    await expect(page.getByRole('button', { name: '展开时间轴' })).toBeVisible();
-
-    // 展开
-    await page.getByRole('button', { name: '展开时间轴' }).click();
-    await expect(page.locator('.timeline')).toBeVisible();
-
-    // 展开后控制条移到顶部（top:16px），不再遮挡时间轴内容
-    const ctrlTop = await page.locator('.fs-controls').evaluate((el) => getComputedStyle(el).top);
-    expect(ctrlTop).toBe('16px');
-
-    // 收起
-    await page.getByRole('button', { name: '收起时间轴' }).click();
-    await expect(page.locator('.timeline')).not.toBeVisible();
-
-    await page.evaluate(() => document.exitFullscreen().catch(() => {}));
-    await page.waitForTimeout(400);
   });
 });
 

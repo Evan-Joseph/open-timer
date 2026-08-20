@@ -121,7 +121,7 @@ test('1024x640 中 7 天泳道不触发页面滚动', async ({ page }) => {
   ).toBeLessThanOrEqual(historyClearance.viewportBottom);
 });
 
-test('全屏逾期时主区与时间轴共享告警状态', async ({ page }) => {
+test('全屏与窗口模式共用同一布局，逾期告警状态一致', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await enterReadyState(page);
   await recordRecentSession(page, '数学二');
@@ -130,50 +130,32 @@ test('全屏逾期时主区与时间轴共享告警状态', async ({ page }) => 
   await page.waitForTimeout(400);
   test.skip(!(await page.evaluate(() => Boolean(document.fullscreenElement))), '浏览器不支持全屏');
 
-  await page.getByRole('button', { name: '展开时间轴' }).click();
+  // 共用一套代码：全屏下顶栏、主时钟、时间轴原样可见，没有第二套全屏 UI
+  await expect(page.locator('.topbar')).toBeVisible();
+  await expect(page.locator('.timeline')).toBeVisible();
+  await expect(page.locator('.fs-controls')).toHaveCount(0);
+  await expect(page.locator('.timeline-drawer')).toHaveCount(0);
+
+  // 告警状态沿用窗口模式的同一套 CSS 变量
   await page.locator('.clockface').evaluate((element) => element.setAttribute('data-away-level', '3'));
   const state = await page.locator('.app').evaluate((element) => {
     const app = getComputedStyle(element);
-    const drawer = getComputedStyle(document.querySelector('.timeline-drawer')!);
     return {
       level: document.querySelector('.clockface')?.getAttribute('data-away-level'),
       wash: app.getPropertyValue('--alert-wash').trim(),
-      drawerBackground: drawer.backgroundColor,
+      timelineBackground: getComputedStyle(document.querySelector('.timeline')!).backgroundColor,
     };
   });
   expect(state.level).toBe('3');
   expect(state.wash).not.toBe('');
   expect(state.wash).not.toBe('transparent');
-  expect(state.drawerBackground).not.toBe('rgb(255, 255, 255)');
+  expect(state.timelineBackground).not.toBe('rgb(255, 255, 255)');
 
-  await expect(page.locator('.timeline-drawer')).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, 0)');
-  const geometry = await page.evaluate(() => {
-    const clock = document.querySelector('.clockface')!.getBoundingClientRect();
-    const drawer = document.querySelector('.timeline-drawer')!.getBoundingClientRect();
-    const controls = document.querySelector('.fs-controls')!.getBoundingClientRect();
-    const main = document.querySelector('.main')!;
-    return {
-      clockTop: clock.top,
-      clockBottom: clock.bottom,
-      drawerTop: drawer.top,
-      controlsTop: controls.top,
-      controlsRight: controls.right,
-      controlsBottom: controls.bottom,
-      controlsLeft: controls.left,
-      clockRight: clock.right,
-      clockLeft: clock.left,
-      mainPaddingBottom: getComputedStyle(main).paddingBottom,
-    };
-  });
-  expect(geometry.clockTop).toBeGreaterThanOrEqual(0);
-  expect(geometry.clockBottom).toBeLessThanOrEqual(geometry.drawerTop + 1);
-  expect(geometry.controlsBottom).toBeLessThanOrEqual(geometry.drawerTop);
-  const controlsOverlapClock = !(
-    geometry.controlsRight <= geometry.clockLeft
-    || geometry.controlsLeft >= geometry.clockRight
-    || geometry.controlsBottom <= geometry.clockTop
-    || geometry.controlsTop >= geometry.clockBottom
-  );
-  expect(controlsOverlapClock).toBe(false);
+  // 一屏容纳，无文档滚动
   await expectDocumentFits(page);
+  await expectWithinViewport(page, '.clockface');
+  await expectWithinViewport(page, '.timeline');
+
+  await page.evaluate(() => document.exitFullscreen().catch(() => {}));
+  await page.waitForTimeout(400);
 });

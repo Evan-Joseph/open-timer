@@ -617,9 +617,7 @@ button:focus-visible, input:focus-visible {
 }
 .main,
 .topbar,
-.timeline,
-.timeline-drawer,
-.fs-controls {
+.timeline {
   transition-property: background-color, border-color, box-shadow, transform, padding, opacity;
   transition-duration: var(--dur-state);
   transition-timing-function: ease;
@@ -630,15 +628,8 @@ button:focus-visible, input:focus-visible {
   border-color: var(--alert-border);
 }
 .app:has(.clockface[data-away-level='2']) .timeline,
-.app:has(.clockface[data-away-level='3']) .timeline,
-.app:has(.clockface[data-away-level='2']) .timeline-drawer,
-.app:has(.clockface[data-away-level='3']) .timeline-drawer {
+.app:has(.clockface[data-away-level='3']) .timeline {
   background: color-mix(in srgb, var(--alert-wash) 72%, var(--bg-elevated));
-  border-color: var(--alert-border);
-}
-.app:has(.clockface[data-away-level='2']) .fs-controls,
-.app:has(.clockface[data-away-level='3']) .fs-controls {
-  background: color-mix(in srgb, var(--alert-wash) 68%, var(--material));
   border-color: var(--alert-border);
 }
 .timeline-head {
@@ -1031,76 +1022,6 @@ button:focus-visible, input:focus-visible {
 }
 
 /* ==========================================================================
-   全屏沉浸模式
-   ========================================================================== */
-
-.app.fullscreen-mode {
-  --drawer-height: min(45dvh, 360px);
-  grid-template-rows: minmax(0, 1fr);
-}
-.app.fullscreen-mode .topbar { display: none; }
-.app.fullscreen-mode .main {
-  padding: clamp(28px, 6vh, 72px) 16px;
-  transition: transform 260ms var(--ease-standard), padding 260ms var(--ease-standard);
-}
-.app.fullscreen-mode .big-timer { min-height: 1.2em; }
-.app.fullscreen-mode .subject-pill.large { font-size: 22px; padding: 10px 26px; }
-/* 全屏空闲态：日期/胶囊/提示随主视觉放大，保持层级比例 */
-.app.fullscreen-mode .idle-date { font-size: 22px; }
-.app.fullscreen-mode .subject-chip { padding: 10px 18px; font-size: 15px; }
-.app.fullscreen-mode .subject-picker { gap: 12px; margin-top: 12px; }
-.app.fullscreen-mode .today-hint { font-size: 15px; }
-
-.fs-controls {
-  position: fixed; top: 16px; right: 16px;
-  z-index: 30;
-  display: flex; align-items: center; gap: 14px;
-  padding: 8px 16px; border-radius: 999px;
-  background: var(--material);
-  backdrop-filter: blur(20px) saturate(1.8);
-  -webkit-backdrop-filter: blur(20px) saturate(1.8);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow);
-  transition: opacity var(--dur-enter) ease, background-color var(--dur-state) ease, border-color var(--dur-state) ease;
-}
-.fs-hint { font-size: 12px; color: var(--text-3); }
-
-/* 抽屉打开后为主时钟保留真实可用行，避免内容变高时被固定 transform 推出视口。 */
-.app.fullscreen-mode.fs-timeline-open {
-  grid-template-rows: minmax(0, calc(100dvh - var(--drawer-height))) var(--drawer-height);
-}
-.app.fullscreen-mode.fs-timeline-open .main {
-  --clock-gap: 4px;
-  grid-row: 1;
-  padding: 10px 16px;
-  transform: none;
-}
-.app.fullscreen-mode.fs-timeline-open .idle-date { font-size: 16px; }
-.app.fullscreen-mode.fs-timeline-open .subject-picker { gap: 6px; margin-top: 2px; }
-.app.fullscreen-mode.fs-timeline-open .subject-chip { padding: 6px 11px; font-size: 13px; }
-.app.fullscreen-mode.fs-timeline-open .away-slot { min-height: 28px; }
-
-/* 全屏时间轴抽屉：底部滑出，收起时隐藏（visibility 同步，保证可访问性树一致） */
-.timeline-drawer {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 15;
-  height: var(--drawer-height); max-height: none; overflow: hidden;
-  background: var(--surface-1);
-  border-top: 1px solid var(--border);
-  box-shadow: var(--shadow-up);
-  visibility: hidden; opacity: 0; transform: translateY(16px);
-  transition:
-    transform 260ms var(--ease-standard),
-    opacity 200ms ease,
-    visibility 0s linear 260ms,
-    background-color var(--dur-state) ease,
-    border-color var(--dur-state) ease;
-}
-.timeline-drawer[data-open='true'] {
-  visibility: visible; opacity: 1; transform: translateY(0);
-  transition-delay: 0s;
-}
-
-/* ==========================================================================
    动效
    ========================================================================== */
 
@@ -1183,7 +1104,7 @@ button:active:not(:disabled) { transform: scale(0.98); }
   .timeline-empty-inline { top: 46px; }
 }
 
-.app:not(.fullscreen-mode):has(.history-strip) {
+.app:has(.history-strip) {
   grid-template-rows: var(--topbar-height) minmax(260px, calc(40.4dvh + 4px)) minmax(0, 1fr);
 }
 .app:has(.history-strip) .main { padding-block: 6px; }

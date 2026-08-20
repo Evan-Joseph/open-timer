@@ -6,16 +6,13 @@ import AuthGate from './components/AuthGate.js';
 import ClockFace from './components/ClockFace.js';
 import Timeline from './components/Timeline.js';
 import SettingsDialog from './components/SettingsDialog.js';
-import { Settings, GanttChart, List } from 'lucide-react';
+import { Settings } from 'lucide-react';
 
 export default function App() {
   const store = useClockStore();
   const settings = useSettings();
   const animationsEnabled = useAnimationsEnabled();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  /** 全屏模式下时间轴是否展开 */
-  const [fsShowTimeline, setFsShowTimeline] = useState(false);
   const [theme, setTheme] = useState<string>(() => localStorage.getItem('clock-theme') || 'auto');
 
   // 主题应用
@@ -77,25 +74,9 @@ export default function App() {
     };
   }, [settings.ambientKind]);
 
-  // 自动识别 DOM Fullscreen 与浏览器自身全屏（如 F11），不再由应用主动接管全屏。
-  useEffect(() => {
-    const onFs = () => {
-      const browserFullscreen = window.matchMedia('(display-mode: fullscreen)').matches;
-      setIsFullscreen(Boolean(document.fullscreenElement) || browserFullscreen);
-    };
-    onFs();
-    document.addEventListener('fullscreenchange', onFs);
-    window.addEventListener('resize', onFs);
-    return () => {
-      document.removeEventListener('fullscreenchange', onFs);
-      window.removeEventListener('resize', onFs);
-    };
-  }, []);
-
-  // 退出全屏时恢复时间轴显示状态
-  useEffect(() => {
-    if (!isFullscreen) setFsShowTimeline(false);
-  }, [isFullscreen]);
+  // 全屏（2026-08-20 决策）：Pad/Desktop/全屏共用同一套布局与代码。
+  // 进入全屏只是视口变大，顶栏、主时钟、时间轴原样保留，尺寸由既有的
+  // dvh/clamp 响应式规则自适应；不再维护 fullscreen-mode 分支、控制条或抽屉。
 
   if (store.phase === 'loading') {
     return (
@@ -110,7 +91,7 @@ export default function App() {
   }
 
   return (
-    <div className={`app ${isFullscreen ? 'fullscreen-mode' : ''} ${fsShowTimeline ? 'fs-timeline-open' : ''}`}>
+    <div className="app">
       <header className="topbar material">
         {/* 品牌名已按 2026-08-20 决策隐藏：顶栏只保留状态点与日期；
             标签页标题（document.title）与 index.html <title> 仍承担识别职责 */}
@@ -137,28 +118,7 @@ export default function App() {
         <ClockFace store={store} />
       </main>
 
-      {isFullscreen && (
-        <div className="fs-controls">
-          <button
-            className="fs-control-btn"
-            onClick={() => setFsShowTimeline((v) => !v)}
-            aria-label={fsShowTimeline ? '收起时间轴' : '展开时间轴'}
-            title={fsShowTimeline ? '收起时间轴' : '展开时间轴'}
-          >
-            {fsShowTimeline ? <List size={15} /> : <GanttChart size={15} />}
-            <span>{fsShowTimeline ? '收起时间轴' : '展开时间轴'}</span>
-          </button>
-          <span className="fs-hint">全屏显示</span>
-        </div>
-      )}
-
-      {isFullscreen ? (
-        <div className="timeline-drawer" data-open={fsShowTimeline} aria-hidden={!fsShowTimeline}>
-          <Timeline store={store} />
-        </div>
-      ) : (
-        <Timeline store={store} />
-      )}
+      <Timeline store={store} />
 
       <SettingsDialog
         open={settingsOpen}
