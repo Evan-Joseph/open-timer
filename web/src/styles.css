@@ -73,6 +73,26 @@
   --dur-enter: 0.25s;
   --dur-state: 0.28s;
 
+  /* 间距节奏：4pt 底 / 8pt 节奏（HIG、Refactoring UI）。新增间距统一从这里取。 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* 字级阶梯（HIG/M3 类型层级）：正文 15、标题 17、时间轴 12–14；
+     大数字不走此表，用 dvh clamp（见 .idle-clock / .big-timer）。 */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-base: 14px;
+  --fs-lg: 15px;
+  --fs-xl: 17px;
+  --fs-2xl: 22px;
+  --fs-3xl: 28px;
+
   /* 中文优先 Noto Sans SC（跨平台一致）；数字/时间用 --font-num 保持系统 SF + tabular */
   --font: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', sans-serif;
   --font-num: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
@@ -232,6 +252,8 @@ button:focus-visible, input:focus-visible {
 }
 .icon-btn:hover { background: var(--surface-2); color: var(--text-1); }
 .icon-btn:active:not(:disabled) { opacity: 0.6; }
+/* 激活态（如「近 7 天回顾」展开时）：与 hover 同一视觉，给出持续选中反馈 */
+.icon-btn.selected { background: var(--surface-2); color: var(--text-1); }
 
 /* 文字按钮：无背景，accent 色 */
 .text-btn {
@@ -638,13 +660,19 @@ button:focus-visible, input:focus-visible {
   min-height: 24px;
 }
 .timeline-title { font-size: 14px; font-weight: 600; margin: 0; }
+/* 分段控件紧凑变体（时间轴头部）：与 .seg-control 同一视觉配方
+   （灰底容器 + 白块选中 + 阴影），仅尺寸降档；容器圆角同为 --radius。 */
 .timeline-scale {
-  display: flex; width: max-content; margin: 0 auto 10px; padding: 2px;
-  border: 1px solid var(--border); border-radius: calc(var(--radius-sm) + 2px); background: var(--surface-2);
+  display: flex; align-items: center; gap: 2px; padding: 2px;
+  margin-right: 8px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2);
+}
+[data-theme='dark'] .timeline-scale {
+  background: color-mix(in srgb, var(--surface-2) 88%, white 12%);
 }
 .timeline-scale button {
-  min-width: 68px; height: 28px; padding: 0 10px; border: 0; border-radius: var(--radius-sm);
-  color: var(--text-2); background: transparent; font: inherit; font-size: 12px;
+  min-width: 40px; height: 24px; padding: 0 10px; border: 0; border-radius: var(--radius-sm);
+  color: var(--text-2); background: transparent; font: inherit; font-size: 12px; line-height: 1;
   transition: color 160ms var(--ease-standard), background-color 160ms var(--ease-standard), box-shadow 160ms var(--ease-standard);
 }
 .timeline-scale button:hover { color: var(--text-1); }
@@ -1083,7 +1111,6 @@ button:active:not(:disabled) { transform: scale(0.98); }
   .switch-subject { margin-top: 4px; }
   .timeline { padding-block: 9px 6px; }
   .timeline-head { margin-bottom: 4px; }
-  .timeline-scale { margin-bottom: 4px; }
   .quiet-period { top: 22px; height: 32px; }
   .seg { top: 28px; }
   .now-line { top: 22px; bottom: 8px; }
@@ -1100,7 +1127,6 @@ button:active:not(:disabled) { transform: scale(0.98); }
   .away-slot { min-height: 30px; }
   .away-line { padding-block: 4px; font-size: 13px; }
   .control-btn, .control-btn.resume { width: 48px; height: 48px; }
-  .timeline-scale button { height: 24px; }
   .timeline-empty-inline { top: 46px; }
 }
 

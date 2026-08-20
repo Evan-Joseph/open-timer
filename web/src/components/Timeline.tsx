@@ -545,6 +545,27 @@ export default function Timeline({ store }: { store: ClockStore }) {
           {!historyOpen && totalSeconds > 0 && <span className="timeline-total"> · 共 {formatDurationZh(totalSeconds)}</span>}
         </h2>
         <div className="timeline-nav">
+          {!historyOpen && mode === 'track' && (
+            <div className="timeline-scale" role="radiogroup" aria-label="时间轴尺度">
+              {([
+                ['default', '默认'],
+                ['full-day', '全天'],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  role="radio"
+                  aria-checked={scale === value}
+                  className={scale === value ? 'selected' : ''}
+                  onClick={() => {
+                    setScale(value);
+                    localStorage.setItem('clock-timeline-scale', value);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           {!historyOpen && <button
             className="icon-btn"
             aria-label={mode === 'track' ? '切换到流水账视图' : '切换到时间轴视图'}
@@ -668,28 +689,6 @@ export default function Timeline({ store }: { store: ClockStore }) {
         </motion.div>
       )}
       </AnimatePresence>
-
-      {!historyOpen && mode === 'track' && (
-        <div className="timeline-scale" role="radiogroup" aria-label="时间轴尺度">
-          {([
-            ['default', '默认'],
-            ['full-day', '全天'],
-          ] as const).map(([value, label]) => (
-            <button
-              key={value}
-              role="radio"
-              aria-checked={scale === value}
-              className={scale === value ? 'selected' : ''}
-              onClick={() => {
-                setScale(value);
-                localStorage.setItem('clock-timeline-scale', value);
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
 
       <AnimatePresence mode="wait" initial={false}>
       {!historyOpen && <motion.div
