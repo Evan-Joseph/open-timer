@@ -18,7 +18,7 @@ import {
 } from './auth.js';
 import { RateLimiter } from './rate-limit.js';
 import { applySecurityHeaders, clientIp } from './headers.js';
-import { eventToLine } from './backup.js';
+import { eventToLine, runBackup } from './backup.js';
 import { ulid } from './util/ulid.js';
 import { hashPassword, verifyPassword } from './password.js';
 import {
@@ -30,6 +30,7 @@ import {
   shanghaiToday,
   toIso,
   computeActiveSeconds,
+  isCountedSegment,
 } from '@clock/shared';
 
 const SUBJECT_ID_ENUM = SUBJECTS.map((s) => s.id) as [string, ...string[]];
@@ -44,6 +45,8 @@ export interface AppDeps {
   now?: () => number;
   /** 限流参数覆盖（测试注入；生产默认登录 5/min，API 300/min） */
   rateLimits?: { loginMaxPerMin?: number; apiMaxPerMin?: number };
+  /** R2 备份桶（仅 Workers 环境注入；Node 本地无 R2 时手动备份端点返回 501） */
+  backupBucket?: import('./backup.js').BackupBucket;
 }
 
 export function createApp(deps: AppDeps): Hono {
@@ -273,12 +276,16 @@ export function createApp(deps: AppDeps): Hono {
       generatedAtMs: nowMs,
       activeSession: active?.session ?? null,
       activeSegments: active?.segments ?? [],
+      minSegmentMs: config.minSegmentMs,
     });
-    // UI 需要会话总净时长（不按日裁剪）：直接从段计算
+    // UI 需要会话总净时长（不按日裁剪）：直接从段计算（误触片段同样过滤）
     let activeTotalSeconds: number | null = null;
     let openSegmentStart: string | null = null;
     if (active) {
-      activeTotalSeconds = computeActiveSeconds(active.segments, nowMs);
+      activeTotalSeconds = computeActiveSeconds(
+        active.segments.filter((seg) => isCountedSegment(seg, config.minSegmentMs)),
+        nowMs,
+      );
       const open = active.segments.find((s) => s.endedAtMs === null);
       openSegmentStart = open ? toIso(open.startedAtMs) : null;
     }
@@ -532,6 +539,8 @@ export function createApp(deps: AppDeps): Hono {
       let secs = 0;
       const clippedSegs: Array<{ started_at: string; ended_at: string | null }> = [];
       for (const seg of segs) {
+        // 误触过滤：短于阈值的已关闭片段不计入、不下发（开放段不受影响）
+        if (!isCountedSegment(seg, config.minSegmentMs)) continue;
         const rawEnd = seg.endedAtMs ?? nowMs;
         const cs = Math.max(seg.startedAtMs, startMs);
         const ce = Math.min(rawEnd, endMs);
@@ -595,6 +604,7 @@ export function createApp(deps: AppDeps): Hono {
       generatedAtMs: nowMs,
       activeSession: active?.session ?? null,
       activeSegments: active?.segments ?? [],
+      minSegmentMs: config.minSegmentMs,
     });
     if (etag) c.header('ETag', etag);
     return c.json(summary);
@@ -651,6 +661,34 @@ export function createApp(deps: AppDeps): Hono {
     c.header('Content-Type', 'application/x-ndjson; charset=utf-8');
     c.header('Content-Disposition', 'attachment; filename="clock-events.jsonl"');
     return c.body(lines.join('\n') + (lines.length ? '\n' : ''));
+  });
+
+  /* ---------- 手动备份（owner）：按需触发一次 R2 备份，返回结果 ---------- */
+
+  app.post('/api/v1/admin/backup', requireOwner(storage), async (c) => {
+    if (!deps.backupBucket) return c.json({ error: 'BACKUP_NOT_CONFIGURED' }, 501);
+    const result = await runBackup(storage, deps.backupBucket, now());
+    return c.json({ ok: true, ...result });
+  });
+
+  /* ---------- 用户 UI 偏好（owner，多端同步） ---------- */
+
+  app.get('/api/v1/prefs', requireOwner(storage), async (c) => {
+    const row = await storage.getPrefs();
+    if (!row) return c.json({ prefs: null, updated_at_ms: 0 });
+    return c.json({ prefs: JSON.parse(row.prefsJson), updated_at_ms: row.updatedAtMs });
+  });
+
+  // 偏好是整体覆盖写（last-write-wins）；非会话写操作，不要求幂等键。
+  // 体积上限防滥用；键集合由客户端约定，服务端不解释。返回 updated_at_ms 供客户端防回滚。
+  app.put('/api/v1/prefs', requireOwner(storage), async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return c.json({ error: 'INVALID_BODY' }, 400);
+    const json = JSON.stringify(body);
+    if (json.length > 2048) return c.json({ error: 'INVALID_BODY' }, 400);
+    const nowMs = now();
+    await storage.setPrefs(json, nowMs);
+    return c.json({ ok: true, updated_at_ms: nowMs });
   });
 
   /* ---------- 统一 404：未匹配路径一律 JSON 错误体（含 /api/* 未知端点） ---------- */

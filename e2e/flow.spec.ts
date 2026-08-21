@@ -56,6 +56,17 @@ async function doSetup(page: Page) {
       if ((await continueBtn.count()) > 0) await continueBtn.click();
     }
   }
+  // 测试隔离：偏好是服务端多端同步的，上一个用例的深色/视图模式会泄漏给后续用例。
+  // 每个用例开始时重置为默认偏好（theme=auto 等）。
+  await page.request.put('/api/v1/prefs', {
+    data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false },
+  });
+  await page.evaluate(() => {
+    localStorage.setItem('clock-theme', 'auto');
+    localStorage.setItem('clock-timeline-scale', 'default');
+    localStorage.setItem('clock-timeline-mode', 'track');
+    document.documentElement.setAttribute('data-theme', 'light');
+  });
   await expect(page.getByTestId('idle-clock')).toBeVisible();
 }
 
@@ -748,11 +759,11 @@ test.describe('时间轴 popover 编辑备注', () => {
     // 再等 sessions 状态更新为 stopped（片段 stopped 标记依赖 sessions 数据）
     await page.waitForTimeout(1200);
 
-    // 打开 popover → 填备注 → 保存
+    // 打开 popover → 填备注 → Enter 自动保存（无 Save 按钮，参照 SP inline-markdown）
     await page.locator('.seg-hit').last().click();
     await expect(page.getByTestId('seg-popover')).toBeVisible();
     await page.getByTestId('popover-note-input').fill('精读真题 2010 年');
-    await page.getByTestId('popover-save-note').click();
+    await page.getByTestId('popover-note-input').press('Enter');
 
     // 保存后 popover 关闭，时间轴刷新后再次打开可见备注
     await expect(page.getByTestId('seg-popover')).toHaveCount(0);

@@ -441,4 +441,20 @@ export class D1Storage implements Storage {
     const { results } = await this.db.prepare('SELECT * FROM session ORDER BY started_at_ms').all<Record<string, unknown>>();
     return results.map(rowToSession);
   }
+
+  /* ---- 用户 UI 偏好 ---- */
+
+  async getPrefs(): Promise<{ prefsJson: string; updatedAtMs: number } | null> {
+    const r = await this.db
+      .prepare('SELECT prefs_json, updated_at_ms FROM user_pref WHERE id = 1')
+      .first<{ prefs_json: string; updated_at_ms: number }>();
+    return r ? { prefsJson: r.prefs_json, updatedAtMs: r.updated_at_ms } : null;
+  }
+
+  async setPrefs(prefsJson: string, nowMs: number): Promise<void> {
+    await this.db
+      .prepare('INSERT INTO user_pref (id, prefs_json, updated_at_ms) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET prefs_json=excluded.prefs_json, updated_at_ms=excluded.updated_at_ms')
+      .bind(prefsJson, nowMs)
+      .run();
+  }
 }

@@ -199,9 +199,37 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     await store.stop(null);
   };
 
+  /* ---------- 空格键主控（FocusTide/Pomotroid 共识：沉浸应用第一快捷键） ----------
+     Space = 开始（空闲）/ 暂停（运行）/ 继续（暂停）；结束反馈卡上 = 确认关闭。
+     输入框、弹层打开、修饰键组合时让位。 */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return;
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+      if (document.querySelector('[role="dialog"]')) return; // 设置/回顾弹层打开时让位
+      e.preventDefault();
+      if (lastStopped && !active) {
+        // 结束反馈卡：确认关闭（等同「好，继续」）
+        if (noteDraft.trim()) void store.setNote(lastStopped.sessionId, noteDraft.trim());
+        setLastStopped(null);
+        setNoteDraft('');
+        return;
+      }
+      if (active?.status === 'running') void store.pause();
+      else if (active?.status === 'paused') void store.resume();
+      else if (!active) void store.start(selectedSubject, intentDraft || null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [active, lastStopped, noteDraft, selectedSubject, intentDraft, store]);
+
   /* ---------- 结束反馈态 ---------- */
   if (lastStopped && !active) {
     const subj = subjectOf(lastStopped.subjectId);
+    // 误触感知（参照 Clockify 阈值思路）：短于 10 秒的会话提示「是误触吗？」，
+    // 并把「继续这段」提为唯一 primary——这是它唯一配得上强调的场景。
+    const isMisfire = lastStopped.seconds < 10;
     return (
       <section className="clockface" data-away-level={reminderLevel} aria-live="polite">
         <M className="finish-card">
@@ -214,7 +242,9 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             {formatDurationZh(lastStopped.seconds)}
           </div>
           <p className="finish-line">
-            已记录本次投入。今天累计 {formatDurationZh(state?.today_active_seconds ?? lastStopped.seconds)}。
+            {isMisfire
+              ? `这段只有 ${lastStopped.seconds} 秒，是误触吗？`
+              : `已记录本次投入。今天累计 ${formatDurationZh(state?.today_active_seconds ?? lastStopped.seconds)}。`}
           </p>
           {/* 离开时长：科目结束后同样进入"已离开"渐进提醒（L1 琥珀 / L2 洗色 / L3 红色氛围） */}
           <div className="away-slot" aria-live="off">
@@ -243,19 +273,9 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             >
               <Undo2 size={14} aria-hidden /> 撤回这条
             </button>
+            {/* 误触恢复：常规场景 ghost；<10s 短会话时提为 primary（唯一配得上强调的场景） */}
             <button
-              className="ghost-btn"
-              onClick={() => {
-                if (noteDraft.trim()) void store.setNote(lastStopped.sessionId, noteDraft.trim());
-                setLastStopped(null);
-                setNoteDraft('');
-              }}
-            >
-              好，继续
-            </button>
-            {/* 误触保护：把「点成结束」的会话一键继续（服务端重开会话、开新段，原秒数保留） */}
-            <button
-              className="primary-btn"
+              className={isMisfire ? 'primary-btn' : 'ghost-btn'}
               data-testid="finish-resume-btn"
               disabled={store.busy}
               onClick={() => {
@@ -266,7 +286,17 @@ export default function ClockFace({ store }: { store: ClockStore }) {
                 void store.resumeSession(sid);
               }}
             >
-              <Play size={18} aria-hidden /> 继续这段
+              <Play size={isMisfire ? 18 : 14} aria-hidden /> 继续这段
+            </button>
+            <button
+              className={isMisfire ? 'ghost-btn' : 'primary-btn'}
+              onClick={() => {
+                if (noteDraft.trim()) void store.setNote(lastStopped.sessionId, noteDraft.trim());
+                setLastStopped(null);
+                setNoteDraft('');
+              }}
+            >
+              好，继续
             </button>
           </div>
         </M>
@@ -286,8 +316,13 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         </div>
 
         <div className="big-timer" data-testid="timer-seconds" aria-live="off" aria-label={`累计 ${formatHms(totalSecs)}，本段 ${formatHmsShort(segmentSecs)}`}>
-          <span className="timer-prev" aria-hidden>{formatHms(prevSecs)}</span>
-          <span className="timer-plus" aria-hidden>+</span>
+          {/* 首段（无已关闭段时 prev=0）不显示「前段 + 」前缀，避免 00:00:00 + 00:00 噪音 */}
+          {prevSecs > 0 && (
+            <>
+              <span className="timer-prev" aria-hidden>{formatHms(prevSecs)}</span>
+              <span className="timer-plus" aria-hidden>+</span>
+            </>
+          )}
           <span className="timer-seg">{formatHmsShort(segmentSecs)}</span>
         </div>
 

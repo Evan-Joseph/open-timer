@@ -13,6 +13,8 @@ export interface AppConfig {
   isProduction: boolean;
   /** owner 会话有效期 */
   sessionTtlMs: number;
+  /** 误触过滤：短于该毫秒数的已关闭片段不计入（默认 10s；CLOCK_MIN_SEGMENT_SECONDS 覆盖，0=禁用） */
+  minSegmentMs: number;
   version: string;
 }
 
@@ -24,6 +26,7 @@ export function loadConfig(): AppConfig {
     baseUrl: process.env.CLOCK_BASE_URL ?? 'http://127.0.0.1:4517',
     isProduction: process.env.NODE_ENV === 'production',
     sessionTtlMs: 7 * 86_400_000,
+    minSegmentMs: Number(process.env.CLOCK_MIN_SEGMENT_SECONDS ?? 10) * 1000,
     version: '0.1.0',
   };
 }

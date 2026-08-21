@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeAll, afterAll } from 'vitest';
+import { describe, expect, it, beforeAll, afterAll, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,6 +26,7 @@ function makeConfig(dbPath: string): AppConfig {
     baseUrl: 'http://127.0.0.1:0',
     isProduction: false,
     sessionTtlMs: 7 * 86_400_000,
+    minSegmentMs: 0, // 单测不过滤误触片段（另有专门用例验证过滤行为）
     version: 'test',
   };
 }
@@ -64,6 +65,15 @@ describe('API 集成', () => {
 
   beforeAll(async () => {
     ctx = await setupCtx();
+  });
+
+  // 测试隔离兜底：个别用例（含 setTimeout 的时序用例）偶发残留活动会话，
+  // 会让后续「建会话」用例拿到 409 级联失败。每条用例结束后强制收尾。
+  afterEach(async () => {
+    const active = await ctx.storage.getActiveSession('owner');
+    if (active) {
+      await ctx.storage.stopSession(active.session.id, Date.now(), 'manual', `test-cleanup:${active.session.id}`);
+    }
   });
 
   afterAll(() => {
@@ -732,4 +742,148 @@ describe('API 集成', () => {
     // 测试环境 isProduction=false：不带 HSTS
     expect(res.headers.get('strict-transport-security')).toBeNull();
   });
+
+  it('手动备份端点：owner 触发写入 R2 并返回结果；未登录 401', async () => {
+    const objects = new Map<string, string>();
+    const fakeBucket = {
+      put: async (k: string, v: string) => {
+        objects.set(k, v);
+      },
+      list: async () => ({ objects: [...objects.keys()].map((key) => ({ key })) }),
+      delete: async () => {},
+    };
+    const backupApp = createApp({ storage: ctx.storage, config: makeConfig(join(tmp, 'clock.sqlite')), backupBucket: fakeBucket });
+
+    // 未登录 → 401
+    const unauth = await backupApp.request('/api/v1/admin/backup', { method: 'POST' });
+    expect(unauth.status).toBe(401);
+
+    // owner → 200 + 写入 events/sessions/last-run
+    const res = await backupApp.request('/api/v1/admin/backup', {
+      method: 'POST',
+      headers: { cookie: ctx.cookie, 'idempotency-key': 'manual-backup-0001' },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.written.length).toBe(2);
+    expect(objects.has(`${'backup'}/${body.date}/events.jsonl`)).toBe(true);
+    expect(objects.has('backup/last-run.json')).toBe(true);
+    expect(JSON.parse(objects.get('backup/last-run.json')!).ok).toBe(true);
+  });
+
+  it('手动备份端点：未注入 R2 桶时返回 501', async () => {
+    // ctx.app 未注入 backupBucket（模拟 Node 本地无 R2）
+    const res = await ctx.app.request('/api/v1/admin/backup', {
+      method: 'POST',
+      headers: { cookie: ctx.cookie, 'idempotency-key': 'manual-backup-501' },
+    });
+    expect(res.status).toBe(501);
+    expect((await res.json()).error).toBe('BACKUP_NOT_CONFIGURED');
+  });
+
+  it('用户偏好：PUT 覆盖写、GET 读取、未登录 401、超大 body 400', async () => {
+    // 未登录
+    const unauth = await ctx.app.request('/api/v1/prefs');
+    expect(unauth.status).toBe(401);
+
+    // 初始为空
+    const empty = await ctx.app.request('/api/v1/prefs', { headers: { cookie: ctx.cookie } });
+    expect(empty.status).toBe(200);
+    expect((await empty.json()).prefs).toBeNull();
+
+    // PUT 写入
+    const prefs = { theme: 'dark', animations: false, timelineScale: 'full-day' };
+    const put = await ctx.app.request('/api/v1/prefs', {
+      method: 'PUT',
+      headers: { cookie: ctx.cookie, 'content-type': 'application/json' },
+      body: JSON.stringify(prefs),
+    });
+    expect(put.status).toBe(200);
+
+    // GET 读回 + updated_at_ms 递增
+    const got = await ctx.app.request('/api/v1/prefs', { headers: { cookie: ctx.cookie } });
+    const body = await got.json();
+    expect(body.prefs).toEqual(prefs);
+    expect(body.updated_at_ms).toBeGreaterThan(0);
+
+    // 非法 body
+    const bad = await ctx.app.request('/api/v1/prefs', {
+      method: 'PUT',
+      headers: { cookie: ctx.cookie, 'content-type': 'application/json' },
+      body: JSON.stringify([1, 2, 3]),
+    });
+    expect(bad.status).toBe(400);
+    const tooBig = await ctx.app.request('/api/v1/prefs', {
+      method: 'PUT',
+      headers: { cookie: ctx.cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ blob: 'x'.repeat(3000) }),
+    });
+    expect(tooBig.status).toBe(400);
+  });
+
+  it('误触过滤：短于 10 秒的已关闭片段不计入 sessions 与 daily-summary', async () => {
+    // 独立 app：minSegmentMs=10s（生产默认）
+    const filteredApp = createApp({
+      storage: ctx.storage,
+      config: { ...makeConfig(join(tmp, 'clock.sqlite')), minSegmentMs: 10_000 },
+    });
+    const h = { 'content-type': 'application/json', cookie: ctx.cookie };
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const url = (p: string) => `/api/v1/${p}`;
+
+    // 基线：套件内先前用例（含 retime +120 的 math 会话）已有累计，断言用增量
+    const summaryUrl = url(`daily-summary?date=${today}&timezone=${encodeURIComponent('Asia/Shanghai')}`);
+    const baseSummary = await (await filteredApp.request(summaryUrl, { headers: h })).json();
+    const mathBase = baseSummary.by_subject.find((b: { subject_id: string }) => b.subject_id === 'math').active_seconds;
+    const englishBase = baseSummary.by_subject.find((b: { subject_id: string }) => b.subject_id === 'english').active_seconds;
+
+    // 造一个 8 秒会话（误触）+ 一个 12 秒会话（有效）
+    const short = await filteredApp.request(url('sessions'), {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'misfire-short-start' },
+      body: JSON.stringify({ subject_id: 'math' }),
+    });
+    expect(short.status).toBe(201);
+    const shortId = (await short.json()).session_id;
+    await new Promise((resolve) => setTimeout(resolve, 8_100));
+    await filteredApp.request(url(`sessions/${shortId}/stop`), {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'misfire-short-stop' },
+      body: JSON.stringify({}),
+    });
+
+    const long = await filteredApp.request(url('sessions'), {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'misfire-long-start' },
+      body: JSON.stringify({ subject_id: 'english' }),
+    });
+    expect(long.status).toBe(201);
+    const longId = (await long.json()).session_id;
+    await new Promise((resolve) => setTimeout(resolve, 12_100));
+    await filteredApp.request(url(`sessions/${longId}/stop`), {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'misfire-long-stop' },
+      body: JSON.stringify({}),
+    });
+
+    // sessions：8s 会话的片段被过滤（segments 为空、秒数 0）；12s 会话保留
+    const sessionsRes = await filteredApp.request(url(`sessions?date=${today}`), { headers: h });
+    const sessionsBody = await sessionsRes.json();
+    const shortEntry = sessionsBody.sessions.find((s: { session_id: string }) => s.session_id === shortId);
+    const longEntry = sessionsBody.sessions.find((s: { session_id: string }) => s.session_id === longId);
+    expect(shortEntry.segments).toEqual([]);
+    expect(shortEntry.active_seconds).toBe(0);
+    expect(longEntry.segments.length).toBeGreaterThan(0);
+    expect(longEntry.active_seconds).toBeGreaterThanOrEqual(12);
+
+    // daily-summary：math（8s）不计入；english（12s）计入
+    const summaryRes = await filteredApp.request(summaryUrl, { headers: h });
+    const summaryBody = await summaryRes.json();
+    const math = summaryBody.by_subject.find((b: { subject_id: string }) => b.subject_id === 'math');
+    const english = summaryBody.by_subject.find((b: { subject_id: string }) => b.subject_id === 'english');
+    // 8s math 会话不贡献任何秒数；12s english 会话贡献 ≥12s
+    expect(math.active_seconds).toBe(mathBase);
+    expect(english.active_seconds).toBeGreaterThanOrEqual(englishBase + 12);
+  }, 30_000);
 });

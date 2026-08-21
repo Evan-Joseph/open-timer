@@ -8,7 +8,11 @@ import { applySecurityHeaders } from './headers.js';
 import { runBackup, type BackupBucket } from './backup.js';
 import { D1Storage, type D1Database } from './repo/d1-storage.js';
 import type { AppConfig } from './config.js';
-import migrationSql from '../../migrations/0001_init.sql';
+import migrationSql0001 from '../../migrations/0001_init.sql';
+import migrationSql0002 from '../../migrations/0002_user_pref.sql';
+
+/** 全部迁移 SQL（按序号拼接；均为 IF NOT EXISTS / ON CONFLICT，可重复执行） */
+const migrationSql = `${migrationSql0001}\n${migrationSql0002}`;
 
 /** Workers 运行时上下文（本地声明，不引入 workers-types 以免与 Node 类型冲突） */
 interface ExecutionContext {
@@ -44,10 +48,24 @@ export default {
 
   /** Cron Triggers（wrangler.jsonc：15:00 UTC = 北京 23:00）：每日备份到 R2。 */
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
-    const storage = new D1Storage(env.DB, migrationSql);
-    await ensureMigrated(env, storage);
-    const result = await runBackup(storage, env.BACKUP, Date.now());
-    console.log(`backup done: date=${result.date} wrote=${result.written.join(',')} pruned=${result.pruned.length}`);
+    const nowMs = Date.now();
+    try {
+      const storage = new D1Storage(env.DB, migrationSql);
+      await ensureMigrated(env, storage);
+      const result = await runBackup(storage, env.BACKUP, nowMs);
+      console.log(`backup done: date=${result.date} wrote=${result.written.join(',')} pruned=${result.pruned.length}`);
+    } catch (err) {
+      // 失败也落一个状态对象，便于用 r2 object get backup/last-run.json 诊断
+      console.error('backup failed:', err);
+      try {
+        await env.BACKUP.put(
+          'backup/last-run.json',
+          JSON.stringify({ ok: false, ran_at_ms: nowMs, ran_at_iso: new Date(nowMs).toISOString(), error: String(err) }, null, 2),
+        );
+      } catch {
+        /* 状态写入失败不影响主流程上报 */
+      }
+    }
   },
 };
 
@@ -59,13 +77,14 @@ async function handle(request: Request, env: Env): Promise<Response> {
     baseUrl: url.origin,
     isProduction: true,
     sessionTtlMs: 7 * 86_400_000,
+    minSegmentMs: 10_000, // 误触过滤：短于 10 秒的已关闭片段不计入
     version: '0.1.0',
   };
   const storage = new D1Storage(env.DB, migrationSql);
   // 模块级标志：同一 isolate 内只探测/执行一次迁移，避免每请求一次 D1 查询
   await ensureMigrated(env, storage);
 
-  const app = createApp({ storage, config });
+  const app = createApp({ storage, config, backupBucket: env.BACKUP });
 
   if (url.pathname.startsWith('/api/')) {
     return app.fetch(request);

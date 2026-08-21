@@ -17,6 +17,7 @@ import type {
 } from './types.js';
 import { SUBJECTS, AGGREGATE_GROUPS, subjectById } from './subjects.js';
 import { shanghaiDayRangeUtc, toIso, TIMEZONE } from './shanghai.js';
+import { DEFAULT_MIN_COUNTED_SEGMENT_MS, isCountedSegment } from './state-machine.js';
 
 export interface SummaryInput {
   date: string;
@@ -29,6 +30,8 @@ export interface SummaryInput {
   /** 当前活动会话（若存在且与当日相关则进 running_session） */
   activeSession: SessionRow | null;
   activeSegments: ActiveSegmentRow[];
+  /** 误触过滤阈值：短于该值的已关闭片段不计入（缺省 10s；测试可置 0） */
+  minSegmentMs?: number;
 }
 
 function clipSegment(
@@ -47,6 +50,7 @@ function clipSegment(
 export function buildDailySummary(input: SummaryInput): DailySummary {
   const { startMs, endMs } = shanghaiDayRangeUtc(input.date);
   const nowMs = input.generatedAtMs;
+  const minSegmentMs = input.minSegmentMs ?? DEFAULT_MIN_COUNTED_SEGMENT_MS;
 
   // 排除 voided；仅统计有效会话
   const validSessions = input.sessions.filter((s) => s.status !== 'voided');
@@ -63,6 +67,7 @@ export function buildDailySummary(input: SummaryInput): DailySummary {
     // 否则 1500ms+1500ms 会得 1+1=2 而 state 得 3）。
     let sessionMs = 0;
     for (const seg of segs) {
+      if (!isCountedSegment(seg, minSegmentMs)) continue; // 误触片段不计入
       const clipped = clipSegment(seg, startMs, endMs, nowMs);
       if (!clipped) continue;
       sessionMs += clipped.end - clipped.start;
@@ -113,7 +118,13 @@ export function buildDailySummary(input: SummaryInput): DailySummary {
   let running_session: RunningSessionEntry | null = null;
   if (input.activeSession && (input.activeSession.status === 'running' || input.activeSession.status === 'paused')) {
     const openSeg = input.activeSegments.find((s) => s.endedAtMs === null);
-    const overlapsDay = input.activeSegments.some((seg) => clipSegment(seg, startMs, endMs, nowMs) !== null);
+    // 段与当日窗口相交即计入；开放段（running）额外放宽——刚启动时开放段与 nowMs 同毫秒、
+    // 长度为 0 会被 clipSegment 判为不相交，但会话此刻确在当日活跃，应计入 running_session。
+    const overlapsDay = input.activeSegments.some(
+      (seg) =>
+        clipSegment(seg, startMs, endMs, nowMs) !== null ||
+        (seg.endedAtMs === null && seg.startedAtMs < endMs && nowMs >= startMs),
+    );
     // paused 时，最后一段的结束时刻即暂停（离开）开始时刻
     let pausedAtMs: number | null = null;
     if (input.activeSession.status === 'paused' && input.activeSegments.length > 0) {
@@ -123,6 +134,7 @@ export function buildDailySummary(input: SummaryInput): DailySummary {
     if (overlapsDay) {
       let activeMs = 0;
       for (const seg of input.activeSegments) {
+        if (!isCountedSegment(seg, minSegmentMs)) continue; // 误触片段不计入（开放段不受影响）
         const clipped = clipSegment(seg, startMs, endMs, nowMs);
         if (clipped) activeMs += clipped.end - clipped.start;
       }

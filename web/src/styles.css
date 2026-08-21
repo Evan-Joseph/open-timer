@@ -429,7 +429,6 @@ button:focus-visible, input:focus-visible {
   display: flex; align-items: center; justify-content: center;
   overflow: hidden;
   padding: var(--main-pad-block) 16px;
-  transition: transform var(--dur-enter) var(--ease-standard), padding var(--dur-enter) var(--ease-standard);
 }
 
 /* ==========================================================================
@@ -644,7 +643,8 @@ button:focus-visible, input:focus-visible {
 .main,
 .topbar,
 .timeline {
-  transition-property: background-color, border-color, box-shadow, transform, padding, opacity;
+  /* 告警状态过渡只动颜色类属性（洗色/描边），不动布局属性（transform/padding 会引发布局抖动） */
+  transition-property: background-color, border-color, box-shadow, opacity;
   transition-duration: var(--dur-state);
   transition-timing-function: var(--ease-standard);
 }
@@ -723,7 +723,7 @@ button:focus-visible, input:focus-visible {
 .history-lane-label span { overflow: hidden; color: var(--text-3); font-family: var(--font-num); font-size: var(--fs-mini); font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .history-lane-track { position: relative; height: 18px; overflow: hidden; border-radius: var(--radius-xs); background: repeating-linear-gradient(90deg, var(--surface-2) 0 calc(27.59% - 1px), var(--border) calc(27.59% - 1px) 27.59%); }
 .history-quiet-period { position: absolute; inset-block: 0; display: grid; place-items: center; overflow: hidden; border-inline: 1px solid color-mix(in srgb, var(--text-3) 18%, transparent); color: var(--text-3); background: color-mix(in srgb, var(--text-3) 7%, transparent); font-size: var(--fs-mini); line-height: 1; white-space: nowrap; }
-.history-lane-segment { position: absolute; z-index: 1; top: 5px; bottom: 5px; min-width: 2px; border-radius: var(--radius-xs); background: var(--sc); transition: width var(--dur-enter) var(--ease-standard), left var(--dur-enter) var(--ease-standard); }
+.history-lane-segment { position: absolute; z-index: 1; top: 5px; bottom: 5px; min-width: 2px; border-radius: var(--radius-xs); background: var(--sc); }
 .history-subjects { display: grid; gap: var(--space-2); }
 .history-subject-bar { display: flex; height: 7px; overflow: hidden; border-radius: 999px; background: var(--surface-2); }
 .history-subject-bar > span { min-width: 2px; }
@@ -904,9 +904,8 @@ button:focus-visible, input:focus-visible {
   outline: none; border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
-.popover-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.popover-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
 .popover-actions button { min-width: 0; white-space: nowrap; }
-.popover-actions .danger-btn { grid-column: 2; }
 /* 动作行契约：同一行按钮等高（44px 主操作档），层级用填充/颜色区分而非尺寸差，
    避免 36px 次要与 44px 主按钮混排的参差感。行容器在 TSX 侧加 .action-row。 */
 .action-row { align-items: center; }
@@ -1123,8 +1122,7 @@ button:active:not(:disabled) { transform: scale(0.98); }
   .pin-key { width: 64px; height: 64px; font-size: 24px; }
   .seg-popover { padding: var(--space-4); }
   .popover-edit-grid { grid-template-columns: 1fr; }
-  .popover-actions { grid-template-columns: 1fr 1fr; }
-  .popover-actions .danger-btn { grid-column: 1 / -1; }
+  .popover-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (max-height: 760px) {

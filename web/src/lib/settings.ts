@@ -1,7 +1,8 @@
-/** 本地设置（localStorage）：声音、环境音。纯展示参考，不进服务端契约。 */
+/** 本地设置（localStorage + 服务端多端同步）。音量是设备本地项（默认 0，不同步）。 */
 
 import { useEffect, useState } from 'react';
 import type { AmbientKind } from './ambient.js';
+import { PREFS_APPLIED_EVT, schedulePrefsPush } from './prefs.js';
 
 const KEY = 'clock-settings-v2';
 
@@ -10,14 +11,14 @@ export interface LocalSettings {
   finishSound: boolean;
   /** 环境音类型（默认 none） */
   ambientKind: AmbientKind;
-  /** 环境音音量 0..1 */
+  /** 环境音音量 0..1（设备本地，不同步；默认 0） */
   ambientVolume: number;
 }
 
 const DEFAULTS: LocalSettings = {
   finishSound: false,
   ambientKind: 'none',
-  ambientVolume: 0.45,
+  ambientVolume: 0,
 };
 
 function load(): LocalSettings {
@@ -49,6 +50,7 @@ export function areAnimationsEnabled(): boolean {
 export function setAnimationsEnabled(enabled: boolean): void {
   localStorage.setItem('clock-animations', enabled ? 'on' : 'off');
   window.dispatchEvent(new CustomEvent(EVT));
+  schedulePrefsPush();
 }
 
 export function useAnimationsEnabled(): boolean {
@@ -57,9 +59,11 @@ export function useAnimationsEnabled(): boolean {
     const update = () => setEnabled(areAnimationsEnabled());
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
     window.addEventListener(EVT, update);
+    window.addEventListener(PREFS_APPLIED_EVT, update);
     media.addEventListener('change', update);
     return () => {
       window.removeEventListener(EVT, update);
+      window.removeEventListener(PREFS_APPLIED_EVT, update);
       media.removeEventListener('change', update);
     };
   }, []);
@@ -74,6 +78,7 @@ export function updateSettings(patch: Partial<LocalSettings>): void {
   const next = { ...load(), ...patch };
   localStorage.setItem(KEY, JSON.stringify(next));
   window.dispatchEvent(new CustomEvent(EVT));
+  schedulePrefsPush();
 }
 
 export function useSettings(): LocalSettings {
@@ -81,7 +86,11 @@ export function useSettings(): LocalSettings {
   useEffect(() => {
     const onChange = () => setSettings(load());
     window.addEventListener(EVT, onChange);
-    return () => window.removeEventListener(EVT, onChange);
+    window.addEventListener(PREFS_APPLIED_EVT, onChange);
+    return () => {
+      window.removeEventListener(EVT, onChange);
+      window.removeEventListener(PREFS_APPLIED_EVT, onChange);
+    };
   }, []);
   return settings;
 }

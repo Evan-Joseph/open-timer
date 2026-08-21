@@ -90,5 +90,15 @@ export async function runBackup(source: BackupSource, bucket: BackupBucket, nowM
   );
   if (pruned.length > 0) await bucket.delete(pruned);
 
+  // 运行状态对象：无需凭据即可用 `wrangler r2 object get` 核对上次备份是否成功
+  await bucket.put(
+    'backup/last-run.json',
+    JSON.stringify(
+      { ok: true, date, ran_at_ms: nowMs, ran_at_iso: new Date(nowMs).toISOString(), events: events.length, sessions: sessions.length, written: [eventsKey, sessionsKey], pruned },
+      null,
+      2,
+    ),
+  );
+
   return { date, written: [eventsKey, sessionsKey], pruned };
 }

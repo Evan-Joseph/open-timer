@@ -45,6 +45,13 @@ docs/     API、设计、审计、交接
 
 规范：禁用统一 opacity 0.4；focus-visible 统一 2px accent 环；press 统一 scale；图标按钮必须有 `aria-label` 与 `title`；文字圆角胶囊不替代熟悉图标。
 
+**按钮权重规则**（2026-08-21，调研 HIG/Super Productivity/FocusTide/Pomotroid 后沉淀）：
+- 一个 action-row 至多一个填充（primary）按钮；primary 权重 = 使用频率高 × 破坏性低。
+- 破坏性/少数恢复类动作永不为 primary（撤回、误触恢复常规场景一律 ghost）。
+- 例外：结束反馈卡检测到 <10s 短会话时提示「是误触吗？」，此时「继续这段」临时提为 primary——这是它唯一配得上强调的场景（参照 Clockify 阈值思路）。
+- 查看型弹层（时间轴详情）以浏览为主、动作皆低频编辑：全部 ghost，不设备注 Save 按钮——备注 Enter/失焦自动保存（参照 Super Productivity inline-markdown 模式）。
+- 主控制（暂停/继续/结束）为 56px 圆形，播放/暂停是最高权重；结束为同尺寸 danger 色图标。
+
 **工具栏契约**（2026-08-20，参考 HIG toolbars / Radix SegmentedControl 单一 size 下发）：同一工具栏行只允许一个高度档（时间轴工具栏 = 32px 行），行内控件 `align-items: center`、间距统一 `--space-2`（8px），中心 Y 共线（E2E 断言 ±1px）。
 
 **动作行契约**：弹层/卡片内的动作行（`.action-row`：结束反馈、时间轴详情）按钮等高 44px，层级用填充/颜色区分而非尺寸差，间距 `--space-3`。
@@ -92,7 +99,19 @@ docs/     API、设计、审计、交接
 - 全局 `@media (prefers-reduced-motion: reduce)` 与 `html.animations-off` 双兜底，动画时长归零但布局功能不变。
 - 计时数字 `font-variant-numeric: tabular-nums` + `font-synthesis: none`，秒变化零布局跳动。
 
-## 8. 参考项目（记录「参考行为 → 本项目取舍」）
+## 8. 多端同步与误触（2026-08-21）
+
+**UI 偏好同步**（服务端 `user_pref` 单行 JSON，`GET/PUT /api/v1/prefs`，owner-only）：
+- localStorage 即时层 + 服务端事实层；last-write-wins；登录态 10s 轮询拉取、本地变更 500ms 防抖推送；在途窗口 3s 内拉取不得回滚本地变更（防竞态）。
+- 同步键：theme / animations / finishSound / ambientKind / timelineScale / timelineMode / historyOpen。
+- local-only 明确排除：ambientVolume（设备响度差异，默认 0）、全屏态、reduced-motion 派生态、输入草稿、clock-last-subject。
+- 参照 Super Productivity sync/local-only-keys 与 Pomotroid 后端持久化范式。
+
+**误触过滤**：短于 `CLOCK_MIN_SEGMENT_SECONDS`（默认 10s）的已关闭片段不计入 sessions/daily-summary/state（开放段不受影响）。领域规则 `isCountedSegment` 在 shared，服务端配置注入。参照 Clockify「可配置阈值丢弃」；不做静默删除会话（事件链完整保留），不做自动合并（无业界先例）。
+
+**空格键主控**：Space = 开始（空闲）/暂停（运行）/继续（暂停）/确认关闭（结束反馈卡）；输入框、弹层打开、修饰键组合时让位。参照 FocusTide/Pomotroid 共识。
+
+## 9. 参考项目（记录「参考行为 → 本项目取舍」）
 
 | 项目 | 借鉴 | 舍弃 |
 |---|---|---|

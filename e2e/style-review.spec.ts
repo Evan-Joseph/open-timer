@@ -11,6 +11,26 @@ async function setup(page: any) {
     await page.keyboard.type(PIN);
     await page.waitForTimeout(700);
   }
+  // 测试隔离：重置服务端同步偏好 + 本地键（深色/视图模式会跨用例泄漏）；清理残留活动会话
+  await page.request.put('/api/v1/prefs', {
+    data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false },
+  });
+  await page.evaluate(() => {
+    localStorage.setItem('clock-theme', 'auto');
+    localStorage.setItem('clock-timeline-scale', 'default');
+    localStorage.setItem('clock-timeline-mode', 'track');
+    document.documentElement.setAttribute('data-theme', 'light');
+  });
+  const stopBtn = page.getByRole('button', { name: '结束并保存' });
+  if ((await stopBtn.count()) > 0) {
+    await stopBtn.click();
+    const withdrawBtn = page.getByTestId('finish-withdraw-btn');
+    if ((await withdrawBtn.count()) > 0) await withdrawBtn.click();
+    else {
+      const cont = page.getByRole('button', { name: '好，继续' });
+      if ((await cont.count()) > 0) await cont.click();
+    }
+  }
 }
 
 test('视觉审计样式断言', async ({ page }) => {
@@ -107,7 +127,7 @@ test('视觉审计样式断言', async ({ page }) => {
   });
   expect(desktopPopover.width).toBe(440);
   expect(desktopPopover.background).toBe('rgba(255, 255, 255, 0.96)');
-  expect(desktopPopover.actionColumns.split(' ').length).toBe(2); // 2×2 网格（保存备注/更新起点/继续这段/撤回）
+  expect(desktopPopover.actionColumns.split(' ').length).toBe(3); // 3 动作：更新起点/继续这段/撤回（备注已自动保存）
   expect(desktopPopover.wrappedButtons).toBe(0);
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -117,7 +137,7 @@ test('视觉审计样式断言', async ({ page }) => {
     fitsViewport: el.getBoundingClientRect().right <= innerWidth && el.getBoundingClientRect().left >= 0,
   }));
   expect(mobilePopover.editColumns.split(' ').length).toBe(1);
-  expect(mobilePopover.actionColumns.split(' ').length).toBe(2);
+  expect(mobilePopover.actionColumns.split(' ').length).toBe(3); // 366px 宽放下 3 个短按钮，无需换行
   expect(mobilePopover.fitsViewport).toBe(true);
   await page.keyboard.press('Escape');
 
@@ -277,7 +297,7 @@ test('工具栏对齐与动作行等高契约', async ({ page }) => {
   const popHeights = await page
     .locator('.popover-actions.action-row > button')
     .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
-  expect(popHeights.length).toBe(4); // 保存备注/更新起点/继续这段/撤回
+  expect(popHeights.length).toBe(3); // 更新起点 / 继续这段 / 撤回（备注自动保存，无 Save 按钮）
   for (const h of popHeights) expect(h).toBe(44);
   await page.keyboard.press('Escape');
 });

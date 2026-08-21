@@ -27,6 +27,7 @@ export default defineConfig({
       CLOCK_DATA_DIR: '/tmp/clock-e2e-data',
       CLOCK_PORT: String(PORT),
       CLOCK_E2E_DAYTIME: '1',
+      CLOCK_MIN_SEGMENT_SECONDS: '0',
       NODE_ENV: 'test',
     },
   },

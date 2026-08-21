@@ -140,6 +140,27 @@ describe('buildDailySummary', () => {
     expect(out.total_active_seconds).toBe(1800);
   });
 
+  it('刚启动的会话（开放段与 now 同毫秒、0 长度）仍计入 running_session', () => {
+    // 竞态回归：start 与 daily-summary 落在同一毫秒时，开放段裁剪长度为 0，
+    // 不得因此把活动会话判为「与当日无交集」而丢失 running_session。
+    const startMs = START + 3_600_000;
+    const nowMs = startMs; // 与启动同毫秒
+    const s = session({ id: 'Z', status: 'running', endedAtMs: null, startedAtMs: startMs });
+    const out = buildDailySummary({
+      date: DAY,
+      sessions: [s],
+      segmentsBySession: new Map([['Z', [seg('Z', startMs, null)]]]),
+      adjustments: [],
+      revision: 1,
+      generatedAtMs: nowMs,
+      activeSession: s,
+      activeSegments: [seg('Z', startMs, null)],
+    });
+    expect(out.running_session).not.toBeNull();
+    expect(out.running_session!.active_seconds).toBe(0);
+    expect(out.running_session!.status).toBe('running');
+  });
+
   it('同 revision 同输入产生字节级一致的 JSON', () => {
     const input = {
       date: DAY,

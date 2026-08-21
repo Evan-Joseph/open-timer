@@ -83,4 +83,8 @@ export interface Storage {
   appendAudit(actor: string, action: string, target: string, detailJson: string | null, nowMs: number): Promise<void>;
   allEvents(): Promise<SessionEventRow[]>;
   allSessions(): Promise<SessionRow[]>;
+
+  /* ---- 用户 UI 偏好（多端同步） ---- */
+  getPrefs(): Promise<{ prefsJson: string; updatedAtMs: number } | null>;
+  setPrefs(prefsJson: string, nowMs: number): Promise<void>;
 }

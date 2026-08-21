@@ -19,6 +19,7 @@ import type { DailySummaryApi, SessionApi } from '../lib/api.js';
 import { apiGet } from '../lib/api.js';
 import { formatBeijingTime, formatDurationZh } from '../lib/clock.js';
 import { useAnimationsEnabled } from '../lib/settings.js';
+import { PREFS_APPLIED_EVT, schedulePrefsPush } from '../lib/prefs.js';
 import { LEARNING_DAY, QUIET_PERIODS, shanghaiDayRangeUtc, timelineRange, type TimelineScale } from '@clock/shared';
 
 const NOW_TICK_MS = 30_000;
@@ -434,6 +435,18 @@ export default function Timeline({ store }: { store: ClockStore }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [historyOpen]);
 
+  // 多端同步：远端偏好到达时重读时间轴尺度/视图模式
+  useEffect(() => {
+    const reload = () => {
+      const s = localStorage.getItem('clock-timeline-scale');
+      setScale(s === 'full-day' ? 'full-day' : 'default');
+      const m = localStorage.getItem('clock-timeline-mode');
+      setMode(m === 'list' ? 'list' : 'track');
+    };
+    window.addEventListener(PREFS_APPLIED_EVT, reload);
+    return () => window.removeEventListener(PREFS_APPLIED_EVT, reload);
+  }, []);
+
   // 撤回
   const handleWithdraw = useCallback(async () => {
     if (!popover) return;
@@ -455,15 +468,17 @@ export default function Timeline({ store }: { store: ClockStore }) {
     }
   }, [popover, store]);
 
-  // 保存备注
-  const handleSaveNote = useCallback(async () => {
+  // 保存备注（自动保存模式，参照 Super Productivity inline-markdown：无 Save 按钮，
+  // Enter/失焦即存）。keepOpen=true 用于失焦保存——不关弹窗，避免抢占其他按钮的点击。
+  const handleSaveNote = useCallback(async (keepOpen = false) => {
     if (!popover || noteSaving) return;
+    const draft = noteDraft.trim();
+    if (draft === (popover.row.note ?? '')) return; // 无变化不写
     setNoteSaving(true);
-    await store.setNote(popover.row.sessionId, noteDraft.trim());
+    await store.setNote(popover.row.sessionId, draft);
     setNoteSaving(false);
-    // 关闭并失效历史缓存，让新备注显现
-    setPopover(null);
     historyCacheRef.current.delete(viewDateRef.current);
+    if (!keepOpen) setPopover(null);
   }, [popover, noteSaving, noteDraft, store]);
 
   const handleSaveStart = useCallback(async () => {
@@ -580,6 +595,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
                   onClick={() => {
                     setScale(value);
                     localStorage.setItem('clock-timeline-scale', value);
+                  schedulePrefsPush({ timelineScale: value });
                   }}
                 >
                   {label}
@@ -591,7 +607,12 @@ export default function Timeline({ store }: { store: ClockStore }) {
             className="icon-btn"
             aria-label={mode === 'track' ? '切换到流水账视图' : '切换到时间轴视图'}
             title={mode === 'track' ? '流水账' : '时间轴'}
-            onClick={() => setMode(mode === 'track' ? 'list' : 'track')}
+            onClick={() => {
+              const next = mode === 'track' ? 'list' : 'track';
+              setMode(next);
+              localStorage.setItem('clock-timeline-mode', next);
+              schedulePrefsPush({ timelineMode: next });
+            }}
             data-testid="timeline-mode-btn"
           >
             {mode === 'track' ? <List size={16} /> : <GanttChart size={16} />}
@@ -618,6 +639,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
             onClick={() => {
               const next = !historyOpen;
               setHistoryOpen(next);
+              schedulePrefsPush({ historyOpen: next });
               if (next) {
                 void loadHistory();
               }
@@ -817,13 +839,14 @@ export default function Timeline({ store }: { store: ClockStore }) {
                 <span>备注</span>
                 <input
                   className="popover-note-input"
-                  placeholder="这次想记下什么？（可选）"
+                  placeholder="这次想记下什么？（可选，Enter 或失焦自动保存）"
                   value={noteDraft}
                   maxLength={200}
                   onChange={(e) => setNoteDraft(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') void handleSaveNote();
                   }}
+                  onBlur={() => void handleSaveNote(true)}
                   aria-label="编辑备注"
                   data-testid="popover-note-input"
                 />
@@ -833,14 +856,8 @@ export default function Timeline({ store }: { store: ClockStore }) {
           {!popover.row.stopped && popover.row.note && <div className="popover-note">「{popover.row.note}」</div>}
           {popover.row.stopped && (
             <div className="popover-actions action-row">
-              <button
-                className="primary-btn popover-save"
-                onClick={() => void handleSaveNote()}
-                disabled={noteSaving}
-                data-testid="popover-save-note"
-              >
-                {noteSaving ? '保存中…' : '保存备注'}
-              </button>
+              {/* 备注已改自动保存（Enter/失焦）：弹窗动作只剩三个低频编辑，统一 ghost 权重。
+                  层级靠顺序与危险色表达，不给少数动作 primary 填充（HIG 按钮权重原则）。 */}
               <button
                 className="ghost-btn"
                 onClick={() => void handleSaveStart()}

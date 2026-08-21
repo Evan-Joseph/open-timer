@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { canTransition, nextStatus, computeActiveSeconds, StateMachineError } from '../src/state-machine.js';
+import {
+  canTransition,
+  nextStatus,
+  computeActiveSeconds,
+  StateMachineError,
+  isCountedSegment,
+  DEFAULT_MIN_COUNTED_SEGMENT_MS,
+} from '../src/state-machine.js';
 
 describe('状态机转移表', () => {
   it('idle → created → running', () => {
@@ -67,5 +74,29 @@ describe('净时长计算', () => {
 
   it('空段列表为 0', () => {
     expect(computeActiveSeconds([])).toBe(0);
+  });
+});
+
+describe('误触片段过滤', () => {
+  it('默认阈值为 10 秒', () => {
+    expect(DEFAULT_MIN_COUNTED_SEGMENT_MS).toBe(10_000);
+  });
+
+  it('开放段始终计入（仍在计时，不可预判为误触）', () => {
+    expect(isCountedSegment({ startedAtMs: 1000, endedAtMs: null }, 10_000)).toBe(true);
+  });
+
+  it('短于阈值的已关闭段不计入', () => {
+    expect(isCountedSegment({ startedAtMs: 0, endedAtMs: 9_999 }, 10_000)).toBe(false);
+    expect(isCountedSegment({ startedAtMs: 0, endedAtMs: 1_000 }, 10_000)).toBe(false);
+  });
+
+  it('达到阈值的已关闭段计入（含恰好等于）', () => {
+    expect(isCountedSegment({ startedAtMs: 0, endedAtMs: 10_000 }, 10_000)).toBe(true);
+    expect(isCountedSegment({ startedAtMs: 0, endedAtMs: 60_000 }, 10_000)).toBe(true);
+  });
+
+  it('阈值 0 时全部计入（测试环境禁用过滤）', () => {
+    expect(isCountedSegment({ startedAtMs: 0, endedAtMs: 500 }, 0)).toBe(true);
   });
 });

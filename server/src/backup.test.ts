@@ -126,4 +126,15 @@ describe('每日备份（Cron + R2）', () => {
     expect(staleBackupKeys([`backup/${firstKept}/e.jsonl`], NOW_MS)).toEqual([]);
     expect(staleBackupKeys([`backup/${pruned}/e.jsonl`], NOW_MS)).toEqual([`backup/${pruned}/e.jsonl`]);
   });
+
+  it('写入 last-run.json 运行状态（ok/日期/计数），便于免凭据核对', async () => {
+    const { bucket, store } = makeFakeBucket();
+    await runBackup(SOURCE, bucket, NOW_MS);
+    const status = JSON.parse(store.get('backup/last-run.json')!);
+    expect(status.ok).toBe(true);
+    expect(status.date).toBe('2026-08-20');
+    expect(status.events).toBe(2);
+    expect(status.sessions).toBe(1);
+    expect(status.ran_at_ms).toBe(NOW_MS);
+  });
 });

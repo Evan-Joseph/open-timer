@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useClockStore } from './lib/store.js';
 import { useAnimationsEnabled, useSettings } from './lib/settings.js';
+import { PREFS_APPLIED_EVT, pullRemotePrefs, schedulePrefsPush } from './lib/prefs.js';
 import { ambient } from './lib/ambient.js';
 import AuthGate from './components/AuthGate.js';
 import ClockFace from './components/ClockFace.js';
@@ -22,11 +23,49 @@ export default function App() {
       document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
     };
     apply();
-    localStorage.setItem('clock-theme', theme);
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     mq.addEventListener('change', apply);
     return () => mq.removeEventListener('change', apply);
   }, [theme]);
+
+  // 多端同步：其他标签页（storage）或远端偏好到达（PREFS_APPLIED_EVT）时重读主题
+  useEffect(() => {
+    const reload = () => setTheme(localStorage.getItem('clock-theme') || 'auto');
+    window.addEventListener('storage', reload);
+    window.addEventListener(PREFS_APPLIED_EVT, reload);
+    return () => {
+      window.removeEventListener('storage', reload);
+      window.removeEventListener(PREFS_APPLIED_EVT, reload);
+    };
+  }, []);
+
+  /** 主题变更：本地立即生效 + 推送远端（多端同步） */
+  const changeTheme = (t: string) => {
+    localStorage.setItem('clock-theme', t);
+    setTheme(t);
+    // 立即应用属性，不依赖 effect 因 state 变化重跑：
+    // 若 state 与属性被外部因素短暂不一致（如远端偏好应用/测试重置），点击仍能落定。
+    const dark = t === 'dark' || (t === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    schedulePrefsPush({ theme: t as 'light' | 'dark' | 'auto' });
+  };
+
+  // 远端偏好轮询（10s，仅登录态；last-write-wins 应用）
+  const prefsUpdatedAtRef = useRef(0);
+  useEffect(() => {
+    if (store.phase !== 'ready') return;
+    let cancelled = false;
+    const pull = async () => {
+      const next = await pullRemotePrefs(prefsUpdatedAtRef.current);
+      if (!cancelled) prefsUpdatedAtRef.current = next;
+    };
+    void pull();
+    const t = window.setInterval(() => void pull(), 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [store.phase]);
 
   // 动画开关：off 时给 <html> 挂 class，CSS 层全局归零（与组件层 motion 跳过并存）
   useEffect(() => {
@@ -124,7 +163,7 @@ export default function App() {
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
         theme={theme}
-        onThemeChange={setTheme}
+        onThemeChange={changeTheme}
         onLogout={store.logout}
       />
     </div>

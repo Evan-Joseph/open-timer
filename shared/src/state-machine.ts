@@ -8,6 +8,24 @@
 
 import type { SessionStatus, SessionEventKind, ActiveSegmentRow } from './types.js';
 
+/**
+ * 误触过滤：短于该阈值的已关闭片段不计入统计与展示（默认 10 秒）。
+ * 阈值可由服务端配置覆盖（如测试环境置 0）。
+ */
+export const DEFAULT_MIN_COUNTED_SEGMENT_MS = 10_000;
+
+/**
+ * 片段是否计入：开放段（endedAtMs=null）仍在计时，始终计入；
+ * 已关闭段须达到最小阈值，否则视为误触。
+ */
+export function isCountedSegment(
+  seg: Pick<ActiveSegmentRow, 'startedAtMs' | 'endedAtMs'>,
+  minMs: number,
+): boolean {
+  if (seg.endedAtMs === null) return true;
+  return seg.endedAtMs - seg.startedAtMs >= minMs;
+}
+
 /** 每个动作要求的前置状态集合。 */
 const ACTION_PRECONDITIONS: Record<SessionEventKind, readonly SessionStatus[] | null> = {
   // created 作用于 idle（无活动会话），用 null 表示无活动会话前提

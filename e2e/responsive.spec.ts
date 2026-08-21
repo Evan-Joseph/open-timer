@@ -20,7 +20,21 @@ async function enterReadyState(page: Page) {
     await stopButton.click();
     const withdrawButton = page.getByTestId('finish-withdraw-btn');
     if (await withdrawButton.count()) await withdrawButton.click();
+    else {
+      const cont = page.getByRole('button', { name: '好，继续' });
+      if (await cont.count()) await cont.click();
+    }
   }
+  // 测试隔离：重置服务端同步偏好与本地键（跨用例泄漏防护）
+  await page.request.put('/api/v1/prefs', {
+    data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false },
+  });
+  await page.evaluate(() => {
+    localStorage.setItem('clock-theme', 'auto');
+    localStorage.setItem('clock-timeline-scale', 'default');
+    localStorage.setItem('clock-timeline-mode', 'track');
+    document.documentElement.setAttribute('data-theme', 'light');
+  });
 
   await expect(page.getByTestId('idle-clock')).toBeVisible();
 }
