@@ -52,4 +52,21 @@ describe('北京时间日切（固定 UTC+8，无 DST）', () => {
   it('非法日期抛错', () => {
     expect(() => shanghaiDayRangeUtc('2026-02-30')).toThrow();
   });
+
+  it('1992 前日期被显式拒绝（固定 +8 无 DST 假设不覆盖）', () => {
+    expect(isValidShanghaiDate('1991-12-31')).toBe(false);
+    expect(isValidShanghaiDate('1992-01-01')).toBe(true);
+    expect(() => shanghaiDayRangeUtc('1991-01-01')).toThrow();
+  });
+
+  it('1992 年起至今 Asia/Shanghai 偏移恒为 +8（运行时断言，防 tz 数据异常）', () => {
+    const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', timeZoneName: 'longOffset' });
+    for (const year of [1992, 2000, 2010, 2020, 2026]) {
+      for (const month of [0, 6]) {
+        const d = new Date(Date.UTC(year, month, 15, 12, 0, 0));
+        const tz = fmt.formatToParts(d).find((p) => p.type === 'timeZoneName')?.value;
+        expect(tz).toBe('GMT+08:00');
+      }
+    }
+  });
 });

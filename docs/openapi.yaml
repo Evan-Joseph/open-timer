@@ -115,7 +115,7 @@ components:
       properties:
         date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
         timezone: { type: string, const: Asia/Shanghai }
-        revision: { type: integer, description: 事件序号；同 date/revision 响应确定 }
+        revision: { type: integer, description: 审计日志序号；同 date/revision 响应确定（覆盖所有写操作） }
         generated_at: { type: string, format: date-time }
         total_active_seconds: { type: integer }
         by_subject:
@@ -380,7 +380,7 @@ paths:
 
   /sessions/{id}/retime:
     post:
-      summary: 修正时长（幂等；审计留痕，±24h 内）
+      summary: 修正时长（幂等；delta 落到末段结束时刻，审计留痕，±24h 内）
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
         - $ref: '#/components/parameters/idempotency-key'
@@ -395,8 +395,8 @@ paths:
                 delta_seconds: { type: integer, minimum: -86400, maximum: 86400 }
                 reason: { type: [string, 'null'], maxLength: 200 }
       responses:
-        '200': { description: 已修正 }
-        '400': { description: 缺 Idempotency-Key 或参数非法 }
+        '200': { description: 已修正（末段结束时刻调整，汇总按段重算反映） }
+        '400': { description: 缺 Idempotency-Key、参数非法，或使末段时长为负（INVALID_RETIME） }
         '404': { description: 会话不存在 }
         '409': { description: 仅 stopped 可修正 }
 

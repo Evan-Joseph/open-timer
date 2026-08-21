@@ -233,7 +233,7 @@ describe('API 集成', () => {
     const retimeRes = await ctx.app.request(`/api/v1/sessions/${created.session_id}/retime`, {
       method: 'POST',
       headers: { ...headers, 'idempotency-key': 'audit-sem-retime' },
-      body: JSON.stringify({ delta_seconds: -30, reason: '审计语义测试' }),
+      body: JSON.stringify({ delta_seconds: 60, reason: '审计语义测试' }),
     });
     expect(retimeRes.status).toBe(200);
 
@@ -396,6 +396,123 @@ describe('API 集成', () => {
     // timezone 必须是 Asia/Shanghai
     const badTz = await ctx.app.request(`/api/v1/daily-summary?date=${today}&timezone=UTC`, { headers: ro });
     expect(badTz.status).toBe(400);
+  });
+
+  it('daily-summary ETag：running 期间禁用 304，stop 后恢复 304', async () => {
+    const h = { 'content-type': 'application/json', cookie: ctx.cookie };
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const url = `/api/v1/daily-summary?date=${today}&timezone=${encodeURIComponent('Asia/Shanghai')}`;
+
+    // 1. 开始会话 → running
+    const start = await ctx.app.request('/api/v1/sessions', {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'etag-running-start' },
+      body: JSON.stringify({ subject_id: 'math' }),
+    });
+    expect(start.status).toBe(201);
+    const created = await start.json();
+
+    // 2. running：不设 ETag；带 If-None-Match 也不应 304（秒数在涨，不能被缓存）
+    const runningRes = await ctx.app.request(url, { headers: h });
+    expect(runningRes.status).toBe(200);
+    expect(runningRes.headers.get('etag')).toBeNull();
+    const runningBody = await runningRes.json();
+    expect(runningBody.running_session).not.toBeNull();
+    const runningReplay = await ctx.app.request(url, {
+      headers: { ...h, 'if-none-match': 'W/"stale-etag"' },
+    });
+    expect(runningReplay.status).toBe(200);
+
+    // 3. stop → 事件落库、running 结束
+    const stop = await ctx.app.request(`/api/v1/sessions/${created.session_id}/stop`, {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'etag-running-stop' },
+      body: JSON.stringify({}),
+    });
+    expect(stop.status).toBe(200);
+
+    // 4. stopped：恢复 ETag + 304 语义
+    const stoppedRes = await ctx.app.request(url, { headers: h });
+    expect(stoppedRes.status).toBe(200);
+    const etag = stoppedRes.headers.get('etag');
+    expect(etag).toBeTruthy();
+    const stopped304 = await ctx.app.request(url, { headers: { ...h, 'if-none-match': etag! } });
+    expect(stopped304.status).toBe(304);
+  });
+
+  it('retime 落段生效：修正时长反映到 daily-summary，负向越界返回 400', async () => {
+    const h = { 'content-type': 'application/json', cookie: ctx.cookie };
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const url = `/api/v1/daily-summary?date=${today}&timezone=${encodeURIComponent('Asia/Shanghai')}`;
+
+    const start = await ctx.app.request('/api/v1/sessions', {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'retime-seg-start' },
+      body: JSON.stringify({ subject_id: 'math' }),
+    });
+    expect(start.status).toBe(201);
+    const created = await start.json();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await ctx.app.request(`/api/v1/sessions/${created.session_id}/stop`, {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'retime-seg-stop' },
+      body: JSON.stringify({}),
+    });
+
+    const beforeTotal = (await (await ctx.app.request(url, { headers: h })).json()).total_active_seconds;
+
+    // 负向越界：末段时长仅 ~1s，-120s 会令末段为负 → 400 INVALID_RETIME（先于正向修正测试）
+    const over = await ctx.app.request(`/api/v1/sessions/${created.session_id}/retime`, {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'retime-seg-over' },
+      body: JSON.stringify({ delta_seconds: -120, reason: null }),
+    });
+    expect(over.status).toBe(400);
+    expect((await over.json()).error).toBe('INVALID_RETIME');
+
+    // +120 秒：落到末段结束时刻，汇总应精确 +120
+    const retime = await ctx.app.request(`/api/v1/sessions/${created.session_id}/retime`, {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'retime-seg-apply' },
+      body: JSON.stringify({ delta_seconds: 120, reason: null }),
+    });
+    expect(retime.status).toBe(200);
+    const afterTotal = (await (await ctx.app.request(url, { headers: h })).json()).total_active_seconds;
+    expect(afterTotal).toBe(beforeTotal + 120);
+  });
+
+  it('note 写 manual_adjustment 使 revision 前进、ETag 失效', async () => {
+    const h = { 'content-type': 'application/json', cookie: ctx.cookie };
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const url = `/api/v1/daily-summary?date=${today}&timezone=${encodeURIComponent('Asia/Shanghai')}`;
+
+    const start = await ctx.app.request('/api/v1/sessions', {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'revision-note-start' },
+      body: JSON.stringify({ subject_id: 'english' }),
+    });
+    expect(start.status).toBe(201);
+    const created = await start.json();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await ctx.app.request(`/api/v1/sessions/${created.session_id}/stop`, {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'revision-note-stop' },
+      body: JSON.stringify({}),
+    });
+
+    const etag1 = (await ctx.app.request(url, { headers: h })).headers.get('etag');
+    expect(etag1).toBeTruthy();
+
+    // note 只写 manual_adjustment、不写 session_event；revision 必须仍前进使 ETag 失效
+    const note = await ctx.app.request(`/api/v1/sessions/${created.session_id}/note`, {
+      method: 'PATCH',
+      headers: { ...h, 'idempotency-key': 'revision-note-apply' },
+      body: JSON.stringify({ note: '改了备注' }),
+    });
+    expect(note.status).toBe(200);
+
+    const etag2 = (await ctx.app.request(url, { headers: h })).headers.get('etag');
+    expect(etag2).not.toBe(etag1);
   });
 
   it('凭据生命周期：创建后可见，吊销后 revoked=true', async () => {

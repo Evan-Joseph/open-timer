@@ -10,11 +10,15 @@ export const SHANGHAI_OFFSET_MS = 8 * 3600 * 1000;
 export const DAY_MS = 86_400_000;
 export const TIMEZONE = 'Asia/Shanghai';
 
-/** 校验 YYYY-MM-DD 格式并是真实日历日期。 */
+/** 校验 YYYY-MM-DD 格式并是真实日历日期（且不早于 1992-01-01）。 */
 export function isValidShanghaiDate(s: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
   const [y, m, d] = s.split('-').map(Number);
   if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  // 固定 +8 无夏令时的假设仅对 1992-01-01 之后成立：中国夏令时 1986–1991，
+  // 1991-09-15 最后一次结束。为简单起见整年 1991 拒绝，避免静默按 +8 错误换算
+  // （本项目只涉及当下/未来日期，此拒绝无实际影响）。
+  if (y < 1992) return false;
   const dt = new Date(Date.UTC(y, m - 1, d));
   return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
 }

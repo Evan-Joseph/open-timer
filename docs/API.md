@@ -120,7 +120,7 @@ Base URL：`https://clock.4c666.top`
 
 | 字段 | 说明 |
 |---|---|
-| `revision` | 事件序号快照；同 date/revision 响应字节级确定，可作缓存键 |
+| `revision` | 审计日志序号快照（覆盖所有写操作，含 note/retime/adjust-start）；同 date/revision 响应字节级确定，可作缓存键 |
 | `by_subject[].active_seconds` | 该科目当日净学习秒数（已按 Asia/Shanghai 日窗裁剪） |
 | `aggregates` | math / english / **408（四模块之和）** / politics |
 | `sessions[].status` | `stopped`=正常结束。`voided` 会话被**完全排除**，不会出现在 `sessions` 数组与任何汇总中，仅通过 `adjustments_or_revocations` 可见 |
@@ -170,7 +170,7 @@ Base URL：`https://clock.4c666.top`
 | POST | `/api/v1/sessions/:id/switch` | 换科目：结束当前段并开启同会话新科目段，body `{ "subject_id": "..." }` |
 | POST | `/api/v1/sessions/:id/void` | 撤回（误记），body `{ "reason": "可选" }` |
 | PATCH | `/api/v1/sessions/:id/note` | 更新备注，body `{ "note": "..." }`（≤200 字） |
-| POST | `/api/v1/sessions/:id/retime` | 修正时长（审计留痕），body `{ "delta_seconds": -300, "reason": "文字或 null" }`（±24h 内；reason 键必须存在，可为 null） |
+| POST | `/api/v1/sessions/:id/retime` | 修正时长：delta 落到末段结束时刻（而非仅改快照），汇总按段重算即反映；审计留痕。body `{ "delta_seconds": -300, "reason": "文字或 null" }`（±24h 内；reason 键必须存在，可为 null）；使末段时长为负时 400 `INVALID_RETIME` |
 | POST | `/api/v1/sessions/:id/adjust-start` | 起点补录：把已停止会话的开始时间向前调整（同步首段与净时长），body `{ "started_at": "ISO8601", "reason": "文字或 null" }`；必须早于首段结束时刻，否则 400 `INVALID_START` |
 | POST | `/api/v1/auth/logout` | 登出 |
 
@@ -180,7 +180,7 @@ Base URL：`https://clock.4c666.top`
 
 | 状态码 | error | 含义 |
 |---|---|---|
-| 400 | `INVALID_BODY` / `INVALID_DATE` / `INVALID_ID` / `TIMEZONE_MUST_BE_ASIA_SHANGHAI` / `IDEMPOTENCY_KEY_REQUIRED` / `INVALID_START` | 参数不合法或缺幂等键；起点补录时刻无效 |
+| 400 | `INVALID_BODY` / `INVALID_DATE` / `INVALID_ID` / `TIMEZONE_MUST_BE_ASIA_SHANGHAI` / `IDEMPOTENCY_KEY_REQUIRED` / `INVALID_START` / `INVALID_RETIME` | 参数不合法或缺幂等键；起点补录时刻无效；retime 使末段时长为负 |
 | 401 | `UNAUTHORIZED` / `INVALID_CREDENTIALS` | 未登录 / 密码错误 |
 | 403 | `CSRF_REJECTED` | 写请求 Origin 与 Host 不同源 |
 | 404 | `SESSION_NOT_FOUND` / `NOT_FOUND` | 会话不存在 / 未知路径 |

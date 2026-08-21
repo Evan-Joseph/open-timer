@@ -63,7 +63,9 @@ export interface Storage {
   sessionsOverlapping(startMs: number, endMs: number): Promise<SessionRow[]>;
   segmentsForSessions(sessionIds: string[]): Promise<Map<string, ActiveSegmentRow[]>>;
   adjustmentsSince(ms: number): Promise<ManualAdjustmentRow[]>;
-  /** revision = 截至 now 的最大事件 id（用于 ETag 确定性）。 */
+  /** revision = 截至 now 的审计日志最大 id（audit_log 覆盖所有写操作，含
+   *  note/retime/adjust-start 这类不写 session_event 的变更）。用于 ETag 确定性：
+   *  任何影响资源的写操作都使 revision 前进、ETag 失效。 */
   maxEventId(): Promise<number>;
 
   /* ---- API 凭据 ---- */

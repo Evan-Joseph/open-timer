@@ -58,13 +58,16 @@ export function buildDailySummary(input: SummaryInput): DailySummary {
 
   for (const session of validSessions) {
     const segs = input.segmentsBySession.get(session.id) ?? [];
-    let sessionSeconds = 0;
+    // 取整口径：同一 session 同一日内累加裁剪后毫秒、最后一次性 floor，
+    // 与 computeActiveSeconds 的「总 ms 一次 floor」一致（多段会话不再各段截断累加，
+    // 否则 1500ms+1500ms 会得 1+1=2 而 state 得 3）。
+    let sessionMs = 0;
     for (const seg of segs) {
       const clipped = clipSegment(seg, startMs, endMs, nowMs);
       if (!clipped) continue;
-      const secs = Math.floor((clipped.end - clipped.start) / 1000);
-      sessionSeconds += secs;
+      sessionMs += clipped.end - clipped.start;
     }
+    const sessionSeconds = Math.floor(sessionMs / 1000);
     if (sessionSeconds > 0 || (session.status === 'running' || session.status === 'paused')) {
       if (sessionSeconds > 0) {
         total += sessionSeconds;
@@ -118,11 +121,12 @@ export function buildDailySummary(input: SummaryInput): DailySummary {
       if (last.endedAtMs !== null) pausedAtMs = last.endedAtMs;
     }
     if (overlapsDay) {
-      let secs = 0;
+      let activeMs = 0;
       for (const seg of input.activeSegments) {
         const clipped = clipSegment(seg, startMs, endMs, nowMs);
-        if (clipped) secs += Math.floor((clipped.end - clipped.start) / 1000);
+        if (clipped) activeMs += clipped.end - clipped.start;
       }
+      const secs = Math.floor(activeMs / 1000);
       running_session = {
         session_id: input.activeSession.id,
         subject_id: input.activeSession.subjectId,

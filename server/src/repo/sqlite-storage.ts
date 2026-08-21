@@ -167,14 +167,16 @@ export class SqliteStorage implements Storage {
   }
 
   private recomputeActiveSeconds(sessionId: string): void {
-    const rows = this.db
-      .prepare('SELECT started_at_ms, ended_at_ms FROM active_segment WHERE session_id = ?')
-      .all(sessionId) as Array<{ started_at_ms: number; ended_at_ms: number | null }>;
-    let ms = 0;
-    for (const s of rows) {
-      if (s.ended_at_ms !== null) ms += Math.max(0, s.ended_at_ms - s.started_at_ms);
-    }
-    this.db.prepare('UPDATE session SET active_seconds = ? WHERE id = ?').run(Math.floor(ms / 1000), sessionId);
+    // 统一口径：总 ms 一次向下取整（SQLite 整数除法即 floor），
+    // 与 shared/summary.ts 的「累加 ms 后一次 floor」、state-machine.ts 的 computeActiveSeconds 一致。
+    this.db
+      .prepare(
+        `UPDATE session SET active_seconds =
+           (SELECT COALESCE(SUM(MAX(0, ended_at_ms - started_at_ms)), 0) / 1000
+            FROM active_segment WHERE session_id = ?)
+         WHERE id = ?`,
+      )
+      .run(sessionId, sessionId);
   }
 
   async createSession(args: {
@@ -287,13 +289,21 @@ export class SqliteStorage implements Storage {
   async applyRetime(sessionId: string, deltaSeconds: number, reason: string | null, nowMs: number): Promise<void> {
     const s = this.requireActive(sessionId);
     if (s.status !== 'stopped') throw new Error('ILLEGAL_TRANSITION');
+    // 时长修正落到末段结束时刻（而非只改 active_seconds 快照）：所有读端点
+    // （state/daily-summary/sessions）都按段重算，只改快照会令 retime 对汇总完全无效。
+    const segs = await this.getSegments(sessionId);
+    if (segs.length === 0) throw new Error('SESSION_HAS_NO_SEGMENTS');
+    const last = segs[segs.length - 1];
+    if (last.endedAtMs == null) throw new Error('ILLEGAL_TRANSITION');
+    const newEndMs = last.endedAtMs + deltaSeconds * 1000;
+    if (newEndMs < last.startedAtMs) throw new Error('INVALID_RETIME'); // 拒绝使末段时长为负的修正
     const before = s.activeSeconds;
-    const after = Math.max(0, before + deltaSeconds);
     const tx = this.db.transaction(() => {
-      this.db.prepare('UPDATE session SET active_seconds = ? WHERE id = ?').run(after, sessionId);
+      this.db.prepare('UPDATE active_segment SET ended_at_ms = ? WHERE id = ?').run(newEndMs, last.id);
+      this.recomputeActiveSeconds(sessionId);
       this.db
         .prepare('INSERT INTO manual_adjustment (session_id, kind, before_json, after_json, reason, created_at_ms) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(sessionId, 'retime', JSON.stringify({ active_seconds: before }), JSON.stringify({ active_seconds: after }), reason, nowMs);
+        .run(sessionId, 'retime', JSON.stringify({ active_seconds: before, ended_at_ms: last.endedAtMs }), JSON.stringify({ ended_at_ms: newEndMs }), reason, nowMs);
       this.db
         .prepare('INSERT INTO audit_log (actor, action, target, detail_json, server_time_ms) VALUES (?, ?, ?, ?, ?)')
         .run('owner', 'retime', sessionId, JSON.stringify({ delta_seconds: deltaSeconds }), nowMs);
@@ -370,7 +380,10 @@ export class SqliteStorage implements Storage {
   }
 
   async maxEventId(): Promise<number> {
-    const r = this.db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM session_event').get() as { m: number };
+    // revision = 审计日志最大 id。audit_log 是「每次写操作都追加」的单一自增序列，
+    // 覆盖所有变更（含 note/retime/adjust-start 这类不写 session_event 的操作），
+    // 保证任何影响资源的写操作都令 revision 前进、ETag 失效。
+    const r = this.db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM audit_log').get() as { m: number };
     return r.m;
   }
 

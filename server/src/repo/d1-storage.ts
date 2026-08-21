@@ -146,18 +146,6 @@ export class D1Storage implements Storage {
     return results.map(rowToSegment);
   }
 
-  private async computeActiveSeconds(sessionId: string): Promise<number> {
-    const { results } = await this.db
-      .prepare('SELECT started_at_ms, ended_at_ms FROM active_segment WHERE session_id = ?')
-      .bind(sessionId)
-      .all<{ started_at_ms: number; ended_at_ms: number | null }>();
-    let ms = 0;
-    for (const s of results) {
-      if (s.ended_at_ms !== null) ms += Math.max(0, s.ended_at_ms - s.started_at_ms);
-    }
-    return Math.floor(ms / 1000);
-  }
-
   async createSession(args: {
     id: string;
     userId: string;
@@ -198,13 +186,18 @@ export class D1Storage implements Storage {
   async pauseSession(sessionId: string, nowMs: number, idempotencyKey: string): Promise<void> {
     const s = await this.requireActive(sessionId);
     if (s.status !== 'running') throw new Error('ILLEGAL_TRANSITION');
+    // active_seconds 更新并入同一 batch（原子）：此前它在 batch 外单独执行，存在
+    // 「段已关但快照未更新」的窗口，与 SQLite 本地版（事务内）行为不一致。
     await this.db.batch([
       this.db.prepare('UPDATE active_segment SET ended_at_ms = ? WHERE session_id = ? AND ended_at_ms IS NULL').bind(nowMs, sessionId),
       this.db.prepare("UPDATE session SET status = 'paused' WHERE id = ?").bind(sessionId),
       this.db.prepare('INSERT INTO session_event (session_id, kind, idempotency_key, server_time_ms, payload_json) VALUES (?, ?, ?, ?, ?)').bind(sessionId, 'paused', idempotencyKey, nowMs, null),
+      this.db
+        .prepare(
+          'UPDATE session SET active_seconds = (SELECT COALESCE(SUM(MAX(0, ended_at_ms - started_at_ms)), 0) / 1000 FROM active_segment WHERE session_id = ?) WHERE id = ?',
+        )
+        .bind(sessionId, sessionId),
     ]);
-    const secs = await this.computeActiveSeconds(sessionId);
-    await this.db.prepare('UPDATE session SET active_seconds = ? WHERE id = ?').bind(secs, sessionId).run();
   }
 
   async resumeSession(sessionId: string, nowMs: number, idempotencyKey: string): Promise<void> {
@@ -226,9 +219,12 @@ export class D1Storage implements Storage {
       this.db
         .prepare('INSERT INTO session_event (session_id, kind, idempotency_key, server_time_ms, payload_json) VALUES (?, ?, ?, ?, ?)')
         .bind(sessionId, 'stopped', idempotencyKey, nowMs, JSON.stringify({ end_reason: endReason })),
+      this.db
+        .prepare(
+          'UPDATE session SET active_seconds = (SELECT COALESCE(SUM(MAX(0, ended_at_ms - started_at_ms)), 0) / 1000 FROM active_segment WHERE session_id = ?) WHERE id = ?',
+        )
+        .bind(sessionId, sessionId),
     ]);
-    const secs = await this.computeActiveSeconds(sessionId);
-    await this.db.prepare('UPDATE session SET active_seconds = ? WHERE id = ?').bind(secs, sessionId).run();
   }
 
   async voidSession(sessionId: string, nowMs: number, reason: string | null, idempotencyKey: string): Promise<void> {
@@ -259,13 +255,24 @@ export class D1Storage implements Storage {
   async applyRetime(sessionId: string, deltaSeconds: number, reason: string | null, nowMs: number): Promise<void> {
     const s = await this.requireActive(sessionId);
     if (s.status !== 'stopped') throw new Error('ILLEGAL_TRANSITION');
+    // 时长修正落到末段结束时刻（而非只改 active_seconds 快照）：所有读端点都按段重算。
+    const segs = await this.getSegments(sessionId);
+    if (segs.length === 0) throw new Error('SESSION_HAS_NO_SEGMENTS');
+    const last = segs[segs.length - 1];
+    if (last.endedAtMs == null) throw new Error('ILLEGAL_TRANSITION');
+    const newEndMs = last.endedAtMs + deltaSeconds * 1000;
+    if (newEndMs < last.startedAtMs) throw new Error('INVALID_RETIME');
     const before = s.activeSeconds;
-    const after = Math.max(0, before + deltaSeconds);
     await this.db.batch([
-      this.db.prepare('UPDATE session SET active_seconds = ? WHERE id = ?').bind(after, sessionId),
+      this.db.prepare('UPDATE active_segment SET ended_at_ms = ? WHERE id = ?').bind(newEndMs, last.id),
+      this.db
+        .prepare(
+          'UPDATE session SET active_seconds = (SELECT COALESCE(SUM(MAX(0, ended_at_ms - started_at_ms)), 0) / 1000 FROM active_segment WHERE session_id = ?) WHERE id = ?',
+        )
+        .bind(sessionId, sessionId),
       this.db
         .prepare('INSERT INTO manual_adjustment (session_id, kind, before_json, after_json, reason, created_at_ms) VALUES (?, ?, ?, ?, ?, ?)')
-        .bind(sessionId, 'retime', JSON.stringify({ active_seconds: before }), JSON.stringify({ active_seconds: after }), reason, nowMs),
+        .bind(sessionId, 'retime', JSON.stringify({ active_seconds: before, ended_at_ms: last.endedAtMs }), JSON.stringify({ ended_at_ms: newEndMs }), reason, nowMs),
       this.db
         .prepare('INSERT INTO audit_log (actor, action, target, detail_json, server_time_ms) VALUES (?, ?, ?, ?, ?)')
         .bind('owner', 'retime', sessionId, JSON.stringify({ delta_seconds: deltaSeconds }), nowMs),
@@ -342,7 +349,8 @@ export class D1Storage implements Storage {
   }
 
   async maxEventId(): Promise<number> {
-    const r = await this.db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM session_event').first<{ m: number }>();
+    // revision = 审计日志最大 id（覆盖所有写操作，见 sqlite-storage 同款注释）。
+    const r = await this.db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM audit_log').first<{ m: number }>();
     return r?.m ?? 0;
   }
 

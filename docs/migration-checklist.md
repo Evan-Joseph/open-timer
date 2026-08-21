@@ -27,7 +27,7 @@
 | --- | --- | --- |
 | API | 云函数 Node 运行时 + Hono 适配 | 专有 SDK，只在入口层使用 |
 | 存储 | CloudBase 数据库（MySQL 方言）新 adapter | 方言差异比 D1 大，migration 需按 MySQL 重写一版 |
-| 登录 | 保持自有 argon2id cookie 方案，不用 CloudBase 登录 | — |
+| 登录 | 保持自有 PBKDF2-SHA256 cookie 方案，不用 CloudBase 登录 | — |
 | 域名 | 需备案 | 国内访问优势 |
 
 ## 回退

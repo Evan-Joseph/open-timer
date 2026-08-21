@@ -39,7 +39,7 @@ export interface ClockStore {
 }
 
 const POLL_MS_IDLE = 15_000; // 空闲时慢轮询
-const POLL_MS_ACTIVE = 5_000; // 运行中快轮询（UI 靠单调时钟平滑，轮询只校准）
+const POLL_MS_ACTIVE = 3_000; // 运行中快轮询（UI 靠单调时钟平滑，轮询只校准）
 const ERROR_TTL_MS = 6_000;
 const TOAST_TTL_MS = 2_600;
 const SYNC_PULSE_KEY = 'clock-sync-pulse';
@@ -57,6 +57,10 @@ export function useClockStore(): ClockStore {
   const toastTimerRef = useRef<number | null>(null);
   /** 每次收到 state 响应时记录单调时刻，供锚点使用 */
   const perfAtStateRef = useRef<number>(0);
+  /** refresh 发出时刻（performance.now），用于 RTT 半程锚点修正 */
+  const sendPerfRef = useRef<number>(0);
+  /** 同源多标签同步主通道（BroadcastChannel），不可用时回退 storage 事件 */
+  const bcRef = useRef<BroadcastChannel | null>(null);
   /** 写操作进行中：期间轮询响应不得覆盖乐观状态（防止"结束反馈反复横跳"） */
   const writeLockedRef = useRef(false);
   /** 锚点纪律：保留上一个锚点，偏差小时不重锚（防计时抖动） */
@@ -77,7 +81,10 @@ export function useClockStore(): ClockStore {
     if (writeLockedRef.current || epoch !== syncEpochRef.current) return;
     // 丢弃滞后的轮询响应（以服务端时间戳为准），防止旧状态回跳
     if (stateRef.current && s.server_now_ms <= stateRef.current.server_now_ms) return;
-    perfAtStateRef.current = performance.now();
+    // RTT 半程锚点：把服务端 server_now_ms 配到「请求-响应中点」而非响应到达时刻，
+    // 消除系统性 RTT/2 偏差（公网 RTT 200-300ms → 原多算 100-150ms）。
+    perfAtStateRef.current =
+      sendPerfRef.current > 0 ? (sendPerfRef.current + performance.now()) / 2 : performance.now();
     stateRef.current = s;
     setState(s);
   }, []);
@@ -103,7 +110,13 @@ export function useClockStore(): ClockStore {
   }, []);
 
   const notifyPeers = useCallback(() => {
-    localStorage.setItem(SYNC_PULSE_KEY, `${Date.now()}:${crypto.randomUUID()}`);
+    // 同源多标签同步：BroadcastChannel 优先（进程内、无 localStorage 同步写盘副作用），
+    // 不可用时回退 localStorage storage 事件（storage 监听处兜底）。
+    if (bcRef.current) {
+      bcRef.current.postMessage({ kind: 'sync' });
+    } else {
+      localStorage.setItem(SYNC_PULSE_KEY, `${Date.now()}:${crypto.randomUUID()}`);
+    }
   }, []);
 
   /** 错误提示：自动消失，不打扰 */
@@ -122,11 +135,15 @@ export function useClockStore(): ClockStore {
   const refresh = useCallback(async () => {
     const epoch = syncEpochRef.current;
     const sequence = ++refreshSeqRef.current;
+    sendPerfRef.current = performance.now(); // RTT 半程锚点：记录发出时刻
     try {
-      // state 与 sessions 并行拉取，减少串行延迟
+      // sessions 的日期必须跟随服务端权威的 today_date（而非客户端墙钟）。
+      // 首次加载无 state 时用客户端兜底；之后一律以服务端日期为准，跨北京时间午夜
+      // 时不会因客户端墙钟/时区偏差拉错当天会话（契约：客户端不自行换算日期）。
+      const today = stateRef.current?.today_date ?? shanghaiTodayLocal();
       const [s] = await Promise.all([
         apiGet<StateApi>('/api/v1/state'),
-        apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${shanghaiTodayLocal()}`)
+        apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${today}`)
           .then((d) => applySessions(d.sessions, epoch, sequence))
           .catch(() => {}),
       ]);
@@ -144,7 +161,21 @@ export function useClockStore(): ClockStore {
       if (event.key === SYNC_PULSE_KEY) void refresh();
     };
     window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
+    // 同源多标签主通道：BroadcastChannel，收到同步脉冲立即 refresh（服务端权威校正）。
+    // 比 storage 事件更可靠（Safari 隐私模式等场景 storage 事件不可靠）且无写盘开销。
+    let bc: BroadcastChannel | null = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+      bc = new BroadcastChannel('immersive-clock');
+      bc.onmessage = (event: MessageEvent) => {
+        if (event.data?.kind === 'sync') void refresh();
+      };
+    }
+    bcRef.current = bc;
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      bc?.close();
+      bcRef.current = null;
+    };
   }, [phase, refresh]);
 
   // 初始鉴权探测
@@ -173,12 +204,24 @@ export function useClockStore(): ClockStore {
     const onVisible = () => {
       if (document.visibilityState === 'visible') refresh();
     };
+    // bfcache（往返缓存）恢复只触发 pageshow，不走 focus/visibilitychange；
+    // 冻结（Page Lifecycle freeze/resume）恢复也不触发二者，需单独监听。
+    // 冻结期间 performance.now() 继续走，恢复后 compute() 自动算出含冻结时长的正确 elapsed；
+    // 这里补 refresh 只是消除「解冻后到下一次轮询前」的显示滞后。
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) refresh();
+    };
+    const onResume = () => refresh();
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onVisible);
+    window.addEventListener('pageshow', onPageShow);
+    document.addEventListener('resume', onResume);
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onVisible);
+      window.removeEventListener('pageshow', onPageShow);
+      document.removeEventListener('resume', onResume);
     };
   }, [phase, refresh, isActive]);
 

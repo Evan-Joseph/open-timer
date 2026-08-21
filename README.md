@@ -35,7 +35,7 @@ npm run test:e2e        # Playwright（自动起服务，端口 4390）
 
 ## 鉴权
 
-- 首次访问设置 owner 密码（argon2id）；登录后 HttpOnly + SameSite=Lax cookie，7 天有效。
+- 首次访问设置 owner 密码（PBKDF2-SHA256，10 万次迭代，Web Crypto 跨运行时）；登录后 HttpOnly + SameSite=Lax cookie，7 天有效。
 - 总控只读凭据：`POST /api/v1/credentials`（owner）生成 `clk_…` token，仅显示一次；`POST /api/v1/credentials/:id/revoke` 撤销；支持轮换（新建+撤销）。
 
 ## 总控只读 API（v1）

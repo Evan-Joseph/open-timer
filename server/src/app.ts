@@ -469,7 +469,12 @@ export function createApp(deps: AppDeps): Hono {
       const session = await storage.getSession(id);
       if (!session) return { status: 404, body: { error: 'SESSION_NOT_FOUND' } };
       if (session.status !== 'stopped') return { status: 409, body: { error: 'ILLEGAL_TRANSITION' } };
-      await storage.applyRetime(id, body.data.delta_seconds, body.data.reason, now());
+      try {
+        await storage.applyRetime(id, body.data.delta_seconds, body.data.reason, now());
+      } catch (error) {
+        if ((error as Error).message === 'INVALID_RETIME') return { status: 400, body: { error: 'INVALID_RETIME' } };
+        throw error;
+      }
       return { status: 200, body: sessionResponse((await storage.getSession(id))!) };
     }),
   );
@@ -550,10 +555,16 @@ export function createApp(deps: AppDeps): Hono {
     const segMap = await storage.segmentsForSessions(sessions.map((s) => s.id));
     const active = await storage.getActiveSession('owner');
     const revision = await storage.maxEventId();
-    const etag = `W/"${date}-${revision}"`;
+    // running 会话的 active_seconds 是随 generated_at 变化的暂算值（非事件驱动），
+    // 而 revision 只随事件（pause/resume/stop 等）递增。running 期间 revision 不变但
+    // 响应体秒数在涨：若继续用 date-revision 作 ETag，带 If-None-Match 的 Agent 会
+    // 拿到 304 却丢失正在增长的暂算秒数。故 running 期间禁用 304 重验证、不设 ETag
+    // （Cache-Control 已是 no-cache，每次仍会带请求 revalidate，但拿回完整 200 体）。
+    const runningNow = active?.session.status === 'running';
+    const etag = runningNow ? null : `W/"${date}-${revision}"`;
 
     const inm = c.req.header('if-none-match');
-    if (inm && inm === etag) {
+    if (etag && inm && inm === etag) {
       c.header('ETag', etag);
       return c.body(null, 304);
     }
@@ -568,7 +579,7 @@ export function createApp(deps: AppDeps): Hono {
       activeSession: active?.session ?? null,
       activeSegments: active?.segments ?? [],
     });
-    c.header('ETag', etag);
+    if (etag) c.header('ETag', etag);
     return c.json(summary);
   });
 
