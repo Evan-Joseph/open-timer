@@ -104,11 +104,11 @@ test('1024x640 中 7 天泳道不触发页面滚动', async ({ page }) => {
   await expect(page.locator('.history-subject-list > span')).toHaveCount(7);
   await expectDocumentFits(page);
   await expectWithinViewport(page, '.clockface');
-  await expectWithinViewport(page, '.history-strip');
+  await expectWithinViewport(page, '.history-overlay-panel');
   const historyClearance = await page.evaluate(() => ({
     clockBottom: document.querySelector('.clockface')!.getBoundingClientRect().bottom,
     timelineTop: document.querySelector('.timeline')!.getBoundingClientRect().top,
-    historyBottom: document.querySelector('.history-strip')!.getBoundingClientRect().bottom,
+    historyBottom: document.querySelector('.history-overlay-panel')!.getBoundingClientRect().bottom,
     viewportBottom: document.documentElement.clientHeight,
   }));
   expect(

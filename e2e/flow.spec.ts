@@ -562,7 +562,7 @@ test.describe('近 7 天执行回顾', () => {
       window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 4
     ));
 
-    await page.getByTestId('history-toggle').click();
+    await page.keyboard.press('Escape');
     await expect(report).toHaveCount(0);
     todaySessionCount = 2;
     todayHasUnfinished = true;
@@ -570,14 +570,14 @@ test.describe('近 7 天执行回顾', () => {
     await expect(report.locator('.history-lane').last().locator('.history-lane-segment')).toHaveCount(1);
     await expect(report.locator('.history-lane-segment')).toHaveCount(7);
 
-    await page.getByTestId('history-toggle').click();
+    await page.keyboard.press('Escape');
     await expect(report).toHaveCount(0);
     todayOpenStatus = 'paused';
     await page.getByTestId('history-toggle').click();
     await expect(report.locator('.history-lane').last().locator('.history-lane-segment')).toHaveCount(1);
     await expect(report.locator('.history-lane-segment')).toHaveCount(7);
 
-    await page.getByTestId('history-toggle').click();
+    await page.keyboard.press('Escape');
     await expect(report).toHaveCount(0);
     todayHasUnfinished = false;
     await page.getByTestId('history-toggle').click();

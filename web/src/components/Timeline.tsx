@@ -105,8 +105,6 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const prevActiveIdRef = useRef<string | null>(null);
   const historyCacheRef = useRef<Map<string, SessionApi[]>>(new Map());
   const syncedTodaySessionsRef = useRef(store.sessions);
-  const historyReportRef = useRef<HTMLDivElement>(null);
-  const autoScrolledHistoryRef = useRef(false);
   const hoverPreviewTimerRef = useRef<number | null>(null);
 
   const loadHistory = useCallback(async () => {
@@ -426,6 +424,16 @@ export default function Timeline({ store }: { store: ClockStore }) {
     };
   }, [popover]);
 
+  // 近 7 天回顾浮层：Esc 关闭（点击遮罩 / 右上角 X 在 JSX 内处理）
+  useEffect(() => {
+    if (!historyOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setHistoryOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [historyOpen]);
+
   // 撤回
   const handleWithdraw = useCallback(async () => {
     if (!popover) return;
@@ -549,22 +557,12 @@ export default function Timeline({ store }: { store: ClockStore }) {
     }];
   }), [minuteToPercent, visibleRange.endMinute, visibleRange.startMinute]);
 
-  useEffect(() => {
-    if (!historyOpen || historyLoading || autoScrolledHistoryRef.current) return;
-    autoScrolledHistoryRef.current = true;
-    const id = window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
-      });
-    });
-    return () => window.cancelAnimationFrame(id);
-  }, [historyOpen, historyLoading, historyLanes]);
-
   return (
+    <>
     <section className="timeline" aria-label="时间轴">
       <div className="timeline-head">
         <h2 className="timeline-title">
-          {historyOpen ? '近 7 天执行回顾' : `时间轴 · ${viewDate}`}
+          {`时间轴 · ${viewDate}`}
           {!historyOpen && totalSeconds > 0 && <span className="timeline-total"> · 共 {formatDurationZh(totalSeconds)}</span>}
         </h2>
         <div className="timeline-nav">
@@ -621,7 +619,6 @@ export default function Timeline({ store }: { store: ClockStore }) {
               const next = !historyOpen;
               setHistoryOpen(next);
               if (next) {
-                autoScrolledHistoryRef.current = false;
                 void loadHistory();
               }
             }}
@@ -631,87 +628,6 @@ export default function Timeline({ store }: { store: ClockStore }) {
           </button>
         </div>
       </div>
-
-      <AnimatePresence initial={false}>
-      {historyOpen && (
-        <motion.div
-          key="week"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={viewTransition}
-        >
-        <div className="history-strip" data-testid="history-strip" ref={historyReportRef}>
-          <div className="history-strip-head">
-            <strong>{historyModel.current[0]?.date.slice(5)} – {historyModel.current.at(-1)?.date.slice(5)}</strong>
-          </div>
-          {historyLoading ? <div className="history-empty">正在读取…</div> : (
-            <div className="history-report">
-              <div className="history-metrics" aria-label="近 7 天汇总">
-                <div><span>总计</span><strong>{formatDurationZh(historyModel.total)}</strong></div>
-                <div><span>日均</span><strong>{formatDurationZh(historyModel.dailyAverage)}</strong></div>
-                <div><span>最长一天</span><strong>{formatDurationZh(historyModel.maxDay)}</strong></div>
-              </div>
-              <div className="history-lanes" role="list" aria-label="近 7 天固定全天泳道">
-                <div className="history-axis" aria-hidden>
-                  <span />
-                  <div className="history-axis-track">
-                    <span className="axis-start">08:00</span>
-                    <span style={{ left: '27.586%' }}>12:00</span>
-                    <span style={{ left: '55.172%' }}>16:00</span>
-                    <span style={{ left: '82.759%' }}>20:00</span>
-                    <span className="axis-end">22:30</span>
-                  </div>
-                </div>
-                {historyLanes.map((day) => (
-                  <div key={day.date} className="history-lane" role="listitem" aria-label={`${day.date}，执行 ${formatDurationZh(day.total_active_seconds)}`}>
-                    <div className="history-lane-label">
-                      <strong>{day.date === store.todayDate ? '今天' : weekdayLabel(day.date)}</strong>
-                      <span>{day.date.slice(5)} · {formatHistoryDuration(day.total_active_seconds)}</span>
-                    </div>
-                    <div className="history-lane-track">
-                      {QUIET_PERIODS.map((period) => (
-                        <span
-                          key={period.id}
-                          className="history-quiet-period"
-                          style={{
-                            left: `${((period.startMinute - LEARNING_DAY.startMinute) / (LEARNING_DAY.endMinute - LEARNING_DAY.startMinute)) * 100}%`,
-                            width: `${((period.endMinute - period.startMinute) / (LEARNING_DAY.endMinute - LEARNING_DAY.startMinute)) * 100}%`,
-                          }}
-                          title={`${period.label}静默时段`}
-                        >{period.label}</span>
-                      ))}
-                      {day.segments.map((segment) => (
-                        <span key={segment.key} className="history-lane-segment" data-color={segment.colorId} style={{ left: `${segment.left}%`, width: `${segment.width}%` }} />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {historyModel.subjects.length > 0 && (
-                <div className="history-subjects" aria-label="近 7 天科目分布">
-                  <div className="history-subject-bar" aria-hidden>
-                    {historyModel.subjects.map((subject) => (
-                      <span key={subject.subjectId} data-color={subject.colorId} style={{ width: `${subject.share * 100}%`, background: 'var(--sc)' }} />
-                    ))}
-                  </div>
-                  <div className="history-subject-list">
-                    {historyModel.subjects.map((subject) => (
-                      <span key={subject.subjectId} data-color={subject.colorId}>
-                        <i className="pill-dot" aria-hidden /> {subject.label}
-                        <strong>{formatDurationZh(subject.seconds)}</strong>
-                        <small>{Math.round(subject.share * 100)}%</small>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        </motion.div>
-      )}
-      </AnimatePresence>
 
       <AnimatePresence mode="wait" initial={false}>
       {!historyOpen && <motion.div
@@ -966,5 +882,108 @@ export default function Timeline({ store }: { store: ClockStore }) {
         ))}
       </div>}
     </section>
+
+    {/* 近 7 天执行回顾：居中浮层（drill-down 模态），时钟保持全尺寸不被挤压 */}
+    <AnimatePresence initial={false}>
+      {historyOpen && (
+        <motion.div
+          key="history-overlay"
+          className="history-overlay-backdrop"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.25, ease: [0.2, 0, 0, 1] }}
+          onClick={() => setHistoryOpen(false)}
+        >
+          <motion.div
+            key="history-panel"
+            className="history-overlay-panel"
+            data-testid="history-strip"
+            role="dialog"
+            aria-modal="true"
+            aria-label="近 7 天执行回顾"
+            initial={{ opacity: 0, y: 14, scale: 0.985 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.985 }}
+            transition={{ duration: 0.25, ease: [0.2, 0, 0, 1] }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="history-overlay-head">
+              <div className="history-overlay-title">
+                <strong>近 7 天执行回顾</strong>
+                <span>{historyModel.current[0]?.date.slice(5)} – {historyModel.current.at(-1)?.date.slice(5)}</span>
+              </div>
+              <button className="icon-btn" aria-label="关闭" title="关闭" onClick={() => setHistoryOpen(false)}>
+                <X size={16} />
+              </button>
+            </div>
+            {historyLoading ? <div className="history-empty">正在读取…</div> : (
+              <div className="history-report">
+                <div className="history-metrics" aria-label="近 7 天汇总">
+                  <div><span>总计</span><strong>{formatDurationZh(historyModel.total)}</strong></div>
+                  <div><span>日均</span><strong>{formatDurationZh(historyModel.dailyAverage)}</strong></div>
+                  <div><span>最长一天</span><strong>{formatDurationZh(historyModel.maxDay)}</strong></div>
+                </div>
+                <div className="history-lanes" role="list" aria-label="近 7 天固定全天泳道">
+                  <div className="history-axis" aria-hidden>
+                    <span />
+                    <div className="history-axis-track">
+                      <span className="axis-start">08:00</span>
+                      <span style={{ left: '27.586%' }}>12:00</span>
+                      <span style={{ left: '55.172%' }}>16:00</span>
+                      <span style={{ left: '82.759%' }}>20:00</span>
+                      <span className="axis-end">22:30</span>
+                    </div>
+                  </div>
+                  {historyLanes.map((day) => (
+                    <div key={day.date} className="history-lane" role="listitem" aria-label={`${day.date}，执行 ${formatDurationZh(day.total_active_seconds)}`}>
+                      <div className="history-lane-label">
+                        <strong>{day.date === store.todayDate ? '今天' : weekdayLabel(day.date)}</strong>
+                        <span>{day.date.slice(5)} · {formatHistoryDuration(day.total_active_seconds)}</span>
+                      </div>
+                      <div className="history-lane-track">
+                        {QUIET_PERIODS.map((period) => (
+                          <span
+                            key={period.id}
+                            className="history-quiet-period"
+                            style={{
+                              left: `${((period.startMinute - LEARNING_DAY.startMinute) / (LEARNING_DAY.endMinute - LEARNING_DAY.startMinute)) * 100}%`,
+                              width: `${((period.endMinute - period.startMinute) / (LEARNING_DAY.endMinute - LEARNING_DAY.startMinute)) * 100}%`,
+                            }}
+                            title={`${period.label}静默时段`}
+                          >{period.label}</span>
+                        ))}
+                        {day.segments.map((segment) => (
+                          <span key={segment.key} className="history-lane-segment" data-color={segment.colorId} style={{ left: `${segment.left}%`, width: `${segment.width}%` }} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {historyModel.subjects.length > 0 && (
+                  <div className="history-subjects" aria-label="近 7 天科目分布">
+                    <div className="history-subject-bar" aria-hidden>
+                      {historyModel.subjects.map((subject) => (
+                        <span key={subject.subjectId} data-color={subject.colorId} style={{ width: `${subject.share * 100}%`, background: 'var(--sc)' }} />
+                      ))}
+                    </div>
+                    <div className="history-subject-list">
+                      {historyModel.subjects.map((subject) => (
+                        <span key={subject.subjectId} data-color={subject.colorId}>
+                          <i className="pill-dot" aria-hidden /> {subject.label}
+                          <strong>{formatDurationZh(subject.seconds)}</strong>
+                          <small>{Math.round(subject.share * 100)}%</small>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+    </>
   );
 }

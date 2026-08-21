@@ -682,10 +682,30 @@ button:focus-visible, input:focus-visible {
 }
 .timeline-scale button:hover { color: var(--text-1); }
 .timeline-scale button.selected { color: var(--text-1); background: var(--surface-1); box-shadow: var(--shadow-sm); }
-.history-strip { max-width: 960px; margin: 0 auto 14px; padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: var(--shadow-sm); }
-.history-strip-head { display: flex; justify-content: space-between; gap: var(--space-3); align-items: flex-start; color: var(--text-3); font-size: var(--fs-xs); }
-.history-strip-head strong { color: var(--text-2); font-family: var(--font-num); font-size: var(--fs-xs); font-weight: 500; font-variant-numeric: tabular-nums; }
-.history-report { display: grid; gap: var(--space-4); margin-top: 14px; }
+/* 近 7 天回顾浮层：居中模态面板（drill-down），参数参照 shadcn/Radix Dialog 与本项目设置弹窗 */
+.history-overlay-backdrop {
+  position: fixed; inset: 0; z-index: 40;
+  background: var(--overlay-scrim);
+  display: flex; align-items: center; justify-content: center;
+  padding: var(--space-5);
+}
+.history-overlay-panel {
+  width: min(960px, calc(100vw - 64px));
+  max-height: calc(100dvh - 64px);
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border); border-radius: var(--radius-xl);
+  background: var(--popover-surface);
+  backdrop-filter: blur(32px) saturate(1.3);
+  -webkit-backdrop-filter: blur(32px) saturate(1.3);
+  box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: var(--space-3);
+}
+.history-overlay-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.history-overlay-title { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.history-overlay-title strong { font-size: var(--fs-xl); font-weight: 600; color: var(--text-1); }
+.history-overlay-title span { color: var(--text-3); font-family: var(--font-num); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.history-report { display: grid; gap: var(--space-4); }
 .history-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid var(--border); }
 .history-metrics > div { display: grid; gap: 1px; padding: var(--space-3) var(--space-3); border-right: 1px solid var(--border); }
 .history-metrics > div:last-child { border-right: 0; }
@@ -1094,8 +1114,6 @@ button:active:not(:disabled) { transform: scale(0.98); }
   .big-timer { font-size: 56px; min-height: 62px; }
   .idle-clock { font-size: 44px; }
   .main { padding: var(--space-5) var(--space-4); }
-  .history-strip-head { display: grid; gap: 2px; }
-  .history-strip { padding: var(--space-3) var(--space-2); }
   .history-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .history-chart { gap: 2px; }
   .history-day { padding-inline: 2px; }
@@ -1142,31 +1160,8 @@ button:active:not(:disabled) { transform: scale(0.98); }
   .timeline-empty-inline { top: 46px; }
 }
 
-.app:has(.history-strip) {
-  grid-template-rows: var(--topbar-height) minmax(260px, calc(40.4dvh + 4px)) minmax(0, 1fr);
-}
-.app:has(.history-strip) .main { padding-block: 6px; }
-.app:has(.history-strip) .clockface { max-width: 760px; gap: 2px; }
-.app:has(.history-strip) .idle-clock,
-.app:has(.history-strip) .big-timer { font-size: clamp(46px, 7.8dvh, 72px); }
-.app:has(.history-strip) .idle-rest { min-height: 26px; }
-.app:has(.history-strip) .away-line { padding-block: 3px; font-size: var(--fs-sm); }
-.app:has(.history-strip) .timeline { overflow: hidden; padding-block: 6px; }
-.app:has(.history-strip) .history-strip {
-  height: auto;
-  margin-bottom: 0;
-  padding: var(--space-2) var(--space-3);
-  overflow: hidden;
-}
-.app:has(.history-strip) .history-report { gap: var(--space-2); margin-top: 6px; }
-.app:has(.history-strip) .history-metrics > div { padding: 4px 10px; }
-.app:has(.history-strip) .history-metrics strong { font-size: var(--fs-base); }
-.app:has(.history-strip) .history-lanes { gap: 3px; }
-.app:has(.history-strip) .history-axis { min-height: 13px; }
-.app:has(.history-strip) .history-lane { min-height: 18px; }
-.app:has(.history-strip) .history-subjects { gap: var(--space-1); }
-.app:has(.history-strip) .history-subject-bar { height: 5px; }
-.app:has(.history-strip) .history-subject-list { gap: 2px 12px; line-height: 1; }
+/* 近 7 天回顾已改为居中浮层（.history-overlay-*），时钟保持全尺寸，
+   不再使用 .app:has(.history-strip) 压缩主时钟。 */
 
 /* ==========================================================================
    reduced motion
