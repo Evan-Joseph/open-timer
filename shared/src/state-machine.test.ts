@@ -21,9 +21,10 @@ describe('状态机转移表', () => {
     expect(canTransition('paused', 'paused')).toBe(false);
   });
 
-  it('stopped 只能 void', () => {
+  it('stopped 可 void / resume（误触继续），不可 stop / created', () => {
     expect(canTransition('stopped', 'voided')).toBe(true);
-    expect(canTransition('stopped', 'resumed')).toBe(false);
+    expect(canTransition('stopped', 'resumed')).toBe(true);
+    expect(nextStatus('stopped', 'resumed')).toBe('running');
     expect(canTransition('stopped', 'stopped')).toBe(false);
     expect(canTransition('stopped', 'created')).toBe(false);
   });
@@ -36,7 +37,7 @@ describe('状态机转移表', () => {
 
   it('非法转移抛 StateMachineError', () => {
     expect(() => nextStatus(null, 'paused')).toThrow(StateMachineError);
-    expect(() => nextStatus('stopped', 'resumed')).toThrow(StateMachineError);
+    expect(() => nextStatus('voided', 'resumed')).toThrow(StateMachineError);
   });
 
   it('有活动会话时不可 created', () => {

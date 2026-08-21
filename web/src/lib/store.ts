@@ -34,6 +34,8 @@ export interface ClockStore {
   switchSubject: (subjectId: string) => Promise<void>;
   /** 撤回（作废）一个已停止的会话；服务端保留审计，所有汇总自动排除 */
   withdraw: (sessionId: string, reason?: string | null) => Promise<boolean>;
+  /** 误触继续：重开一个已停止的会话（保留原段与秒数，新段从当前起算） */
+  resumeSession: (sessionId: string) => Promise<boolean>;
   setNote: (sessionId: string, note: string) => Promise<void>;
   adjustStart: (sessionId: string, startedAt: string) => Promise<boolean>;
 }
@@ -458,6 +460,30 @@ export function useClockStore(): ClockStore {
     [beginWrite, sessions, refresh, flashError, flashToast, notifyPeers],
   );
 
+  /**
+   * 误触继续：重开已停止会话。服务端约束：仅 stopped 可重开，且无其他活动会话；
+   * 原会话的段、备注、时长修正全部保留，新段从当前时刻起算。
+   */
+  const resumeSession = useCallback(
+    async (sessionId: string) => {
+      beginWrite();
+      setBusy(true);
+      const res = await apiPost(`/api/v1/sessions/${sessionId}/resume`);
+      setBusy(false);
+      await releaseWriteLock();
+      if (!res.ok) {
+        flashError('继续失败，请重试');
+        refresh();
+        return false;
+      }
+      flashToast('已继续这段会话');
+      notifyPeers();
+      await refresh();
+      return true;
+    },
+    [beginWrite, refresh, flashError, flashToast, notifyPeers],
+  );
+
   const setNote = useCallback(
     async (sessionId: string, note: string) => {
       const res = await apiPatch(`/api/v1/sessions/${sessionId}/note`, { note }).catch(() => null);
@@ -553,8 +579,12 @@ export function useClockStore(): ClockStore {
     };
     const prev = awayAnchorRef.current;
     if (prev && prev.running) {
-      const driftSec = Math.abs(prev.confirmedSeconds + (performance.now() - prev.anchorPerfMs) / 1000 - next.confirmedSeconds);
-      if (driftSec <= 1.2) return prev;
+      const extrapolated = prev.confirmedSeconds + (performance.now() - prev.anchorPerfMs) / 1000;
+      const driftSec = Math.abs(extrapolated - next.confirmedSeconds);
+      // 休息时长单调前进：偏差小保持旧锚（平滑）；新确认值落后于本地外推时也保持旧锚，
+      // 防止「已休息」数字回跳（轮询校准竞态下服务端确认值可能暂时落后于单调外推）。
+      // 仅当确认值领先外推 >1.2s（如设备休眠后真实休息比外推更长）才重锚。
+      if (driftSec <= 1.2 || next.confirmedSeconds < extrapolated) return prev;
     }
     awayAnchorRef.current = next;
     return next;
@@ -582,6 +612,7 @@ export function useClockStore(): ClockStore {
     stop,
     switchSubject,
     withdraw,
+    resumeSession,
     setNote,
     adjustStart,
   };

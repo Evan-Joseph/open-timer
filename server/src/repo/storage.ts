@@ -46,7 +46,7 @@ export interface Storage {
   }): Promise<SessionRow | null>;
   /** 关闭开放段并追加事件。 */
   pauseSession(sessionId: string, nowMs: number, idempotencyKey: string): Promise<void>;
-  /** 开新段并追加事件。 */
+  /** 开新段并追加事件；stopped 会话可被重开（误触继续）：清除结束时刻并开新段。 */
   resumeSession(sessionId: string, nowMs: number, idempotencyKey: string): Promise<void>;
   /** 关闭开放段、定格会话。 */
   stopSession(sessionId: string, nowMs: number, endReason: string, idempotencyKey: string): Promise<void>;

@@ -107,7 +107,7 @@ test('视觉审计样式断言', async ({ page }) => {
   });
   expect(desktopPopover.width).toBe(440);
   expect(desktopPopover.background).toBe('rgba(255, 255, 255, 0.96)');
-  expect(desktopPopover.actionColumns.split(' ').length).toBe(3);
+  expect(desktopPopover.actionColumns.split(' ').length).toBe(2); // 2×2 网格（保存备注/更新起点/继续这段/撤回）
   expect(desktopPopover.wrappedButtons).toBe(0);
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -268,7 +268,7 @@ test('工具栏对齐与动作行等高契约', async ({ page }) => {
   const finishHeights = await page
     .locator('.finish-actions.action-row > button')
     .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
-  expect(finishHeights.length).toBe(2);
+  expect(finishHeights.length).toBe(3); // 撤回这条 / 好，继续 / 继续这段
   for (const h of finishHeights) expect(h).toBe(44);
   await page.getByRole('button', { name: '好，继续' }).click();
 
@@ -277,7 +277,7 @@ test('工具栏对齐与动作行等高契约', async ({ page }) => {
   const popHeights = await page
     .locator('.popover-actions.action-row > button')
     .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
-  expect(popHeights.length).toBe(3);
+  expect(popHeights.length).toBe(4); // 保存备注/更新起点/继续这段/撤回
   for (const h of popHeights) expect(h).toBe(44);
   await page.keyboard.press('Escape');
 });

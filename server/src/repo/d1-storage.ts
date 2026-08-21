@@ -202,11 +202,17 @@ export class D1Storage implements Storage {
 
   async resumeSession(sessionId: string, nowMs: number, idempotencyKey: string): Promise<void> {
     const s = await this.requireActive(sessionId);
-    if (s.status !== 'paused') throw new Error('ILLEGAL_TRANSITION');
+    if (s.status !== 'paused' && s.status !== 'stopped') throw new Error('ILLEGAL_TRANSITION');
+    const statusStmt =
+      s.status === 'stopped'
+        ? this.db.prepare("UPDATE session SET status = 'running', ended_at_ms = NULL, end_reason = NULL WHERE id = ?").bind(sessionId)
+        : this.db.prepare("UPDATE session SET status = 'running' WHERE id = ?").bind(sessionId);
     await this.db.batch([
+      statusStmt,
       this.db.prepare('INSERT INTO active_segment (session_id, started_at_ms, ended_at_ms) VALUES (?, ?, NULL)').bind(sessionId, nowMs),
-      this.db.prepare("UPDATE session SET status = 'running' WHERE id = ?").bind(sessionId),
-      this.db.prepare('INSERT INTO session_event (session_id, kind, idempotency_key, server_time_ms, payload_json) VALUES (?, ?, ?, ?, ?)').bind(sessionId, 'resumed', idempotencyKey, nowMs, null),
+      this.db
+        .prepare('INSERT INTO session_event (session_id, kind, idempotency_key, server_time_ms, payload_json) VALUES (?, ?, ?, ?, ?)')
+        .bind(sessionId, 'resumed', idempotencyKey, nowMs, s.status === 'stopped' ? JSON.stringify({ reopened_from: 'stopped' }) : null),
     ]);
   }
 

@@ -230,10 +230,15 @@ export class SqliteStorage implements Storage {
   async resumeSession(sessionId: string, nowMs: number, idempotencyKey: string): Promise<void> {
     const tx = this.db.transaction(() => {
       const s = this.requireActive(sessionId);
-      if (s.status !== 'paused') throw new Error('ILLEGAL_TRANSITION');
+      if (s.status !== 'paused' && s.status !== 'stopped') throw new Error('ILLEGAL_TRANSITION');
+      if (s.status === 'stopped') {
+        // 误触结束后重开会话：清除结束时刻/原因，原段与备注、修正保留
+        this.db.prepare("UPDATE session SET status = 'running', ended_at_ms = NULL, end_reason = NULL WHERE id = ?").run(sessionId);
+      } else {
+        this.db.prepare("UPDATE session SET status = 'running' WHERE id = ?").run(sessionId);
+      }
       this.db.prepare('INSERT INTO active_segment (session_id, started_at_ms, ended_at_ms) VALUES (?, ?, NULL)').run(sessionId, nowMs);
-      this.db.prepare("UPDATE session SET status = 'running' WHERE id = ?").run(sessionId);
-      this.appendEvent(sessionId, 'resumed', idempotencyKey, nowMs);
+      this.appendEvent(sessionId, 'resumed', idempotencyKey, nowMs, s.status === 'stopped' ? { reopened_from: 'stopped' } : undefined);
     });
     tx();
   }

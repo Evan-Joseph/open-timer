@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Clock, LocateFixed, Undo2, X, List, GanttChart, CalendarDays } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, LocateFixed, Undo2, X, List, GanttChart, CalendarDays, Play } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { ClockStore } from '../lib/store.js';
 import type { DailySummaryApi, SessionApi } from '../lib/api.js';
@@ -420,6 +420,16 @@ export default function Timeline({ store }: { store: ClockStore }) {
     if (ok) {
       setPopover(null);
       // 历史日缓存同步失效
+      historyCacheRef.current.delete(viewDateRef.current);
+    }
+  }, [popover, store]);
+
+  // 误触继续：重开已停止会话（覆盖「结束后才意识到点错」的场景）
+  const handleResume = useCallback(async () => {
+    if (!popover) return;
+    const ok = await store.resumeSession(popover.row.sessionId);
+    if (ok) {
+      setPopover(null);
       historyCacheRef.current.delete(viewDateRef.current);
     }
   }, [popover, store]);
@@ -896,6 +906,9 @@ export default function Timeline({ store }: { store: ClockStore }) {
                 data-testid="popover-save-start"
               >
                 {startSaving ? '更新中…' : '更新起点'}
+              </button>
+              <button className="ghost-btn" onClick={() => void handleResume()} data-testid="popover-resume">
+                <Play size={14} aria-hidden /> 继续这段
               </button>
               <button className="ghost-btn danger-btn" onClick={() => void handleWithdraw()} data-testid="withdraw-btn">
                 <Undo2 size={14} aria-hidden /> 撤回

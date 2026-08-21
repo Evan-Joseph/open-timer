@@ -165,7 +165,7 @@ Base URL：`https://clock.4c666.top`
 |---|---|---|
 | POST | `/api/v1/sessions` | 开始计时，body `{ "subject_id": "math", "intent_note": "可选" }`；返回 201 新会话 |
 | POST | `/api/v1/sessions/:id/pause` | 暂停（离开）；本段结算，暂停时间不计入 |
-| POST | `/api/v1/sessions/:id/resume` | 继续；开启新段，本段从 0 累计 |
+| POST | `/api/v1/sessions/:id/resume` | 继续；开启新段，本段从 0 累计。**误触保护**：`stopped` 会话也可 resume（重开会话、清结束时刻，原段与秒数保留）；已有其他活动会话时 409 `ACTIVE_SESSION_EXISTS` |
 | POST | `/api/v1/sessions/:id/stop` | 结束并保存，body `{ "end_note": "可选" }` |
 | POST | `/api/v1/sessions/:id/switch` | 换科目：结束当前段并开启同会话新科目段，body `{ "subject_id": "..." }` |
 | POST | `/api/v1/sessions/:id/void` | 撤回（误记），body `{ "reason": "可选" }` |

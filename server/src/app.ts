@@ -356,10 +356,27 @@ export function createApp(deps: AppDeps): Hono {
       const id = id0;
       const session = await storage.getSession(id);
       if (!session) return { status: 404, body: { error: 'SESSION_NOT_FOUND' } };
-      if (session.status !== 'paused') return { status: 409, body: { error: 'ILLEGAL_TRANSITION', status: session.status } };
+      if (session.status !== 'paused' && session.status !== 'stopped')
+        return { status: 409, body: { error: 'ILLEGAL_TRANSITION', status: session.status } };
+      // 误触继续：重开已停止会话前，必须没有其他活动会话（唯一活动会话约束）
+      if (session.status === 'stopped') {
+        const active = await storage.getActiveSession('owner');
+        if (active) {
+          return {
+            status: 409,
+            body: { error: 'ACTIVE_SESSION_EXISTS', active_session_id: active.session.id, subject_id: active.session.subjectId },
+          };
+        }
+      }
       const nowMs = now();
       await storage.resumeSession(id, nowMs, `resume:${c.req.header('idempotency-key')}`);
-      await storage.appendAudit('owner', 'session_resume', id, null, nowMs);
+      await storage.appendAudit(
+        'owner',
+        'session_resume',
+        id,
+        session.status === 'stopped' ? JSON.stringify({ reopened_from: 'stopped' }) : null,
+        nowMs,
+      );
       return { status: 200, body: sessionResponse((await storage.getSession(id))!) };
     }),
   );

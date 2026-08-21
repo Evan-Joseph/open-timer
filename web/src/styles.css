@@ -903,8 +903,9 @@ button:focus-visible, input:focus-visible {
   outline: none; border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
-.popover-actions { display: grid; grid-template-columns: 1fr 1fr auto; gap: var(--space-3); }
+.popover-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
 .popover-actions button { min-width: 0; white-space: nowrap; }
+.popover-actions .danger-btn { grid-column: 2; }
 /* 动作行契约：同一行按钮等高（44px 主操作档），层级用填充/颜色区分而非尺寸差，
    避免 36px 次要与 44px 主按钮混排的参差感。行容器在 TSX 侧加 .action-row。 */
 .action-row { align-items: center; }

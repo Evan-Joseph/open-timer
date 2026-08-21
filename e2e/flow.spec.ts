@@ -573,6 +573,60 @@ test.describe('撤回（作废）与一致性', () => {
   });
 });
 
+test.describe('误触继续（stopped 会话可重开）', () => {
+  test('结束反馈卡一键继续：恢复运行态且秒数保留', async ({ page }) => {
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数学二' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1200);
+
+    // 误触场景：想点暂停却点成了结束
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await expect(page.getByTestId('finish-duration')).toBeVisible();
+
+    await page.getByTestId('finish-resume-btn').click();
+    await expect(page.getByTestId('toast')).toContainText('已继续这段会话');
+
+    // 恢复运行态：同一会话继续计时（暂停按钮回来、进行中状态）
+    await expect(page.getByText('· 进行中')).toBeVisible({ timeout: 3_000 });
+    await expect(page.getByRole('button', { name: '暂停计时' })).toBeVisible();
+    const state = await (await page.request.get('/api/v1/state')).json();
+    expect(state.active_session).not.toBeNull();
+    expect(state.active_session.status).toBe('running');
+    // 误触前已计的秒数保留（≥1s）
+    expect(state.active_session.active_seconds).toBeGreaterThanOrEqual(1);
+
+    // 清理：真正结束
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+    await expect(page.getByTestId('idle-clock')).toBeVisible();
+  });
+
+  test('时间轴详情处继续：点错结束、关掉反馈卡后仍可恢复', async ({ page }) => {
+    await doSetup(page);
+    const beforeSegs = await page.locator('.seg').count();
+    await page.getByRole('radio', { name: '英语二' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1200);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    // 关掉结束反馈卡（误以为没有补救入口）
+    await page.getByRole('button', { name: '好，继续' }).click();
+    await expect(page.getByTestId('idle-clock')).toBeVisible();
+    await page.waitForTimeout(1200); // 等 sessions 更新为 stopped
+
+    // 时间轴详情里仍可继续这段
+    await page.locator('.seg-hit').last().click();
+    await expect(page.getByTestId('seg-popover')).toBeVisible();
+    await page.getByTestId('popover-resume').click();
+    await expect(page.getByText('· 进行中')).toBeVisible({ timeout: 3_000 });
+
+    // 清理
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByTestId('finish-withdraw-btn').click();
+    await expect(page.locator('.seg')).toHaveCount(beforeSegs);
+  });
+});
+
 test.describe('离开（暂停）时长显示', () => {
   test('暂停后显示「已离开」计时且不计学习时长', async ({ page }) => {
     await doSetup(page);

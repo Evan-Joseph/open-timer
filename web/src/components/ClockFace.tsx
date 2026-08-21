@@ -289,7 +289,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
               <Undo2 size={14} aria-hidden /> 撤回这条
             </button>
             <button
-              className="primary-btn"
+              className="ghost-btn"
               onClick={() => {
                 if (noteDraft.trim()) void store.setNote(lastStopped.sessionId, noteDraft.trim());
                 setLastStopped(null);
@@ -297,6 +297,21 @@ export default function ClockFace({ store }: { store: ClockStore }) {
               }}
             >
               好，继续
+            </button>
+            {/* 误触保护：把「点成结束」的会话一键继续（服务端重开会话、开新段，原秒数保留） */}
+            <button
+              className="primary-btn"
+              data-testid="finish-resume-btn"
+              disabled={store.busy}
+              onClick={() => {
+                if (noteDraft.trim()) void store.setNote(lastStopped.sessionId, noteDraft.trim());
+                const sid = lastStopped.sessionId;
+                setLastStopped(null);
+                setNoteDraft('');
+                void store.resumeSession(sid);
+              }}
+            >
+              <Play size={18} aria-hidden /> 继续这段
             </button>
           </div>
         </M>

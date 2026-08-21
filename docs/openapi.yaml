@@ -287,15 +287,15 @@ paths:
 
   /sessions/{id}/resume:
     post:
-      summary: 继续（幂等）
+      summary: 继续（幂等）。误触保护：stopped 会话可重开（清结束时刻、保留原段与秒数、开新段）
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
         - $ref: '#/components/parameters/idempotency-key'
       responses:
-        '200': { description: 已继续 }
+        '200': { description: 已继续（重开 stopped 时 payload 带 reopened_from） }
         '400': { description: 缺 Idempotency-Key 或 id 非法 }
         '404': { description: 会话不存在 }
-        '409': { description: 非法状态转移 }
+        '409': { description: 非法状态转移，或重开 stopped 会话时已有其他活动会话（ACTIVE_SESSION_EXISTS） }
 
   /sessions/{id}/stop:
     post:

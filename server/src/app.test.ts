@@ -515,6 +515,88 @@ describe('API 集成', () => {
     expect(etag2).not.toBe(etag1);
   });
 
+  it('误触继续：stopped 会话可重开，新段从当前起算且回放/并发受约束', async () => {
+    const h = { 'content-type': 'application/json', cookie: ctx.cookie };
+    const start = await ctx.app.request('/api/v1/sessions', {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'reopen-start' },
+      body: JSON.stringify({ subject_id: 'math' }),
+    });
+    expect(start.status).toBe(201);
+    const created = await start.json();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const stop = await ctx.app.request(`/api/v1/sessions/${created.session_id}/stop`, {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'reopen-stop' },
+      body: JSON.stringify({}),
+    });
+    expect(stop.status).toBe(200);
+
+    // 重开：恢复 running、清结束时刻、此前秒数保留、开新开放段
+    const resume = await ctx.app.request(`/api/v1/sessions/${created.session_id}/resume`, {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'reopen-resume' },
+    });
+    expect(resume.status).toBe(200);
+    const body = await resume.json();
+    expect(body.status).toBe('running');
+    expect(body.ended_at).toBeNull();
+    expect(body.active_seconds).toBeGreaterThanOrEqual(1);
+    let segments = await ctx.storage.getSegments(created.session_id);
+    expect(segments.length).toBe(2);
+    expect(segments[1].endedAtMs).toBeNull();
+
+    // 幂等回放：同键不重复开段
+    const replay = await ctx.app.request(`/api/v1/sessions/${created.session_id}/resume`, {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'reopen-resume' },
+    });
+    expect(replay.status).toBe(200);
+    expect(replay.headers.get('idempotent-replay')).toBe('true');
+    expect((await ctx.storage.getSegments(created.session_id)).length).toBe(2);
+
+    // 非法转移：running 不可 resume
+    const bad = await ctx.app.request(`/api/v1/sessions/${created.session_id}/resume`, {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'reopen-resume-bad' },
+    });
+    expect(bad.status).toBe(409);
+    expect((await bad.json()).error).toBe('ILLEGAL_TRANSITION');
+
+    // 唯一活动会话守卫：已有活动会话时重开另一个 stopped 会话 → 409
+    const second = await ctx.app.request('/api/v1/sessions', {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'reopen-second-start' },
+      body: JSON.stringify({ subject_id: 'english' }),
+    });
+    expect(second.status).toBe(409); // 当前会话仍 running，无法新建
+    await ctx.app.request(`/api/v1/sessions/${created.session_id}/stop`, {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'reopen-stop-again' },
+      body: JSON.stringify({}),
+    });
+    const third = await ctx.app.request('/api/v1/sessions', {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'reopen-third-start' },
+      body: JSON.stringify({ subject_id: 'english' }),
+    });
+    expect(third.status).toBe(201);
+    const reopenOld = await ctx.app.request(`/api/v1/sessions/${created.session_id}/resume`, {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'reopen-old-blocked' },
+    });
+    expect(reopenOld.status).toBe(409);
+    expect((await reopenOld.json()).error).toBe('ACTIVE_SESSION_EXISTS');
+
+    // 清理
+    const thirdBody = await third.json();
+    await ctx.app.request(`/api/v1/sessions/${thirdBody.session_id}/stop`, {
+      method: 'POST',
+      headers: { ...h, 'idempotency-key': 'reopen-third-stop' },
+      body: JSON.stringify({}),
+    });
+  });
+
   it('凭据生命周期：创建后可见，吊销后 revoked=true', async () => {
     const create = await ctx.app.request('/api/v1/credentials', {
       method: 'POST',

@@ -2,7 +2,7 @@
  * 计时状态机（纯函数）。服务端与测试共用；UI 层不做状态判定。
  *
  * idle → running → paused → running → stopped
- * 附加：stopped → voided（作废，保留审计）。
+ * 附加：stopped → voided（作废，保留审计）；stopped → running（误触结束后继续，重开会话）。
  * 切换科目不在状态机内表达：先 stop(end_reason='subject_switch') 再 start 新会话。
  */
 
@@ -13,7 +13,8 @@ const ACTION_PRECONDITIONS: Record<SessionEventKind, readonly SessionStatus[] | 
   // created 作用于 idle（无活动会话），用 null 表示无活动会话前提
   created: null,
   paused: ['running'],
-  resumed: ['paused'],
+  // stopped 也允许 resumed：误触结束后可继续该会话（重开会话、开新段）
+  resumed: ['paused', 'stopped'],
   stopped: ['running', 'paused'],
   voided: ['stopped'],
 };
