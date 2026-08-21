@@ -10,8 +10,8 @@ import { useAnimationsEnabled, useSettings } from '../lib/settings.js';
 import { playFinishChime, playAwayReminder } from '../lib/sound.js';
 import { isQuietMinute } from '@clock/shared';
 
-/* 全屏召回"再等 5 分钟"（推迟仅一次性的简单实现：到期后若仍离开则再次弹出） */
-const AWAY_SNOOZE_MS = 5 * 60_000;
+/* 逾期（L3）不再使用阻断式全屏召回弹窗：统一由红色洗色氛围 + away-line 文案表达。
+   恢复/开始下一段的入口在常规控件里（继续计时 / 空闲页开始），无需独占弹窗。 */
 
 function M({ children, ...props }: any) {
   const animationsEnabled = useAnimationsEnabled();
@@ -77,8 +77,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   }, [recentFocusEndMs, readServerNowMs]);
 
   /* ---------- 离开（暂停 / 科目结束后）渐进提醒 ---------- */
-  const [awaySnoozedUntil, setAwaySnoozedUntil] = useState(0); // 全屏召回推迟到的时间戳
-  const [awayDismissed, setAwayDismissed] = useState(false);   // 本轮离开已手动关闭全屏召回
   const awayChimePlayedRef = useRef(false);                   // L2 提示音只播一次
   const overdueChimePlayedRef = useRef(false);                // L3 逾期升级音只播一次
   const [awayAnchorOverride, setAwayAnchorOverride] = useState<SyncAnchor | null>(null); // 结束态离开锚点
@@ -104,8 +102,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     if (!awayActive) {
       awayChimePlayedRef.current = false;
       overdueChimePlayedRef.current = false;
-      setAwayDismissed(false);
-      setAwaySnoozedUntil(0);
       setAwayAnchorOverride(null);
     }
   }, [awayActive]);
@@ -131,54 +127,14 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       playAwayReminder(0.2);
     }
   }, [awayLevel, quietPeriod]);
-  // 休息超过建议窗口的逾期宽限且未推迟/未关闭 → 全屏召回
-  const showAwayRecall = awayActive && !quietPeriod && awayLevel >= 3 && !awayDismissed && Date.now() >= awaySnoozedUntil;
-  /** 结束态"开始下一段"：延续刚才的科目 */
-  const handleStartNext = () => {
-    const sid = lastStopped?.subjectId ?? recentStopped?.subject_id ?? selectedSubject;
-    setAwayDismissed(true);
-    setLastStopped(null);
-    setNoteDraft('');
-    void store.start(sid, null);
-  };
   const handleWithdrawLastStopped = async () => {
     if (!lastStopped) return;
     const ok = await store.withdraw(lastStopped.sessionId, '误记');
     if (!ok) return;
     setLastStopped(null);
     setAwayAnchorOverride(null);
-    setAwayDismissed(true);
     setNoteDraft('');
   };
-  /** L3 全屏召回（暂停态与结束态共用；结束态按钮为"开始下一段"） */
-  const awayRecallOverlay =
-    showAwayRecall && !active ? (
-      <div className="away-overlay" role="dialog" aria-modal="true" aria-label="离开提醒" onClick={() => setAwayDismissed(true)}>
-        <div className="away-overlay-card" onClick={(e) => e.stopPropagation()}>
-          <div className="away-overlay-title">已离开 {formatHms(awaySeconds)}</div>
-          <p className="away-overlay-text">建议休息 {formatDurationZh(restPlan.recommendedSeconds)}。现在开始下一段吗？</p>
-          <div className="away-overlay-actions action-row">
-            <button className="primary-btn" onClick={handleStartNext} disabled={busy}>
-              <Flag size={18} aria-hidden /> 开始下一段
-            </button>
-            <button className="ghost-btn" onClick={() => setAwaySnoozedUntil(Date.now() + AWAY_SNOOZE_MS)}>再等 5 分钟</button>
-          </div>
-        </div>
-      </div>
-    ) : showAwayRecall ? (
-      <div className="away-overlay" role="dialog" aria-modal="true" aria-label="离开提醒" onClick={() => setAwayDismissed(true)}>
-        <div className="away-overlay-card" onClick={(e) => e.stopPropagation()}>
-          <div className="away-overlay-title">已离开 {formatHms(awaySeconds)}</div>
-          <p className="away-overlay-text">建议休息 {formatDurationZh(restPlan.recommendedSeconds)}。现在回到这一段吗？</p>
-          <div className="away-overlay-actions action-row">
-            <button className="primary-btn" onClick={() => { setAwayDismissed(true); void store.resume(); }} disabled={busy}>
-              <Play size={18} aria-hidden /> 回到学习
-            </button>
-            <button className="ghost-btn" onClick={() => setAwaySnoozedUntil(Date.now() + AWAY_SNOOZE_MS)}>再等 5 分钟</button>
-          </div>
-        </div>
-      </div>
-    ) : null;
 
   // 空闲态北京时间与"距上次专注"间隔（5s 步进，共用一个 interval）
   const [idleNowMs, setIdleNowMs] = useState(readServerNowMs);
@@ -247,7 +203,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   if (lastStopped && !active) {
     const subj = subjectOf(lastStopped.subjectId);
     return (
-      <>
       <section className="clockface" data-away-level={reminderLevel} aria-live="polite">
         <M className="finish-card">
           <div className="finish-glow" aria-hidden />
@@ -261,7 +216,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
           <p className="finish-line">
             已记录本次投入。今天累计 {formatDurationZh(state?.today_active_seconds ?? lastStopped.seconds)}。
           </p>
-          {/* 离开时长：科目结束后同样进入"已离开"渐进提醒（L1 黄 / L2 红 / L3 全屏召回） */}
+          {/* 离开时长：科目结束后同样进入"已离开"渐进提醒（L1 琥珀 / L2 洗色 / L3 红色氛围） */}
           <div className="away-slot" aria-live="off">
             <div
               className={`away-line${reminderLevel >= 2 ? ' strong' : reminderLevel >= 1 ? ' urgent' : ''}`}
@@ -316,10 +271,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
           </div>
         </M>
       </section>
-
-      {/* L3 全屏召回（结束态）：离开 ≥30 分钟，可"开始下一段 / 再等 5 分钟 / 点遮罩关闭本轮" */}
-      {awayRecallOverlay}
-      </>
     );
   }
 
@@ -327,7 +278,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   if (active) {
     const subj = subjectOf(active.subject_id);
     return (
-      <>
       <section className={`clockface ${paused ? 'is-paused' : 'is-running'}`} data-away-level={reminderLevel}>
         <div className="subject-pill large" data-color={subj?.color_id}>
           <span className="pill-dot" aria-hidden />
@@ -347,7 +297,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         {active.intent_note && <div className="intent-line">「{active.intent_note}」</div>}
 
         {/* 离开时长：常驻占位（running 时空行），暂停/恢复瞬间不引起布局位移。
-            渐进提醒：建议结束前 1 分钟预告，达到建议时长进入应回到下一段，逾期宽限后召回。 */}
+            渐进提醒：L1 琥珀描边 / L2 洗色 / L3 红色氛围（统一氛围表达，无阻断弹窗）。 */}
         <div className="away-slot" aria-live="off">
           {paused && (
             <div
@@ -396,10 +346,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
           </div>
         </details>
       </section>
-
-      {/* L3 全屏召回：离开 ≥30 分钟。渐入 + 半透明遮罩，可"回到学习 / 再等 5 分钟 / 点遮罩关闭本轮" */}
-      {awayRecallOverlay}
-    </>
   );
 }
 

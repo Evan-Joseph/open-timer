@@ -20,7 +20,7 @@ docs/     API、设计、审计、交接
 |---|---|---|
 | 背景/表面 | `--bg` `--bg-elevated` `--surface-1` `--surface-2` | 分层：页面底 → 卡片 → 次级 |
 | 文字 | `--text-1` `--text-2` `--text-3` | 主/次/弱；`--text-3` 仅非关键信息（对比 ≥3:1） |
-| 语义色 | `--accent`(systemBlue) `--danger`(systemRed) `--success`(systemGreen) `--amber` | HIG 语义色，浅/深各一套 |
+| 语义色 | `--accent`(systemBlue) `--danger`(systemRed) `--success`(systemGreen) `--amber` `--on-accent`(accent 底上的白) | HIG 语义色，浅/深各一套 |
 | 边框/阴影 | `--border` `--shadow` `--shadow-sm` `--shadow-up` `--shadow-hover` `--shadow-knob` | 分层阴影，向上用 `--shadow-up`，悬停抬升用 `--shadow-hover`，分段控件滑块用 `--shadow-knob` |
 | 材质 | `--material`(顶栏/浮层 0.72) `--popover-surface`(弹层 0.96) `--overlay-scrim`(遮罩 0.44) | backdrop-filter 只用于顶栏与浮层 |
 | 圆角 | `--radius-xs`3（微图形：时间轴片段/信标旗） `--radius-sm`6 `--radius`10 `--radius-lg`12 `--radius-xl`14；胶囊 999px | 控件 ≤ 卡片 ≤ 浮层 |
@@ -47,7 +47,7 @@ docs/     API、设计、审计、交接
 
 **工具栏契约**（2026-08-20，参考 HIG toolbars / Radix SegmentedControl 单一 size 下发）：同一工具栏行只允许一个高度档（时间轴工具栏 = 32px 行），行内控件 `align-items: center`、间距统一 `--space-2`（8px），中心 Y 共线（E2E 断言 ±1px）。
 
-**动作行契约**：弹层/卡片内的动作行（`.action-row`：结束反馈、召回卡片、时间轴详情）按钮等高 44px，层级用填充/颜色区分而非尺寸差，间距 `--space-3`。
+**动作行契约**：弹层/卡片内的动作行（`.action-row`：结束反馈、时间轴详情）按钮等高 44px，层级用填充/颜色区分而非尺寸差，间距 `--space-3`。
 
 ## 4. 弹层与遮罩
 
@@ -64,14 +64,14 @@ docs/     API、设计、审计、交接
 | 专注（running） | 运行中 | 中性底色 + `--success` 呼吸状态点；`data-away-level='0'`，不触发任何告警 |
 | 休息 L1（due-soon） | 暂停/结束后，休息达建议时长的 75% | 仅局部：`.away-line` 琥珀描边 + 胶囊轻呼吸 |
 | 休息 L2（due） | 达建议休息时长 100% | 温和琥珀洗色扩展到主区+时间轴+顶栏 |
-| 逾期 L3（overdue） | 达 150% 或 +2min 宽限 | 红色洗色覆盖全 app，全屏召回卡片 |
+| 逾期 L3（overdue） | 达 150% 或 +2min 宽限 | 红色洗色覆盖全 app（统一氛围表达，无阻断弹窗） |
 | 静默（quiet） | 午饭/午睡/晚饭/夜间窗口 | 继续计时但 `reminderLevel` 归 0，不升级提醒 |
 
 三态参数（2026-08-20 调研校准，来源见交接手册参考资料）：
 - 洗色过渡：全视口色彩变化用 `--dur-wash` 0.5s + `--ease-expo`（FocusTide 背景层参数），比组件级过渡慢，避免闪变。
 - L2 呼吸 3.2s / L3 呼吸 2.6s，opacity 0.75↔1（原 1.8s / 0.58↔1 过快过深，是焦虑感主源；WCAG 2.3.1 闪烁约束 + Super Productivity 呼吸基准）。
 - 深色主题 L3 洗色 mix 比例 12%（浅 15%）：深色下红感知更刺眼（FocusTide dark 降饱和思路）。
-- 召回卡片比洗色晚 `--dur-enter` 进场（wash 先铺垫、卡片是结论），一次性出现不循环弹；主按钮「回到学习/开始下一段」向前看，次按钮「再等 5 分钟」可打盹（Super Productivity take-a-break 模型）。
+- 逾期不使用阻断式全屏召回弹窗（2026-08-21 移除）：红色洗色 + away-line 文案已足够表达，恢复/开始下一段入口在常规控件（继续计时 / 空闲页开始）。避免打断式弹窗干扰沉浸。
 - 洗色只做 opacity 呼吸，不做 transform scale（大面缩放 = 整屏重绘 + 晃屏）。
 
 约束：告警只作为背景氛围与边界强调，文字/科目色/片段色/时间 Flag 保持可读；呼吸动画只挂在一个全视口层，避免频率相位分裂；`prefers-reduced-motion` 或应用内关动画时保留静态告警色（wash 层 `animation: none`，全量终态）、停止呼吸。

@@ -91,6 +91,8 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const [startSaving, setStartSaving] = useState(false);
   /** 查看历史日时按日期拉取的会话数据 */
   const [historySessions, setHistorySessions] = useState<SessionApi[]>([]);
+  /** 单日历史数据加载中：避免数据未到时闪现上一天片段或误报「这一天还没有记录」 */
+  const [dayLoading, setDayLoading] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historySummaries, setHistorySummaries] = useState<DailySummaryApi[]>([]);
   const [historyWeekSessions, setHistoryWeekSessions] = useState<Map<string, SessionApi[]>>(new Map());
@@ -181,23 +183,34 @@ export default function Timeline({ store }: { store: ClockStore }) {
     return historySessions;
   }, [isToday, store.sessions, historySessions]);
 
-  // 历史日数据拉取
+  // 历史日数据拉取（加载时清空旧数据并标记 dayLoading，避免数据未到时闪现上一天片段
+  // 或误报「这一天还没有记录」）
   useEffect(() => {
-    if (isToday) return;
+    if (isToday) {
+      setDayLoading(false);
+      return;
+    }
     const cached = historyCacheRef.current.get(viewDate);
     if (cached) {
       setHistorySessions(cached);
+      setDayLoading(false);
       return;
     }
+    setDayLoading(true);
+    setHistorySessions([]);
     let cancelled = false;
     apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${viewDate}`)
       .then((d) => {
         if (cancelled) return;
         historyCacheRef.current.set(viewDate, d.sessions);
         setHistorySessions(d.sessions);
+        setDayLoading(false);
       })
       .catch(() => {
-        if (!cancelled) setHistorySessions([]);
+        if (!cancelled) {
+          setHistorySessions([]);
+          setDayLoading(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -711,7 +724,14 @@ export default function Timeline({ store }: { store: ClockStore }) {
       >{mode === 'list' ? (
         /* 流水账视图：按时间排序的记录行，小屏友好 */
         <div className="timeline-list" data-testid="timeline-list">
-          {segs.length === 0 ? (
+          {dayLoading && !isToday ? (
+            <div className="timeline-list-empty" data-testid="timeline-list-empty">
+              <span className="empty-glyph" aria-hidden>
+                <Clock size={20} />
+              </span>
+              <div className="empty-title">正在读取…</div>
+            </div>
+          ) : segs.length === 0 ? (
             <div className="timeline-list-empty" data-testid="timeline-list-empty">
               <span className="empty-glyph" aria-hidden>
                 <Clock size={20} />
@@ -798,7 +818,13 @@ export default function Timeline({ store }: { store: ClockStore }) {
               </span>
             );
           })}
-          {visibleSegs.length === 0 && <div className="timeline-empty-inline">这一天还没有记录</div>}
+          {dayLoading && !isToday ? (
+            <div className="timeline-empty-inline">正在读取…</div>
+          ) : segs.length === 0 ? (
+            <div className="timeline-empty-inline" data-testid="timeline-empty">这一天还没有记录</div>
+          ) : visibleSegs.length === 0 ? (
+            <div className="timeline-empty-inline timeline-empty-window">有记录，但不在当前显示的时间范围</div>
+          ) : null}
           {isToday && (
             <div className="now-line" style={{ left: `${nowPercent}%` }} data-testid="now-line" aria-label="当前时间">
               <span className="now-flag" aria-hidden />

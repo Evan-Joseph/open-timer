@@ -391,6 +391,82 @@ test.describe('时间轴信标与定位', () => {
   });
 });
 
+test.describe('时间轴空态与窗口', () => {
+  test('当天有记录但都在默认窗口外：不误报空日，显示窗口外提示', async ({ page }) => {
+    await page.clock.install({ time: beijingTodayAt(10) });
+    await doSetup(page);
+    const today = shanghaiToday(Date.now());
+    const { startMs } = shanghaiDayRangeUtc(today);
+    const at = (h: number) => new Date(startMs + h * 3_600_000).toISOString();
+
+    // 模拟：记录在清晨 06–07 点；state 的 server_now_ms 为 20:00。
+    // 默认尺度窗口锚定当前时刻（20:00），不含清晨片段 → 不得误报「这一天还没有记录」。
+    const realState = await (await page.request.get('/api/v1/state')).json();
+    await page.route('**/api/v1/state', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ...realState, server_now_ms: startMs + 20 * 3_600_000, server_now_iso: at(20), active_session: null }),
+      }),
+    );
+    await page.route('**/api/v1/sessions*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          date: today,
+          timezone: 'Asia/Shanghai',
+          sessions: [
+            {
+              session_id: 'TESTSESS',
+              subject_id: 'math',
+              started_at: at(6),
+              ended_at: at(7),
+              active_seconds: 3600,
+              status: 'stopped',
+              end_reason: 'manual',
+              note: null,
+              segments: [{ started_at: at(6), ended_at: at(7) }],
+            },
+          ],
+        }),
+      }),
+    );
+
+    await page.reload();
+    await page.waitForTimeout(500);
+    // 不误报空日
+    await expect(page.getByTestId('timeline-empty')).toHaveCount(0);
+    // 窗口外提示（记录在窗口之外）
+    await expect(page.locator('.timeline-empty-window')).toBeVisible();
+    // 片段不在当前窗口内，未渲染
+    await expect(page.locator('.seg')).toHaveCount(0);
+
+    // 切到全天尺度：清晨片段落在 08:00–22:30 之外（06–07 点），仍不得误报空日
+    await page.getByRole('radio', { name: '全天' }).click();
+    await expect(page.getByTestId('timeline-empty')).toHaveCount(0);
+    await expect(page.locator('.timeline-empty-window')).toBeVisible();
+  });
+
+  test('真正无记录的一天显示空日文案', async ({ page }) => {
+    await page.clock.install({ time: beijingTodayAt(10) });
+    await doSetup(page);
+    const today = shanghaiToday(Date.now());
+    await page.route('**/api/v1/sessions*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ date: today, timezone: 'Asia/Shanghai', sessions: [] }),
+      }),
+    );
+    await page.reload();
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId('timeline-empty')).toBeVisible();
+    await expect(page.getByTestId('timeline-empty')).toContainText('这一天还没有记录');
+    await expect(page.locator('.timeline-empty-window')).toHaveCount(0);
+  });
+});
+
 test.describe('近 7 天执行回顾', () => {
   test('以固定全天泳道展示七天记录，并隐藏单日时间轴', async ({ page }) => {
     await doSetup(page);
@@ -896,28 +972,18 @@ test.describe('离开渐进提醒', () => {
     await page.reload();
     await expect(page.getByTestId('away-line')).toHaveClass(/strong/);
 
-    // 恢复 9 分钟暂停快照后进入逾期宽限并显示全屏召回。
+    // 恢复 9 分钟暂停快照后进入逾期：统一由红色洗色氛围 + away-line 表达，无阻断弹窗。
     pausedAgeMs = 9 * 60 * 1000;
     await page.reload();
-    const dialog = page.getByRole('dialog', { name: '离开提醒' });
-    await expect(dialog).toBeVisible();
+    await expect(page.locator('.clockface.is-paused')).toHaveAttribute('data-away-level', '3');
+    await expect(page.getByTestId('away-line')).toContainText('休息已超时');
+    await expect(page.getByRole('dialog', { name: '离开提醒' })).toHaveCount(0);
 
-    // 推迟 5 分钟：立即关闭；4 分钟后不弹，6 分钟后重新弹出
-    await dialog.getByRole('button', { name: '再等 5 分钟' }).click();
-    await expect(dialog).not.toBeVisible();
-    await page.clock.fastForward(4 * 60 * 1000);
-    await expect(dialog).not.toBeVisible();
-    await page.clock.fastForward(2 * 60 * 1000);
-    await expect(dialog).toBeVisible();
-
-    // 回到学习：overlay 关闭并恢复运行
+    // 回到学习：常规控件恢复运行，提醒复位
     await page.unroute('**/api/v1/state');
-    await dialog.getByRole('button', { name: '回到学习' }).click();
-    await expect(dialog).not.toBeVisible();
+    await page.getByRole('button', { name: '继续计时' }).click();
     await expect(page.getByText('· 进行中')).toBeVisible();
     await expect(page.locator('.clockface.is-running')).toHaveAttribute('data-away-level', '0');
-    await page.clock.fastForward(20 * 60 * 1000);
-    await expect(page.getByRole('dialog', { name: '离开提醒' })).toHaveCount(0);
 
     // 自我清理：结束会话回到空闲态（避免串行污染后续依赖空闲态的测试）
     await page.getByRole('button', { name: '结束并保存' }).click();
@@ -947,12 +1013,16 @@ test.describe('科目结束后的离开提醒', () => {
     await page.clock.fastForward(6 * 60 * 1000);
     await expect(page.getByTestId('away-line')).toHaveClass(/strong/);
 
-    // 逾期宽限后 → 全屏召回，"开始下一段"恢复学习
+    // 逾期宽限后：红色洗色氛围 + away-line 表达（无阻断弹窗）；开始下一段回到空闲页
     await page.clock.fastForward(3 * 60 * 1000);
-    const dialog = page.getByRole('dialog', { name: '离开提醒' });
-    await expect(dialog).toBeVisible();
-    await dialog.getByRole('button', { name: '开始下一段' }).click();
-    await expect(dialog).not.toBeVisible();
+    await expect(page.locator('.clockface')).toHaveAttribute('data-away-level', '3');
+    await expect(page.getByTestId('away-line')).toContainText('休息已超时');
+    await expect(page.getByRole('dialog', { name: '离开提醒' })).toHaveCount(0);
+
+    // 开始下一段：回到空闲页并开始新会话
+    await page.getByRole('button', { name: '好，继续' }).click();
+    await expect(page.getByTestId('idle-clock')).toBeVisible();
+    await page.getByTestId('start-btn').click();
     await expect(page.getByText('· 进行中')).toBeVisible();
     // 运行态不再显示离开行（提醒已复位）
     await expect(page.getByTestId('away-line')).toHaveCount(0);
