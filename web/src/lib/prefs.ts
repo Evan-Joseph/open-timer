@@ -20,6 +20,8 @@ export interface SyncedPrefs {
   timelineScale: 'default' | 'full-day';
   timelineMode: 'track' | 'list';
   historyOpen: boolean;
+  /** 空闲页选中的科目（跨端跟随） */
+  selectedSubject: string;
 }
 
 const THEME_KEY = 'clock-theme';
@@ -27,6 +29,7 @@ const ANIM_KEY = 'clock-animations';
 const SETTINGS_KEY = 'clock-settings-v2';
 const SCALE_KEY = 'clock-timeline-scale';
 const MODE_KEY = 'clock-timeline-mode';
+const SUBJECT_KEY = 'clock-last-subject';
 /** 远端偏好应用后广播：各组件重读本地键 */
 export const PREFS_APPLIED_EVT = 'clock-prefs-applied';
 
@@ -66,6 +69,7 @@ export function readLocalPrefs(): SyncedPrefs {
     timelineScale: scale === 'full-day' ? 'full-day' : 'default',
     timelineMode: mode === 'list' ? 'list' : 'track',
     historyOpen: false, // 瞬时视图态：只推送，拉取时不强制打开
+    selectedSubject: safeGet(SUBJECT_KEY) || 'math',
   };
 }
 
@@ -115,6 +119,10 @@ export function applyRemotePrefs(remote: Partial<SyncedPrefs>): boolean {
   }
   if (remote.timelineMode && remote.timelineMode !== local.timelineMode) {
     safeSet(MODE_KEY, remote.timelineMode);
+    changed = true;
+  }
+  if (remote.selectedSubject && remote.selectedSubject !== local.selectedSubject) {
+    safeSet(SUBJECT_KEY, remote.selectedSubject);
     changed = true;
   }
   if (changed) window.dispatchEvent(new CustomEvent(PREFS_APPLIED_EVT));

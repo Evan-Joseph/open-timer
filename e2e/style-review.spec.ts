@@ -13,7 +13,7 @@ async function setup(page: any) {
   }
   // 测试隔离：重置服务端同步偏好 + 本地键（深色/视图模式会跨用例泄漏）；清理残留活动会话
   await page.request.put('/api/v1/prefs', {
-    data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false },
+    data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false, selectedSubject: 'math' },
   });
   await page.evaluate(() => {
     localStorage.setItem('clock-theme', 'auto');

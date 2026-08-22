@@ -103,7 +103,7 @@ docs/     API、设计、审计、交接
 
 **UI 偏好同步**（服务端 `user_pref` 单行 JSON，`GET/PUT /api/v1/prefs`，owner-only）：
 - localStorage 即时层 + 服务端事实层；last-write-wins；登录态 10s 轮询拉取、本地变更 500ms 防抖推送；在途窗口 3s 内拉取不得回滚本地变更（防竞态）。
-- 同步键：theme / animations / finishSound / ambientKind / timelineScale / timelineMode / historyOpen。
+- 同步键：theme / animations / finishSound / ambientKind / timelineScale / timelineMode / historyOpen / selectedSubject（空闲页选中科目）。
 - local-only 明确排除：ambientVolume（设备响度差异，默认 0）、全屏态、reduced-motion 派生态、输入草稿、clock-last-subject。
 - 参照 Super Productivity sync/local-only-keys 与 Pomotroid 后端持久化范式。
 

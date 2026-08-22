@@ -27,7 +27,7 @@ async function enterReadyState(page: Page) {
   }
   // 测试隔离：重置服务端同步偏好与本地键（跨用例泄漏防护）
   await page.request.put('/api/v1/prefs', {
-    data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false },
+    data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false, selectedSubject: 'math' },
   });
   await page.evaluate(() => {
     localStorage.setItem('clock-theme', 'auto');

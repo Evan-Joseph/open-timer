@@ -59,7 +59,7 @@ async function doSetup(page: Page) {
   // 测试隔离：偏好是服务端多端同步的，上一个用例的深色/视图模式会泄漏给后续用例。
   // 每个用例开始时重置为默认偏好（theme=auto 等）。
   await page.request.put('/api/v1/prefs', {
-    data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false },
+    data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false, selectedSubject: 'math' },
   });
   await page.evaluate(() => {
     localStorage.setItem('clock-theme', 'auto');
@@ -740,8 +740,62 @@ test.describe('多端偏好同步', () => {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(1000);
     await page.request.put('/api/v1/prefs', {
-      data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false },
+      data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false, selectedSubject: 'math' },
     });
+  });
+
+  test('一端选科目，另一端经同步跟随（选中科目属于同步键）', async ({ page, context }) => {
+    await doSetup(page);
+    // 端 A 选「计算机组成原理」并推送
+    await page.getByRole('radio', { name: '计算机组成原理' }).click();
+    await page.waitForTimeout(1200); // 等防抖推送落地
+
+    // 端 B 新标签页：挂载拉取远端偏好，选中项应为计算机组成原理
+    const pageB = await context.newPage();
+    await pageB.goto('/');
+    await pageB.waitForTimeout(400);
+    await expect(pageB.locator('.subject-chip.selected')).toContainText('计算机组成原理', { timeout: 15_000 });
+    await pageB.close();
+
+    // 复位
+    await page.request.put('/api/v1/prefs', {
+      data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false, selectedSubject: 'math' },
+    });
+  });
+
+  test('计时对表：一端开始计时，另一端同步进入运行且秒数对齐（±2s）', async ({ page, context }) => {
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数学二' }).click();
+    await page.getByTestId('start-btn').click();
+    await expect(page.getByText('· 进行中')).toBeVisible();
+
+    // 端 B：同浏览器新标签页（共享会话状态轮询 + BroadcastChannel 脉冲）
+    const pageB = await context.newPage();
+    await pageB.goto('/');
+    await pageB.waitForTimeout(400);
+    await expect(pageB.getByText('· 进行中')).toBeVisible({ timeout: 10_000 });
+
+    // 对表：两端累计秒数差 ≤2s（服务端权威 + 各自单调外推）
+    await page.waitForTimeout(6_000);
+    const secsOf = async (p: typeof page) => {
+      const label = await p.getByTestId('timer-seconds').getAttribute('aria-label');
+      const m = label!.match(/累计 (\d{2}):(\d{2}):(\d{2})/);
+      return Number(m![1]) * 3600 + Number(m![2]) * 60 + Number(m![3]);
+    };
+    const [a, b] = [await secsOf(page), await secsOf(pageB)];
+    expect(Math.abs(a - b)).toBeLessThanOrEqual(2);
+    expect(a).toBeGreaterThanOrEqual(5);
+    await pageB.close();
+
+    // 自我清理
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    const withdrawBtn = page.getByTestId('finish-withdraw-btn');
+    if (await withdrawBtn.count()) await withdrawBtn.click();
+    else {
+      const cont = page.getByRole('button', { name: '好，继续' });
+      if (await cont.count()) await cont.click();
+    }
+    await expect(page.getByTestId('idle-clock')).toBeVisible();
   });
 });
 

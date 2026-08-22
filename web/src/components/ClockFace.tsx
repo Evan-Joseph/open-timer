@@ -7,6 +7,7 @@ import type { ClockStore } from '../lib/store.js';
 import type { SyncAnchor } from '../lib/clock.js';
 import { useMonotonicSeconds, useDualMonotonic, useWallSeconds, useBeijingTime, formatHms, formatHmsShort, formatDurationZh, formatBeijingTime, restPlanForFocus, restStageOf, restStageLabel } from '../lib/clock.js';
 import { useAnimationsEnabled, useSettings } from '../lib/settings.js';
+import { PREFS_APPLIED_EVT, schedulePrefsPush } from '../lib/prefs.js';
 import { playFinishChime, playAwayReminder } from '../lib/sound.js';
 import { isQuietMinute } from '@clock/shared';
 
@@ -156,12 +157,25 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const pickSubject = useCallback((id: string) => {
     userPickedRef.current = true;
     setSelectedSubject(id);
+    localStorage.setItem('clock-last-subject', id);
+    schedulePrefsPush({ selectedSubject: id }); // 多端同步选中科目
   }, []);
 
   // 记住最近使用科目（下次进入直接默认）
   useEffect(() => {
     localStorage.setItem('clock-last-subject', selectedSubject);
   }, [selectedSubject]);
+
+  // 多端同步：其他端选了科目（远端偏好到达）时跟随更新。
+  // 这是显式同步语义，优先级高于本地轮询守卫（userPickedRef 只挡会话数据推断）。
+  useEffect(() => {
+    const reload = () => {
+      const s = localStorage.getItem('clock-last-subject');
+      if (s) setSelectedSubject(s);
+    };
+    window.addEventListener(PREFS_APPLIED_EVT, reload);
+    return () => window.removeEventListener(PREFS_APPLIED_EVT, reload);
+  }, []);
 
   // 仅当"从未手动选过且无本地记录"时，才用当天最后一个会话的科目作默认值（只发生一次）
   useEffect(() => {
