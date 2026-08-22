@@ -25,7 +25,6 @@ export interface D1Statement {
 export interface D1Database {
   prepare(query: string): D1Statement;
   batch(statements: D1Statement[]): Promise<unknown[]>;
-  exec(query: string): Promise<{ count: number }>;
 }
 
 function rowToSession(r: Record<string, unknown>): SessionRow {
@@ -53,6 +52,21 @@ function rowToSegment(r: Record<string, unknown>): ActiveSegmentRow {
   };
 }
 
+/**
+ * 把迁移 SQL 文本拆成语句数组：先剔除 `--` 整行注释，再按分号拆分。
+ * 兼容单行与多行语句；本项目迁移 SQL 无字符串内嵌分号。
+ */
+export function splitMigrationSql(sql: string): string[] {
+  const withoutComments = sql
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('--'))
+    .join('\n');
+  return withoutComments
+    .split(';')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
 export class D1Storage implements Storage {
   constructor(
     private db: D1Database,
@@ -68,8 +82,11 @@ export class D1Storage implements Storage {
   }
 
   async migrate(): Promise<void> {
-    // migration SQL 全部使用 IF NOT EXISTS / ON CONFLICT，可重复执行
-    await this.db.exec(this.migrationSql);
+    // 不用 D1 exec：exec 对「多语句 + 注释行」混合的 SQL 解析不稳定（D1_EXEC_ERROR）。
+    // 按分号拆分（先剥整行注释）后用 batch 原子执行；全部语句幂等
+    // （IF NOT EXISTS / ON CONFLICT），可重复执行。
+    const statements = splitMigrationSql(this.migrationSql);
+    await this.db.batch(statements.map((sql) => this.db.prepare(sql)));
     const stmts = SUBJECTS.map((s) =>
       this.db
         .prepare(
