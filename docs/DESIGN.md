@@ -102,10 +102,19 @@ docs/     API、设计、审计、交接
 ## 8. 多端同步与误触（2026-08-21）
 
 **UI 偏好同步**（服务端 `user_pref` 单行 JSON，`GET/PUT /api/v1/prefs`，owner-only）：
-- localStorage 即时层 + 服务端事实层；last-write-wins；登录态 10s 轮询拉取、本地变更 500ms 防抖推送；在途窗口 3s 内拉取不得回滚本地变更（防竞态）。
+- localStorage 即时层 + 服务端事实层；last-write-wins；登录态 15s 轮询拉取偏好、空闲 30s / 运行中 3s 轮询状态、本地变更 500ms 防抖推送；在途窗口 3s 内拉取不得回滚本地变更（防竞态）。轮询间隔依据：Workers 免费档 100,000 请求/天是紧约束（单设备约 3.5 万请求/天，三设备内安全）；304 只省 D1 读、不省请求数，故不用作优化手段。
 - 同步键：theme / animations / finishSound / ambientKind / timelineScale / timelineMode / historyOpen / selectedSubject（空闲页选中科目）。
 - local-only 明确排除：ambientVolume（设备响度差异，默认 0）、全屏态、reduced-motion 派生态、输入草稿、clock-last-subject。
 - 参照 Super Productivity sync/local-only-keys 与 Pomotroid 后端持久化范式。
+
+**时钟同步正确姿势**（2026-08-22 联网核验背书：本实现 = Cristian 中点锚定算法，与微软 Live Share SDK 同构）：
+- 服务端权威 `server_now_ms` + RTT 半程锚定 + `performance.now` 单调外推 + 1.2s 迟滞（≈chrony makestep 阈值）+ 滞后响应丢弃。
+- 弱网防护：维护最近 8 次 RTT 窗口，样本 RTT > max(1000ms, 3×中位数) 时不用于重锚（防 ±RTT/2 锚点污染）。
+- 不引入多采样/Marzullo/HLC/钟漂率补偿：单权威源 + 秒级显示精度下均为过度工程（误差预算被 RTT/2 ≪ 1s 显示量子占据）。
+
+**轮询间隔与资源**（依据 Cloudflare 免费档：Workers 100,000 请求/天、D1 5,000,000 行读/天）：
+- 状态：运行中 3s / 空闲 30s；偏好：15s；单设备 ≈2 万请求/天，三设备内安全。
+- `sessionsOverlapping` 必须走 `session_ended(ended_at_ms)` 索引（「窗口起点后结束 ∪ 仍开放」改写）——全表扫描会在约 250 个历史会话时撞穿 D1 行读日额度导致应用整体不可用。
 
 **误触过滤**：短于 `CLOCK_MIN_SEGMENT_SECONDS`（默认 10s）的已关闭片段不计入 sessions/daily-summary/state（开放段不受影响）。领域规则 `isCountedSegment` 在 shared，服务端配置注入。参照 Clockify「可配置阈值丢弃」；不做静默删除会话（事件链完整保留），不做自动合并（无业界先例）。
 

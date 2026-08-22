@@ -717,7 +717,22 @@ test.describe('误触继续（stopped 会话可重开）', () => {
 });
 
 test.describe('多端偏好同步', () => {
-  test('同浏览器两个标签页：一端切深色，另一端经同步应用（含新开标签页继承）', async ({ page, context }) => {
+  // 用独立 browser context 模拟「另一台真实设备」：隔离 localStorage 与 cookie。
+  // 同 context 标签页共享 localStorage，会掩盖服务端同步路径，不能验证跨设备语义。
+  async function freshDevice(browser: any) {
+    const ctxB = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    const pageB = await ctxB.newPage();
+    await pageB.goto('/');
+    await pageB.waitForTimeout(400);
+    // 登录态不共享：输入 PIN 登录（服务端已 setup，单次输入即可）
+    if (await pageB.locator('.pin-dots').count()) {
+      await pageB.keyboard.type(PASSWORD);
+      await pageB.waitForTimeout(700);
+    }
+    return { ctxB, pageB };
+  }
+
+  test('跨设备：一端切深色，另一端登录后经服务端同步应用', async ({ page, browser }) => {
     await doSetup(page);
     // 端 A 切深色（本地立即生效 + 500ms 防抖推送服务端）
     await page.getByRole('button', { name: '设置' }).click();
@@ -726,13 +741,10 @@ test.describe('多端偏好同步', () => {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(1200); // 等推送落地
 
-    // 端 B（同浏览器新标签页）：挂载即拉取远端偏好并应用
-    const pageB = await context.newPage();
-    await pageB.goto('/');
-    await pageB.waitForTimeout(400);
-    // B 已登录（共享 cookie）：等待首轮偏好拉取应用深色
+    // 端 B（独立设备）：登录后首轮偏好拉取即应用深色
+    const { ctxB, pageB } = await freshDevice(browser);
     await expect(pageB.locator('html[data-theme="dark"]')).toBeVisible({ timeout: 15_000 });
-    await pageB.close();
+    await ctxB.close();
 
     // 复位：端 A 切回跟随系统，避免污染后续用例
     await page.getByRole('button', { name: '设置' }).click();
@@ -744,20 +756,38 @@ test.describe('多端偏好同步', () => {
     });
   });
 
-  test('一端选科目，另一端经同步跟随（选中科目属于同步键）', async ({ page, context }) => {
+  test('跨设备：一端选科目，另一端登录后经服务端同步跟随', async ({ page, browser }) => {
     await doSetup(page);
     // 端 A 选「计算机组成原理」并推送
     await page.getByRole('radio', { name: '计算机组成原理' }).click();
     await page.waitForTimeout(1200); // 等防抖推送落地
 
-    // 端 B 新标签页：挂载拉取远端偏好，选中项应为计算机组成原理
-    const pageB = await context.newPage();
-    await pageB.goto('/');
-    await pageB.waitForTimeout(400);
+    // 端 B（独立设备）：登录后选中项应为计算机组成原理
+    const { ctxB, pageB } = await freshDevice(browser);
     await expect(pageB.locator('.subject-chip.selected')).toContainText('计算机组成原理', { timeout: 15_000 });
-    await pageB.close();
+    await ctxB.close();
 
     // 复位
+    await page.request.put('/api/v1/prefs', {
+      data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false, selectedSubject: 'math' },
+    });
+  });
+
+  test('跨设备：一端打开近 7 天回顾，另一端登录后经服务端同步跟随打开', async ({ page, browser }) => {
+    await doSetup(page);
+    await page.getByTestId('history-toggle').click();
+    await expect(page.getByTestId('history-strip')).toBeVisible();
+    await page.waitForTimeout(1200); // 等防抖推送落地
+
+    // 端 B（独立设备）：登录后 7 天面板应自动打开
+    const { ctxB, pageB } = await freshDevice(browser);
+    await expect(pageB.getByTestId('history-strip')).toBeVisible({ timeout: 15_000 });
+    await ctxB.close();
+
+    // 复位：Esc 关闭面板（关闭状态同样经服务端同步）
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('history-strip')).toHaveCount(0);
+    await page.waitForTimeout(1000);
     await page.request.put('/api/v1/prefs', {
       data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false, selectedSubject: 'math' },
     });

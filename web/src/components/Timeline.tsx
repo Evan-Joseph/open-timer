@@ -19,7 +19,7 @@ import type { DailySummaryApi, SessionApi } from '../lib/api.js';
 import { apiGet } from '../lib/api.js';
 import { formatBeijingTime, formatDurationZh } from '../lib/clock.js';
 import { useAnimationsEnabled } from '../lib/settings.js';
-import { PREFS_APPLIED_EVT, schedulePrefsPush } from '../lib/prefs.js';
+import { PREFS_APPLIED_EVT, schedulePrefsPush, setHistoryOpenLocal } from '../lib/prefs.js';
 import { LEARNING_DAY, QUIET_PERIODS, shanghaiDayRangeUtc, timelineRange, type TimelineScale } from '@clock/shared';
 
 const NOW_TICK_MS = 30_000;
@@ -425,27 +425,39 @@ export default function Timeline({ store }: { store: ClockStore }) {
     };
   }, [popover]);
 
+  /** 关闭 7 天面板的统一出口：Esc / 遮罩 / 右上角 X 都走这里，关闭状态同样多端同步。 */
+  const closeHistory = useCallback(() => {
+    setHistoryOpen(false);
+    setHistoryOpenLocal(false);
+    schedulePrefsPush({ historyOpen: false });
+  }, []);
+
   // 近 7 天回顾浮层：Esc 关闭（点击遮罩 / 右上角 X 在 JSX 内处理）
   useEffect(() => {
     if (!historyOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setHistoryOpen(false);
+      if (e.key === 'Escape') closeHistory();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [historyOpen]);
+  }, [historyOpen, closeHistory]);
 
-  // 多端同步：远端偏好到达时重读时间轴尺度/视图模式
+  // 多端同步：远端偏好到达时重读时间轴尺度/视图模式/7 天面板开合
   useEffect(() => {
     const reload = () => {
       const s = localStorage.getItem('clock-timeline-scale');
       setScale(s === 'full-day' ? 'full-day' : 'default');
       const m = localStorage.getItem('clock-timeline-mode');
       setMode(m === 'list' ? 'list' : 'track');
+      const next = localStorage.getItem('clock-history-open') === '1';
+      setHistoryOpen((prev) => {
+        if (next && !prev) void loadHistory();
+        return next;
+      });
     };
     window.addEventListener(PREFS_APPLIED_EVT, reload);
     return () => window.removeEventListener(PREFS_APPLIED_EVT, reload);
-  }, []);
+  }, [loadHistory]);
 
   // 撤回
   const handleWithdraw = useCallback(async () => {
@@ -644,6 +656,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
             onClick={() => {
               const next = !historyOpen;
               setHistoryOpen(next);
+              setHistoryOpenLocal(next);
               schedulePrefsPush({ historyOpen: next });
               if (next) {
                 void loadHistory();
@@ -915,7 +928,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.25, ease: [0.2, 0, 0, 1] }}
-          onClick={() => setHistoryOpen(false)}
+          onClick={closeHistory}
         >
           <motion.div
             key="history-panel"
@@ -935,7 +948,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
                 <strong>近 7 天执行回顾</strong>
                 <span>{historyModel.current[0]?.date.slice(5)} – {historyModel.current.at(-1)?.date.slice(5)}</span>
               </div>
-              <button className="icon-btn" aria-label="关闭" title="关闭" onClick={() => setHistoryOpen(false)}>
+              <button className="icon-btn" aria-label="关闭" title="关闭" onClick={closeHistory}>
                 <X size={16} />
               </button>
             </div>

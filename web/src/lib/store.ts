@@ -40,8 +40,8 @@ export interface ClockStore {
   adjustStart: (sessionId: string, startedAt: string) => Promise<boolean>;
 }
 
-const POLL_MS_IDLE = 15_000; // 空闲时慢轮询
-const POLL_MS_ACTIVE = 3_000; // 运行中快轮询（UI 靠单调时钟平滑，轮询只校准）
+const POLL_MS_IDLE = 30_000; // 空闲慢轮询（30s：空闲显示由服务端锚定墙钟，间隔不敏感；省一半请求）
+const POLL_MS_ACTIVE = 3_000; // 运行中快轮询（3s：状态变更传播上限，对表足够；勿再压小，免费档 100k req/天 受限）
 const ERROR_TTL_MS = 6_000;
 const TOAST_TTL_MS = 2_600;
 const SYNC_PULSE_KEY = 'clock-sync-pulse';
@@ -61,6 +61,19 @@ export function useClockStore(): ClockStore {
   const perfAtStateRef = useRef<number>(0);
   /** refresh 发出时刻（performance.now），用于 RTT 半程锚点修正 */
   const sendPerfRef = useRef<number>(0);
+  /** RTT 样本窗口（最近 8 次）：中点锚定的误差界是 ±RTT/2，
+   *  弱网 RTT 突增的样本会把锚点污染 1s+ 又被迟滞锁住。
+   *  重锚时拒绝显著高延迟样本（NTP 最小延迟择优 / Live Share improveAccuracy 思想）。 */
+  const rttWindowRef = useRef<number[]>([]);
+  const lastRttMsRef = useRef(0);
+  /** 当前样本是否适合用于重锚（首样本无窗口基线时放行） */
+  const rttUsable = () => {
+    const win = rttWindowRef.current;
+    if (win.length < 2) return true;
+    const sorted = [...win].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    return lastRttMsRef.current <= Math.max(1000, 3 * median);
+  };
   /** 同源多标签同步主通道（BroadcastChannel），不可用时回退 storage 事件 */
   const bcRef = useRef<BroadcastChannel | null>(null);
   /** 写操作进行中：期间轮询响应不得覆盖乐观状态（防止"结束反馈反复横跳"） */
@@ -83,6 +96,12 @@ export function useClockStore(): ClockStore {
     if (writeLockedRef.current || epoch !== syncEpochRef.current) return;
     // 丢弃滞后的轮询响应（以服务端时间戳为准），防止旧状态回跳
     if (stateRef.current && s.server_now_ms <= stateRef.current.server_now_ms) return;
+    // RTT 采样：中点锚定要求样本延迟正常，高延迟样本不参与重锚决策
+    const rttMs = sendPerfRef.current > 0 ? performance.now() - sendPerfRef.current : 0;
+    lastRttMsRef.current = rttMs;
+    const win = rttWindowRef.current;
+    win.push(rttMs);
+    if (win.length > 8) win.shift();
     // RTT 半程锚点：把服务端 server_now_ms 配到「请求-响应中点」而非响应到达时刻，
     // 消除系统性 RTT/2 偏差（公网 RTT 200-300ms → 原多算 100-150ms）。
     perfAtStateRef.current =
@@ -532,6 +551,9 @@ export function useClockStore(): ClockStore {
       // 偏差 = 旧锚外推值 - 新确认值；小于阈值则视为本地单调时钟更平滑，不重锚
       const driftSec = Math.abs(prev.confirmedSeconds + (performance.now() - prev.anchorPerfMs) / 1000 - next.confirmedSeconds);
       if (driftSec <= 1.2) return prev;
+      // 弱网防护：大偏差需要重锚，但高 RTT 样本的中点估计误差界 ±RTT/2 太大，
+      // 宁可继续外推等下一个好样本（NTP 最小延迟择优思想）
+      if (!rttUsable()) return prev;
     }
     anchorRef.current = next;
     return next;
@@ -554,6 +576,7 @@ export function useClockStore(): ClockStore {
     if (prev && prev.running === next.running) {
       const driftSec = Math.abs(prev.confirmedSeconds + (performance.now() - prev.anchorPerfMs) / 1000 - next.confirmedSeconds);
       if (driftSec <= 1.2) return prev;
+      if (!rttUsable()) return prev; // 弱网高 RTT 样本不重锚
     }
     segmentAnchorRef.current = next;
     return next;
@@ -583,8 +606,9 @@ export function useClockStore(): ClockStore {
       const driftSec = Math.abs(extrapolated - next.confirmedSeconds);
       // 休息时长单调前进：偏差小保持旧锚（平滑）；新确认值落后于本地外推时也保持旧锚，
       // 防止「已休息」数字回跳（轮询校准竞态下服务端确认值可能暂时落后于单调外推）。
-      // 仅当确认值领先外推 >1.2s（如设备休眠后真实休息比外推更长）才重锚。
+      // 仅当确认值领先外推 >1.2s（如设备休眠后真实休息比外推更长）且 RTT 样本可信才重锚。
       if (driftSec <= 1.2 || next.confirmedSeconds < extrapolated) return prev;
+      if (!rttUsable()) return prev; // 弱网高 RTT 样本不重锚
     }
     awayAnchorRef.current = next;
     return next;

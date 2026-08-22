@@ -30,6 +30,7 @@ const SETTINGS_KEY = 'clock-settings-v2';
 const SCALE_KEY = 'clock-timeline-scale';
 const MODE_KEY = 'clock-timeline-mode';
 const SUBJECT_KEY = 'clock-last-subject';
+const HISTORY_KEY = 'clock-history-open';
 /** 远端偏好应用后广播：各组件重读本地键 */
 export const PREFS_APPLIED_EVT = 'clock-prefs-applied';
 
@@ -68,7 +69,7 @@ export function readLocalPrefs(): SyncedPrefs {
     ambientKind,
     timelineScale: scale === 'full-day' ? 'full-day' : 'default',
     timelineMode: mode === 'list' ? 'list' : 'track',
-    historyOpen: false, // 瞬时视图态：只推送，拉取时不强制打开
+    historyOpen: safeGet(HISTORY_KEY) === '1',
     selectedSubject: safeGet(SUBJECT_KEY) || 'math',
   };
 }
@@ -119,6 +120,10 @@ export function applyRemotePrefs(remote: Partial<SyncedPrefs>): boolean {
   }
   if (remote.timelineMode && remote.timelineMode !== local.timelineMode) {
     safeSet(MODE_KEY, remote.timelineMode);
+    changed = true;
+  }
+  if (typeof remote.historyOpen === 'boolean' && remote.historyOpen !== local.historyOpen) {
+    safeSet(HISTORY_KEY, remote.historyOpen ? '1' : '0');
     changed = true;
   }
   if (remote.selectedSubject && remote.selectedSubject !== local.selectedSubject) {
@@ -174,6 +179,11 @@ export function schedulePrefsPush(overrides?: Partial<SyncedPrefs>): void {
     pushTimer = null;
     void pushRemote({ ...readLocalPrefs(), ...overrides });
   }, 500);
+}
+
+/** 7 天面板开合的本地持久化（同浏览器新标签页挂载时继承）。 */
+export function setHistoryOpenLocal(open: boolean): void {
+  safeSet(HISTORY_KEY, open ? '1' : '0');
 }
 
 /** 拉取并应用远端偏好；返回是否应用了变化。 */

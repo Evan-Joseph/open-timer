@@ -342,13 +342,17 @@ export class SqliteStorage implements Storage {
   /* ---- 查询 ---- */
 
   async sessionsOverlapping(startMs: number, endMs: number): Promise<SessionRow[]> {
+    // 与 D1 适配器同款索引友好写法（见 d1-storage.ts 注释）：
+    // 「窗口起点后结束」∪「仍开放」，避免全表扫描。
     return (
       this.db
         .prepare(
-          `SELECT * FROM session WHERE status != 'voided' AND started_at_ms < ?
-           AND (ended_at_ms IS NULL OR ended_at_ms > ?) ORDER BY started_at_ms`,
+          `SELECT * FROM session WHERE status != 'voided' AND ended_at_ms IS NOT NULL AND ended_at_ms > ? AND started_at_ms < ?
+           UNION
+           SELECT * FROM session WHERE status IN ('running','paused')
+           ORDER BY started_at_ms`,
         )
-        .all(endMs, startMs) as Array<Record<string, unknown>>
+        .all(startMs, endMs) as Array<Record<string, unknown>>
     ).map(rowToSession);
   }
 

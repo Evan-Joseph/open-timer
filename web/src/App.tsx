@@ -50,7 +50,7 @@ export default function App() {
     schedulePrefsPush({ theme: t as 'light' | 'dark' | 'auto' });
   };
 
-  // 远端偏好轮询（10s，仅登录态；last-write-wins 应用）
+  // 远端偏好轮询（15s，仅登录态；偏好是低频变更，15s 足够且省资源；last-write-wins 应用）
   const prefsUpdatedAtRef = useRef(0);
   useEffect(() => {
     if (store.phase !== 'ready') return;
@@ -60,7 +60,7 @@ export default function App() {
       if (!cancelled) prefsUpdatedAtRef.current = next;
     };
     void pull();
-    const t = window.setInterval(() => void pull(), 10_000);
+    const t = window.setInterval(() => void pull(), 15_000);
     return () => {
       cancelled = true;
       window.clearInterval(t);
