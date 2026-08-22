@@ -510,6 +510,11 @@ export default function Timeline({ store }: { store: ClockStore }) {
     const current = [...historySummaries].sort((a, b) => a.date.localeCompare(b.date));
     const total = current.reduce((sum, day) => sum + day.total_active_seconds, 0);
     const maxDay = Math.max(0, ...current.map((day) => day.total_active_seconds));
+    // 日均只按已完成的过去日计算（窗口固定 7 天 → 6 个完整日）：今日仍在进行中，
+    // 纳入会系统性拉低均值（半天分母算全天），对用户判断节奏是误导。
+    const pastDays = current.filter((day) => day.date !== store.todayDate);
+    const pastTotal = pastDays.reduce((sum, day) => sum + day.total_active_seconds, 0);
+    const dailyAverage = pastDays.length > 0 ? Math.round(pastTotal / pastDays.length) : 0;
     const subjectSeconds = new Map<string, number>();
     for (const day of current) {
       for (const item of day.by_subject) {
@@ -529,8 +534,8 @@ export default function Timeline({ store }: { store: ClockStore }) {
         };
       })
       .sort((a, b) => b.seconds - a.seconds);
-    return { current, total, dailyAverage: Math.round(total / 7), maxDay, subjects };
-  }, [historySummaries, store.subjects]);
+    return { current, total, dailyAverage, maxDay, subjects };
+  }, [historySummaries, store.subjects, store.todayDate]);
 
   const weekdayLabel = (date: string) => {
     const [year, month, day] = date.split('-').map(Number);
@@ -938,7 +943,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
               <div className="history-report">
                 <div className="history-metrics" aria-label="近 7 天汇总">
                   <div><span>总计</span><strong>{formatDurationZh(historyModel.total)}</strong></div>
-                  <div><span>日均</span><strong>{formatDurationZh(historyModel.dailyAverage)}</strong></div>
+                  <div title="近 6 个完整日的平均，不含进行中的今日"><span>日均</span><strong>{formatDurationZh(historyModel.dailyAverage)}</strong></div>
                   <div><span>最长一天</span><strong>{formatDurationZh(historyModel.maxDay)}</strong></div>
                 </div>
                 <div className="history-lanes" role="list" aria-label="近 7 天固定全天泳道">

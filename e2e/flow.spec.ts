@@ -494,8 +494,9 @@ test.describe('近 7 天执行回顾', () => {
     let todayOpenStatus: 'running' | 'paused' = 'running';
     await page.route('**/api/v1/daily-summary?**', async (route) => {
       const date = new URL(route.request().url()).searchParams.get('date')!;
-      const current = currentDates.has(date);
-      const total = current ? 3600 : 1800;
+      // 面板只查近 7 天窗口；今日 7200、过去 6 日各 3600，用于区分日均口径：
+      // 新语义日均 = 6×3600/6 = 3600「1 小时 0 分」；旧语义 (7200+21600)/7 ≈ 4114「1 小时 8 分」
+      const total = date === state.today_date ? 7200 : 3600;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -545,9 +546,10 @@ test.describe('近 7 天执行回顾', () => {
     await page.getByTestId('history-toggle').click();
     const report = page.getByTestId('history-strip');
     await expect(report).toBeVisible();
-    await expect(report.locator('.history-metrics')).toContainText('7 小时');
+    await expect(report.locator('.history-metrics')).toContainText('8 小时');
     await expect(report.locator('.history-metrics')).toContainText('日均');
-    await expect(report.locator('.history-metrics > div').nth(1)).toContainText('1 小时');
+    // 日均剔除进行中的今日：6×3600/6 = 3600s =「1 小时 0 分」（若纳入今日则为「1 小时 8 分」）
+    await expect(report.locator('.history-metrics > div').nth(1)).toContainText('1 小时 0 分');
     await expect(report.locator('.history-metrics')).toContainText('最长一天');
     await expect(report).not.toContainText('仅记录时间事实');
     await expect(report).not.toContainText('较前 7 天');
@@ -711,6 +713,35 @@ test.describe('误触继续（stopped 会话可重开）', () => {
     await page.getByRole('button', { name: '结束并保存' }).click();
     await page.getByTestId('finish-withdraw-btn').click();
     await expect(page.locator('.seg')).toHaveCount(beforeSegs);
+  });
+});
+
+test.describe('多端偏好同步', () => {
+  test('同浏览器两个标签页：一端切深色，另一端经同步应用（含新开标签页继承）', async ({ page, context }) => {
+    await doSetup(page);
+    // 端 A 切深色（本地立即生效 + 500ms 防抖推送服务端）
+    await page.getByRole('button', { name: '设置' }).click();
+    await page.getByRole('radio', { name: '深色' }).click();
+    await expect(page.locator('html[data-theme="dark"]')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(1200); // 等推送落地
+
+    // 端 B（同浏览器新标签页）：挂载即拉取远端偏好并应用
+    const pageB = await context.newPage();
+    await pageB.goto('/');
+    await pageB.waitForTimeout(400);
+    // B 已登录（共享 cookie）：等待首轮偏好拉取应用深色
+    await expect(pageB.locator('html[data-theme="dark"]')).toBeVisible({ timeout: 15_000 });
+    await pageB.close();
+
+    // 复位：端 A 切回跟随系统，避免污染后续用例
+    await page.getByRole('button', { name: '设置' }).click();
+    await page.getByRole('radio', { name: '跟随系统' }).click();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(1000);
+    await page.request.put('/api/v1/prefs', {
+      data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false },
+    });
   });
 });
 

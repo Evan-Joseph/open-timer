@@ -35,9 +35,11 @@ interface Env {
 let migrated = false;
 
 async function ensureMigrated(env: Env, storage: D1Storage): Promise<void> {
+  // 始终执行幂等迁移（全部 IF NOT EXISTS / ON CONFLICT，可重复执行），
+  // 每 isolate 仅一次。旧版曾以「schema_migrations 表存在」作为跳过条件，
+  // 导致后续增量迁移（如 0002 user_pref）在生产永远不执行——该门槛已移除。
   if (migrated) return;
-  const ready = await env.DB.prepare('SELECT COUNT(*) AS c FROM schema_migrations').first().catch(() => null);
-  if (!ready) await storage.migrate();
+  await storage.migrate();
   migrated = true;
 }
 
