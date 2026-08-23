@@ -6,10 +6,12 @@ import { apiGet, apiPost, apiPatch } from './api.js';
 import type { SyncAnchor } from './clock.js';
 import { shanghaiTodayLocal } from './clock.js';
 
-export type AuthPhase = 'loading' | 'setup' | 'login' | 'ready';
+export type AuthPhase = 'loading' | 'setup' | 'readonly' | 'ready';
 
 export interface ClockStore {
   phase: AuthPhase;
+  /** 已登录可写（'ready'）；readonly 为公开只读监督态 */
+  isOwner: boolean;
   subjects: SubjectApi[];
   state: StateApi | null;
   anchor: SyncAnchor | null;
@@ -176,8 +178,9 @@ export function useClockStore(): ClockStore {
   }, [applyState, applySessions, flashError]);
 
   // 同源其他标签页完成写操作后立即同步；跨设备仍由服务端轮询校准。
+  // 只读监督态同样需要同步（公开端点），故 readonly 一并订阅。
   useEffect(() => {
-    if (phase !== 'ready') return;
+    if (phase !== 'ready' && phase !== 'readonly') return;
     const onStorage = (event: StorageEvent) => {
       if (event.key === SYNC_PULSE_KEY) void refresh();
     };
@@ -199,26 +202,26 @@ export function useClockStore(): ClockStore {
     };
   }, [phase, refresh]);
 
-  // 初始鉴权探测
+  // 初始鉴权探测：未登录默认进入只读监督态（公开端点可看，写操作需解锁）
   useEffect(() => {
     (async () => {
       try {
         const me = await apiGet<{ authenticated: boolean; setup_done: boolean }>('/api/v1/auth/me');
         if (!me.setup_done) setPhase('setup');
-        else if (!me.authenticated) setPhase('login');
+        else if (!me.authenticated) setPhase('readonly');
         else setPhase('ready');
         const subs = await apiGet<SubjectApi[]>('/api/v1/subjects').catch(() => [] as SubjectApi[]);
         setSubjects(subs);
       } catch {
-        setPhase('login');
+        setPhase('readonly');
       }
     })();
   }, []);
 
-  // ready 后启动轮询；运行中加快频率
+  // ready/readonly 后启动轮询；运行中加快频率（只读态轮询的是公开端点）
   const isActive = state?.active_session != null;
   useEffect(() => {
-    if (phase !== 'ready') return;
+    if (phase !== 'ready' && phase !== 'readonly') return;
     refresh();
     const interval = isActive ? POLL_MS_ACTIVE : POLL_MS_IDLE;
     pollRef.current = window.setInterval(refresh, interval);
@@ -246,9 +249,9 @@ export function useClockStore(): ClockStore {
     };
   }, [phase, refresh, isActive]);
 
-  // 加载 subjects（ready 后一定有凭据）
+  // 加载 subjects（ready/readonly 均可：公开端点）
   useEffect(() => {
-    if (phase !== 'ready') return;
+    if (phase !== 'ready' && phase !== 'readonly') return;
     apiGet<SubjectApi[]>('/api/v1/subjects').then(setSubjects).catch(() => {});
   }, [phase]);
 
@@ -280,8 +283,8 @@ export function useClockStore(): ClockStore {
 
   const logout = useCallback(async () => {
     await apiPost('/api/v1/auth/logout');
-    setState(null);
-    setPhase('login');
+    // 回到只读监督态（而非阻断式登录页）：监督者仍可查看
+    setPhase('readonly');
   }, []);
 
   const activeId = state?.active_session?.session_id ?? null;
@@ -616,6 +619,7 @@ export function useClockStore(): ClockStore {
 
   return {
     phase,
+    isOwner: phase === 'ready',
     subjects,
     state,
     anchor,

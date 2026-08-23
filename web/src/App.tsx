@@ -7,13 +7,15 @@ import AuthGate from './components/AuthGate.js';
 import ClockFace from './components/ClockFace.js';
 import Timeline from './components/Timeline.js';
 import SettingsDialog from './components/SettingsDialog.js';
-import { Settings } from 'lucide-react';
+import { Settings, Lock } from 'lucide-react';
 
 export default function App() {
   const store = useClockStore();
   const settings = useSettings();
   const animationsEnabled = useAnimationsEnabled();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** 只读监督态的解锁弹层（输入 PIN 转 owner） */
+  const [loginOpen, setLoginOpen] = useState(false);
   const [theme, setTheme] = useState<string>(() => localStorage.getItem('clock-theme') || 'auto');
 
   // 主题应用
@@ -125,8 +127,8 @@ export default function App() {
     );
   }
 
-  if (store.phase === 'setup' || store.phase === 'login') {
-    return <AuthGate phase={store.phase} onSetup={store.setupPassword} onLogin={store.login} error={store.error} />;
+  if (store.phase === 'setup') {
+    return <AuthGate phase="setup" onSetup={store.setupPassword} onLogin={store.login} error={store.error} />;
   }
 
   return (
@@ -135,11 +137,37 @@ export default function App() {
         {/* 品牌名已按 2026-08-20 决策隐藏：顶栏只保留状态点与日期；
             标签页标题（document.title）与 index.html <title> 仍承担识别职责 */}
         <span className={`topbar-status-dot ${store.state?.active_session?.status === 'running' ? 'live' : ''}`} aria-hidden />
+        {!store.isOwner && <span className="topbar-readonly-badge">只读监督</span>}
         <span className="topbar-date">{store.todayDate} · 北京时间</span>
+        {!store.isOwner && (
+          <button
+            className="icon-btn"
+            aria-label="解锁操作"
+            title="输入 PIN 解锁操作"
+            onClick={() => setLoginOpen(true)}
+            data-testid="unlock-btn"
+          >
+            <Lock size={18} />
+          </button>
+        )}
         <button className="icon-btn" aria-label="设置" onClick={() => setSettingsOpen(true)}>
           <Settings size={20} />
         </button>
       </header>
+
+      {loginOpen && (
+        <AuthGate
+          phase="login"
+          onSetup={store.setupPassword}
+          onLogin={async (p) => {
+            const ok = await store.login(p);
+            if (ok) setLoginOpen(false);
+            return ok;
+          }}
+          error={store.error}
+          onClose={() => setLoginOpen(false)}
+        />
+      )}
 
       {store.error && (
         <div className="sync-banner" role="status">
@@ -165,6 +193,7 @@ export default function App() {
         theme={theme}
         onThemeChange={changeTheme}
         onLogout={store.logout}
+        isOwner={store.isOwner}
       />
     </div>
   );

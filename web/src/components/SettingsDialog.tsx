@@ -10,9 +10,11 @@ interface Props {
   theme: string;
   onThemeChange: (t: string) => void;
   onLogout: () => Promise<void>;
+  /** 只读监督态隐藏退出登录（本就没有登录会话） */
+  isOwner: boolean;
 }
 
-export default function SettingsDialog({ open, onOpenChange, theme, onThemeChange, onLogout }: Props) {
+export default function SettingsDialog({ open, onOpenChange, theme, onThemeChange, onLogout, isOwner }: Props) {
   const settings = useSettings();
   const animationsOn = useAnimationsEnabled();
   const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -153,11 +155,13 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
             </p>
           </div>
 
-          <div className="setting-row">
-            <button className="danger-btn" onClick={() => void onLogout()}>
-              退出登录
-            </button>
-          </div>
+          {isOwner && (
+            <div className="setting-row">
+              <button className="danger-btn" onClick={() => void onLogout()}>
+                退出登录
+              </button>
+            </div>
+          )}
 
           <Dialog.Close className="icon-btn dialog-close" aria-label="关闭">
             <X size={16} />

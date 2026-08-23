@@ -76,6 +76,8 @@ function formatHistoryDuration(seconds: number): string {
 
 export default function Timeline({ store }: { store: ClockStore }) {
   const animationsEnabled = useAnimationsEnabled();
+  /** 只读监督态：时间轴可看，编辑/撤回/继续/海螺（要调 LLM）全部封死 */
+  const readOnly = store.phase === 'readonly';
   const viewTransition = animationsEnabled ? { duration: 0.22, ease: [0.2, 0, 0, 1] as const } : { duration: 0 };
   const [viewDate, setViewDate] = useState(store.todayDate);
   const [popover, setPopover] = useState<{ row: SessionRow; containerX: number } | null>(null);
@@ -676,7 +678,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
           >
             <CalendarDays size={16} />
           </button>
-          <button
+          {!readOnly && <button
             className={`icon-btn ${conchOpen ? 'selected' : ''}`}
             aria-label="神奇海螺"
             title="神奇海螺 · 下一步做什么"
@@ -689,7 +691,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
             data-testid="conch-toggle"
           >
             <Shell size={16} />
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -864,7 +866,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
               </span>
             </div>
           </div>
-          {popover.row.stopped && (
+          {popover.row.stopped && !readOnly && (
             <div className="popover-edit-grid">
               <label className="popover-field">
                 <span>开始时间</span>
@@ -896,7 +898,8 @@ export default function Timeline({ store }: { store: ClockStore }) {
             </div>
           )}
           {!popover.row.stopped && popover.row.note && <div className="popover-note">「{popover.row.note}」</div>}
-          {popover.row.stopped && (
+          {popover.row.stopped && readOnly && popover.row.note && <div className="popover-note">「{popover.row.note}」</div>}
+          {popover.row.stopped && !readOnly && (
             <div className="popover-actions action-row">
               {/* 备注已改自动保存（Enter/失焦）：弹窗动作只剩三个低频编辑，统一 ghost 权重。
                   层级靠顺序与危险色表达，不给少数动作 primary 填充（HIG 按钮权重原则）。 */}

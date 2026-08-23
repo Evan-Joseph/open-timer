@@ -5,6 +5,11 @@ const PIN = '123456';
 async function setup(page: any) {
   await page.goto('/');
   await page.waitForTimeout(400);
+  // 只读监督态（已设置过密码、未登录）：点锁图标唤出解锁层
+  if ((await page.locator('.pin-dots').isVisible().catch(() => false)) === false) {
+    await page.getByTestId('unlock-btn').click();
+    await page.waitForTimeout(300);
+  }
   await page.keyboard.type(PIN);
   await page.waitForTimeout(700);
   if ((await page.getByText('再输入一次以确认').count()) > 0) {

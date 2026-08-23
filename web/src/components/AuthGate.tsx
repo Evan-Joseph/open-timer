@@ -1,18 +1,20 @@
 /** iOS 锁屏式 PIN 界面：六位圆点 + 数字键盘。setup 需要输入两次确认。 */
 
 import { useEffect, useState } from 'react';
-import { Delete, Lock } from 'lucide-react';
+import { Delete, Lock, X } from 'lucide-react';
 
 interface Props {
   phase: 'setup' | 'login';
   onSetup: (p: string) => Promise<boolean>;
   onLogin: (p: string) => Promise<boolean>;
   error: string | null;
+  /** 提供后显示关闭按钮（只读态的解锁弹层用），否则为全屏阻断式 */
+  onClose?: () => void;
 }
 
 const KEYS: Array<string | 'del' | 'empty'> = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'empty', '0', 'del'];
 
-export default function AuthGate({ phase, onSetup, onLogin, error }: Props) {
+export default function AuthGate({ phase, onSetup, onLogin, error, onClose }: Props) {
   const [entry, setEntry] = useState('');
   const [firstPass, setFirstPass] = useState<string | null>(null); // setup 第一次输入
   const [busy, setBusy] = useState(false);
@@ -72,16 +74,17 @@ export default function AuthGate({ phase, onSetup, onLogin, error }: Props) {
     }
   };
 
-  // 物理键盘支持：数字键输入、退格删除、回车提交
+  // 物理键盘支持：数字键输入、退格删除、回车提交；弹层模式下 Esc 关闭
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (/^[0-9]$/.test(e.key)) press(e.key);
       else if (e.key === 'Backspace') press('del');
+      else if (e.key === 'Escape' && onClose) onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busy, firstPass, phase]);
+  }, [busy, firstPass, phase, onClose]);
 
   const title =
     phase === 'setup'
@@ -91,8 +94,13 @@ export default function AuthGate({ phase, onSetup, onLogin, error }: Props) {
       : '输入 PIN 解锁';
 
   return (
-    <div className="auth-gate">
-      <div className="auth-card pin-card">
+    <div className={`auth-gate${onClose ? ' auth-gate-overlay' : ''}`} onClick={onClose}>
+      <div className="auth-card pin-card" onClick={(e) => e.stopPropagation()}>
+        {onClose && (
+          <button className="icon-btn auth-close" aria-label="关闭" title="关闭" onClick={onClose}>
+            <X size={16} />
+          </button>
+        )}
         <div className="auth-icon">
           <Lock size={20} />
         </div>

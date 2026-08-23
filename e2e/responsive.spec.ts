@@ -13,6 +13,12 @@ async function enterReadyState(page: Page) {
       await page.keyboard.type(PASSWORD);
       await page.waitForTimeout(700);
     }
+  } else if (await page.getByTestId('unlock-btn').count()) {
+    // 只读监督态：点锁图标解锁进入可操作态
+    await page.getByTestId('unlock-btn').click();
+    await page.waitForTimeout(300);
+    await page.keyboard.type(PASSWORD);
+    await page.waitForTimeout(700);
   }
 
   const stopButton = page.getByRole('button', { name: '结束并保存' });

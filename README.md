@@ -35,7 +35,9 @@ npm run test:e2e        # Playwright（自动起服务，端口 4390）
 
 ## 鉴权
 
+- **默认进入只读监督态**（2026-08-23）：任何人打开即是大屏只读视图（时钟/时间轴/近 7 天回顾可看），计时操作与写端点全部封死；顶栏锁图标输入 6 位 PIN 解锁为 owner（可读写）。监督场景（给别人看进度）无需交出密码。
 - 首次访问设置 owner 密码（PBKDF2-SHA256，10 万次迭代，Web Crypto 跨运行时）；登录后 HttpOnly + SameSite=Lax cookie，7 天有效。
+- 写安全纵深：即使绕过 UI，所有写端点服务端仍强制 `requireOwner`；只读态纯前端对齐，不替代服务端鉴权。
 - 总控只读凭据：`POST /api/v1/credentials`（owner）生成 `clk_…` token，仅显示一次；`POST /api/v1/credentials/:id/revoke` 撤销；支持轮换（新建+撤销）。
 
 ## 总控只读 API（v1）

@@ -36,7 +36,11 @@ async function doSetup(page: Page) {
     await page.waitForTimeout(500); // 满 6 位后自动提交的延迟
   };
   const setupDots = page.locator('.pin-dots');
-  await expect(setupDots).toBeVisible();
+  // 只读监督态（已设置过密码、未登录）：点锁图标唤出解锁层
+  if (!(await setupDots.isVisible().catch(() => false))) {
+    await page.getByTestId('unlock-btn').click();
+    await expect(setupDots).toBeVisible();
+  }
   await enterPin();
   // setup 需要二次确认；login 一次即可。出现「再输入一次」说明是 setup 流程
   const confirmTitle = page.getByText('再输入一次以确认');
@@ -724,8 +728,13 @@ test.describe('多端偏好同步', () => {
     const pageB = await ctxB.newPage();
     await pageB.goto('/');
     await pageB.waitForTimeout(400);
-    // 登录态不共享：输入 PIN 登录（服务端已 setup，单次输入即可）
+    // 登录态不共享：输入 PIN 登录（服务端已 setup；未登录默认进只读监督态，需先点锁解锁）
     if (await pageB.locator('.pin-dots').count()) {
+      await pageB.keyboard.type(PASSWORD);
+      await pageB.waitForTimeout(700);
+    } else if (await pageB.getByTestId('unlock-btn').count()) {
+      await pageB.getByTestId('unlock-btn').click();
+      await pageB.waitForTimeout(300);
       await pageB.keyboard.type(PASSWORD);
       await pageB.waitForTimeout(700);
     }

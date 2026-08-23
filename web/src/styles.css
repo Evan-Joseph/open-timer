@@ -1257,3 +1257,30 @@ html.animations-off .app::before { animation: none !important; }
 html.animations-off .conch-breathe,
 html.animations-off .conch-running-badge,
 html.animations-off .conch-spin { animation: none; }
+
+/* ---------- 只读监督态（2026-08-23） ---------- */
+
+.topbar-readonly-badge {
+  font-size: var(--fs-xs); color: var(--text-2);
+  background: var(--surface-2); border-radius: 999px;
+  padding: 0 var(--space-2); line-height: 1.7; white-space: nowrap;
+}
+
+.readonly-block {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-2);
+  padding: var(--space-4) 0;
+}
+.readonly-line { font-size: var(--fs-lg); color: var(--text-1); font-variant-numeric: tabular-nums; }
+.readonly-line.readonly-sub { font-size: var(--fs-sm); color: var(--text-2); max-width: 70ch; text-align: center; }
+.readonly-hint { font-size: var(--fs-xs); color: var(--text-3); }
+
+/* 解锁弹层：复用 PIN 卡，叠加遮罩而非全屏阻断（监督者背后仍可见时钟） */
+.auth-gate.auth-gate-overlay {
+  position: fixed; inset: 0; z-index: 50;
+  min-height: 0; height: 100dvh;
+  background: var(--overlay-scrim);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.auth-card { position: relative; }
+.auth-close { position: absolute; top: var(--space-3); right: var(--space-3); }

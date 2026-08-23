@@ -28,6 +28,8 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const { state, subjects, anchor, busy } = store;
   const active = state?.active_session ?? null;
   const settings = useSettings();
+  /** 只读监督态：所有计时操作封死，仅展示（写端点本就要求 owner，这里是 UI 对齐） */
+  const readOnly = store.phase === 'readonly';
 
   const seconds = useMonotonicSeconds(anchor);
   // 本段活跃秒（running 增长 / paused 冻结）：与总累计用同一 tick 同源计算，杜绝抢秒抖动
@@ -220,6 +222,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
      输入框、弹层打开、修饰键组合时让位。 */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (readOnly) return; // 只读监督态：空格主控整体让位
       if (e.code !== 'Space' || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat) return;
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
@@ -238,7 +241,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active, lastStopped, noteDraft, selectedSubject, intentDraft, store]);
+  }, [active, lastStopped, noteDraft, selectedSubject, intentDraft, store, readOnly]);
 
   /* ---------- 结束反馈态 ---------- */
   if (lastStopped && !active) {
@@ -361,7 +364,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
           )}
         </div>
 
-        <div className="control-row">
+        {!readOnly && <div className="control-row">
           {paused ? (
             <button className="control-btn resume" onClick={store.resume} disabled={busy} aria-label="继续计时" title="继续">
               <Play size={24} />
@@ -374,10 +377,10 @@ export default function ClockFace({ store }: { store: ClockStore }) {
           <button className="control-btn stop" onClick={handleStop} disabled={busy} aria-label="结束并保存" title="结束并保存">
             <Square size={24} />
           </button>
-        </div>
+        </div>}
 
-        {/* 换科目：结束当前段并开启新段 */}
-        <details className="switch-subject">
+        {/* 换科目：结束当前段并开启新段（只读监督态隐藏） */}
+        {!readOnly && <details className="switch-subject">
           <summary>切换到其他科目</summary>
           <div className="switch-grid">
             {subjects
@@ -395,7 +398,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
                 </button>
               ))}
           </div>
-        </details>
+        </details>}
       </section>
   );
 }
@@ -434,6 +437,19 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         </div>
       )}
 
+      {readOnly ? (
+        <div className="readonly-block" data-testid="readonly-block">
+          <div className="readonly-line">今天累计 {formatDurationZh(state?.today_active_seconds ?? 0)}</div>
+          {recentStopped && (
+            <div className="readonly-line readonly-sub">
+              最近：{subjectOf(recentStopped.subject_id)?.display_name ?? recentStopped.subject_id}
+              {recentStopped.note ? ` · 「${recentStopped.note}」` : ''}
+            </div>
+          )}
+          <div className="readonly-hint">只读监督模式 · 点右上角锁图标解锁后可操作</div>
+        </div>
+      ) : (
+        <>
       <div className="subject-picker" role="radiogroup" aria-label="选择科目">
         {ordered.map((s) => (
           <button
@@ -464,6 +480,8 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       </button>
 
       <div className="today-hint">今天已记录 {formatDurationZh(state?.today_active_seconds ?? 0)}</div>
+        </>
+      )}
     </section>
   );
 }
