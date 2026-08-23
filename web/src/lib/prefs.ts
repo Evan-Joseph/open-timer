@@ -20,6 +20,8 @@ export interface SyncedPrefs {
   timelineScale: 'default' | 'full-day';
   timelineMode: 'track' | 'list';
   historyOpen: boolean;
+  /** 神奇海螺浮层开合 */
+  conchOpen: boolean;
   /** 空闲页选中的科目（跨端跟随） */
   selectedSubject: string;
 }
@@ -31,6 +33,7 @@ const SCALE_KEY = 'clock-timeline-scale';
 const MODE_KEY = 'clock-timeline-mode';
 const SUBJECT_KEY = 'clock-last-subject';
 const HISTORY_KEY = 'clock-history-open';
+const CONCH_KEY = 'clock-conch-open';
 /** 远端偏好应用后广播：各组件重读本地键 */
 export const PREFS_APPLIED_EVT = 'clock-prefs-applied';
 
@@ -70,6 +73,7 @@ export function readLocalPrefs(): SyncedPrefs {
     timelineScale: scale === 'full-day' ? 'full-day' : 'default',
     timelineMode: mode === 'list' ? 'list' : 'track',
     historyOpen: safeGet(HISTORY_KEY) === '1',
+    conchOpen: safeGet(CONCH_KEY) === '1',
     selectedSubject: safeGet(SUBJECT_KEY) || 'math',
   };
 }
@@ -124,6 +128,10 @@ export function applyRemotePrefs(remote: Partial<SyncedPrefs>): boolean {
   }
   if (typeof remote.historyOpen === 'boolean' && remote.historyOpen !== local.historyOpen) {
     safeSet(HISTORY_KEY, remote.historyOpen ? '1' : '0');
+    changed = true;
+  }
+  if (typeof remote.conchOpen === 'boolean' && remote.conchOpen !== local.conchOpen) {
+    safeSet(CONCH_KEY, remote.conchOpen ? '1' : '0');
     changed = true;
   }
   if (remote.selectedSubject && remote.selectedSubject !== local.selectedSubject) {
@@ -184,6 +192,11 @@ export function schedulePrefsPush(overrides?: Partial<SyncedPrefs>): void {
 /** 7 天面板开合的本地持久化（同浏览器新标签页挂载时继承）。 */
 export function setHistoryOpenLocal(open: boolean): void {
   safeSet(HISTORY_KEY, open ? '1' : '0');
+}
+
+/** 神奇海螺浮层开合的本地持久化。 */
+export function setConchOpenLocal(open: boolean): void {
+  safeSet(CONCH_KEY, open ? '1' : '0');
 }
 
 /** 拉取并应用远端偏好；返回是否应用了变化。 */

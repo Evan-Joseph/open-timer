@@ -1182,3 +1182,78 @@ html.animations-off *, html.animations-off *::before, html.animations-off *::aft
   transition-duration: 0.01ms !important;
 }
 html.animations-off .app::before { animation: none !important; }
+
+/* ---------- 神奇海螺浮层（2026-08-23；范式 = 近 7 天回顾居中浮层） ---------- */
+
+.conch-panel { width: min(720px, calc(100vw - 64px)); }
+.conch-title { align-items: center; }
+.conch-title svg { color: var(--accent); flex: none; }
+.conch-head-actions { display: flex; align-items: center; gap: var(--space-2); }
+.conch-window-seg { align-self: flex-start; }
+
+.conch-body { display: grid; gap: var(--space-3); }
+
+.conch-loading {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-2);
+  padding: var(--space-7) 0;
+  color: var(--text-2); font-size: var(--fs-md);
+}
+.conch-loading-main { display: flex; align-items: center; gap: var(--space-2); }
+.conch-loading-sub { font-size: var(--fs-xs); color: var(--text-3); }
+.conch-breathe { color: var(--accent); animation: conch-breathe var(--dur-breathe) ease-in-out infinite; }
+@keyframes conch-breathe { 0%, 100% { opacity: 0.55; transform: scale(1); } 50% { opacity: 1; transform: scale(1.08); } }
+.conch-spin { animation: conch-spin 1s linear infinite; }
+@keyframes conch-spin { to { transform: rotate(360deg); } }
+
+.conch-error {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-3);
+  padding: var(--space-6) 0;
+  color: var(--text-2); font-size: var(--fs-md); text-align: center;
+}
+.conch-empty { padding: var(--space-6) 0; text-align: center; color: var(--text-3); font-size: var(--fs-md); }
+
+.conch-card {
+  display: grid; gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+.conch-card-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.conch-subject-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--sc, var(--accent)); flex: none; }
+.conch-subject-name { font-size: var(--fs-md); font-weight: 600; color: var(--text-1); }
+.conch-running-badge {
+  font-size: var(--fs-xs); color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
+  border-radius: 999px; padding: 0 var(--space-2); line-height: 1.6;
+  animation: pill-breathe var(--dur-breathe-pill) ease-in-out infinite;
+}
+.conch-meta { font-size: var(--fs-xs); color: var(--text-3); margin-left: auto; white-space: nowrap; }
+.conch-conf { font-size: var(--fs-xs); border-radius: 999px; padding: 0 var(--space-2); line-height: 1.6; background: var(--surface-2); color: var(--text-2); white-space: nowrap; }
+.conch-conf-high { color: var(--sc, var(--accent)); }
+.conch-conf-low { opacity: 0.7; }
+
+.conch-action-line { display: flex; align-items: center; gap: var(--space-2); }
+.conch-chip {
+  font-size: var(--fs-xs); color: var(--text-2);
+  background: var(--surface-2); border-radius: 999px; padding: 0 var(--space-2); line-height: 1.7;
+}
+.conch-topic { font-size: var(--fs-sm); color: var(--text-2); }
+.conch-next { font-size: var(--fs-xl); font-weight: 600; color: var(--text-1); line-height: 1.4; }
+.conch-rationale { font-size: var(--fs-sm); color: var(--text-2); }
+.conch-footnote { display: flex; flex-wrap: wrap; gap: var(--space-3); font-size: var(--fs-xs); color: var(--text-3); }
+.conch-card-actions { display: flex; justify-content: flex-end; }
+.conch-card-actions .ghost-btn { display: inline-flex; align-items: center; gap: var(--space-1); }
+
+.conch-skipped {
+  display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4);
+  padding-top: var(--space-2); border-top: 1px solid var(--border);
+  font-size: var(--fs-xs); color: var(--text-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conch-breathe, .conch-running-badge, .conch-spin { animation: none; }
+}
+html.animations-off .conch-breathe,
+html.animations-off .conch-running-badge,
+html.animations-off .conch-spin { animation: none; }

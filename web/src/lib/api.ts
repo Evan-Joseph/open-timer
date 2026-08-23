@@ -45,12 +45,51 @@ export interface StateApi {
   active_session: ActiveSessionApi | null;
   today_active_seconds: number;
   today_date: string;
+  /** 事件水位（= 最大事件 id）：无计时事件则不变，可作缓存失效依据 */
+  revision: number;
 }
 
 export interface DailySummaryApi {
   date: string;
   total_active_seconds: number;
   by_subject: Array<{ subject_id: string; active_seconds: number; session_count: number }>;
+}
+
+/* ---------- 神奇海螺 ---------- */
+
+export type ConchWindow = 'all' | '30d' | '7d';
+
+export interface ConchSubjectApi {
+  subject_id: string;
+  display_name: string;
+  running_now: boolean;
+  last_active_date: string;
+  next_action: string;
+  action_kind: 'lecture' | 'problems' | 'book' | 'review' | 'test' | 'other';
+  topic: string | null;
+  pattern: string | null;
+  rationale: string;
+  confidence: 'high' | 'medium' | 'low';
+  alternative: string | null;
+}
+
+export interface ConchSkippedApi {
+  subject_id: string;
+  display_name: string;
+  reason: 'not_started' | 'inactive';
+}
+
+export interface ConchAskResponseApi {
+  window: ConchWindow;
+  generated_at: string;
+  revision: number;
+  model: string;
+  subjects: ConchSubjectApi[];
+  skipped: ConchSkippedApi[];
+}
+
+export function conchAsk(window: ConchWindow) {
+  return apiPost<ConchAskResponseApi>('/api/v1/conch/ask', { window });
 }
 
 function newIdempotencyKey(): string {

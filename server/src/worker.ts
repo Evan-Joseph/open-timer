@@ -7,6 +7,7 @@ import { createApp } from './app.js';
 import { applySecurityHeaders } from './headers.js';
 import { runBackup, type BackupBucket } from './backup.js';
 import { D1Storage, type D1Database } from './repo/d1-storage.js';
+import { loadConchConfig } from './conch-config.js';
 import type { AppConfig } from './config.js';
 import migrationSql0001 from '../../migrations/0001_init.sql';
 import migrationSql0002 from '../../migrations/0002_user_pref.sql';
@@ -32,6 +33,11 @@ interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
   BACKUP: BackupBucket;
+  /** 神奇海螺（可选）：wrangler secret 注入；缺失则功能返回 503 */
+  CONCH_API_BASE?: string;
+  CONCH_API_KEY?: string;
+  CONCH_MODEL?: string;
+  CONCH_THINKING_BUDGET?: string;
 }
 
 /** 同一 Worker isolate 内共享：迁移完成后不再探测数据库 */
@@ -83,6 +89,12 @@ async function handle(request: Request, env: Env): Promise<Response> {
     isProduction: true,
     sessionTtlMs: 7 * 86_400_000,
     minSegmentMs: 10_000, // 误触过滤：短于 10 秒的已关闭片段不计入
+    conch: loadConchConfig({
+      CONCH_API_BASE: env.CONCH_API_BASE,
+      CONCH_API_KEY: env.CONCH_API_KEY,
+      CONCH_MODEL: env.CONCH_MODEL,
+      CONCH_THINKING_BUDGET: env.CONCH_THINKING_BUDGET,
+    }),
     version: '0.1.0',
   };
   const storage = new D1Storage(env.DB, migrationSql);

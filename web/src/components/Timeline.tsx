@@ -12,14 +12,15 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Clock, LocateFixed, Undo2, X, List, GanttChart, CalendarDays, Play } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, LocateFixed, Undo2, X, List, GanttChart, CalendarDays, Play, Shell } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { ClockStore } from '../lib/store.js';
 import type { DailySummaryApi, SessionApi } from '../lib/api.js';
 import { apiGet } from '../lib/api.js';
 import { formatBeijingTime, formatDurationZh } from '../lib/clock.js';
 import { useAnimationsEnabled } from '../lib/settings.js';
-import { PREFS_APPLIED_EVT, schedulePrefsPush, setHistoryOpenLocal } from '../lib/prefs.js';
+import { PREFS_APPLIED_EVT, schedulePrefsPush, setConchOpenLocal, setHistoryOpenLocal } from '../lib/prefs.js';
+import ConchOverlay from './ConchOverlay.js';
 import { LEARNING_DAY, QUIET_PERIODS, shanghaiDayRangeUtc, timelineRange, type TimelineScale } from '@clock/shared';
 
 const NOW_TICK_MS = 30_000;
@@ -95,6 +96,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
   /** 单日历史数据加载中：避免数据未到时闪现上一天片段或误报「这一天还没有记录」 */
   const [dayLoading, setDayLoading] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [conchOpen, setConchOpen] = useState(false);
   const [historySummaries, setHistorySummaries] = useState<DailySummaryApi[]>([]);
   const [historyWeekSessions, setHistoryWeekSessions] = useState<Map<string, SessionApi[]>>(new Map());
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -432,6 +434,13 @@ export default function Timeline({ store }: { store: ClockStore }) {
     schedulePrefsPush({ historyOpen: false });
   }, []);
 
+  /** 关闭神奇海螺浮层（同样多端同步开合态）。 */
+  const closeConch = useCallback(() => {
+    setConchOpen(false);
+    setConchOpenLocal(false);
+    schedulePrefsPush({ conchOpen: false });
+  }, []);
+
   // 近 7 天回顾浮层：Esc 关闭（点击遮罩 / 右上角 X 在 JSX 内处理）
   useEffect(() => {
     if (!historyOpen) return;
@@ -454,6 +463,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
         if (next && !prev) void loadHistory();
         return next;
       });
+      setConchOpen(localStorage.getItem('clock-conch-open') === '1');
     };
     window.addEventListener(PREFS_APPLIED_EVT, reload);
     return () => window.removeEventListener(PREFS_APPLIED_EVT, reload);
@@ -665,6 +675,20 @@ export default function Timeline({ store }: { store: ClockStore }) {
             data-testid="history-toggle"
           >
             <CalendarDays size={16} />
+          </button>
+          <button
+            className={`icon-btn ${conchOpen ? 'selected' : ''}`}
+            aria-label="神奇海螺"
+            title="神奇海螺 · 下一步做什么"
+            onClick={() => {
+              const next = !conchOpen;
+              setConchOpen(next);
+              setConchOpenLocal(next);
+              schedulePrefsPush({ conchOpen: next });
+            }}
+            data-testid="conch-toggle"
+          >
+            <Shell size={16} />
           </button>
         </div>
       </div>
@@ -1018,6 +1042,11 @@ export default function Timeline({ store }: { store: ClockStore }) {
           </motion.div>
         </motion.div>
       )}
+    </AnimatePresence>
+
+    {/* 神奇海螺：下一步做什么（居中浮层，同 7 天回顾范式） */}
+    <AnimatePresence initial={false}>
+      {conchOpen && <ConchOverlay onClose={closeConch} />}
     </AnimatePresence>
     </>
   );

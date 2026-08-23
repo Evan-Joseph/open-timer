@@ -27,6 +27,7 @@ function makeConfig(dbPath: string): AppConfig {
     isProduction: false,
     sessionTtlMs: 7 * 86_400_000,
     minSegmentMs: 0, // 单测不过滤误触片段（另有专门用例验证过滤行为）
+    conch: null,
     version: 'test',
   };
 }
