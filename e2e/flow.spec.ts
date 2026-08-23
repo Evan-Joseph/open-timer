@@ -1148,6 +1148,8 @@ test.describe('科目结束后的离开提醒', () => {
     // 开始下一段：回到空闲页并开始新会话
     await page.getByRole('button', { name: '好，继续' }).click();
     await expect(page.getByTestId('idle-clock')).toBeVisible();
+    // 关掉结束卡后的空闲态与暂停态氛围一致：逾期洗色持续，直到开始下一段
+    await expect(page.locator('.clockface.idle')).toHaveAttribute('data-away-level', '3');
     await page.getByTestId('start-btn').click();
     await expect(page.getByText('· 进行中')).toBeVisible();
     // 运行态不再显示离开行（提醒已复位）

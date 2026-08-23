@@ -203,11 +203,13 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       if (settings.finishSound) playFinishChime();
       setLastStopped(snapshot); // 立即呈现结束反馈（store.stop 内部乐观清空活动会话）
       // 从运行态结束时休息从 0 开始；从暂停态结束时沿用已经发生的休息。
+      // 锚点用服务端校准时钟（与暂停态口径一致），不用本机 Date.now()——
+      // 设备时钟偏移不得导致两种空闲态的休息计时快慢不同。
       setAwayAnchorOverride({
         confirmedSeconds: paused ? awaySeconds : 0,
         running: true,
         anchorPerfMs: performance.now(),
-        serverNowMs: Date.now(),
+        serverNowMs: readServerNowMs(),
       });
     }
     await store.stop(null);
@@ -412,7 +414,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   });
 
   return (
-    <section className="clockface idle">
+    <section className="clockface idle" data-away-level={reminderLevel}>
       <div className="idle-clock" data-testid="idle-clock" key={idleTime}>
         {idleTime}
       </div>
