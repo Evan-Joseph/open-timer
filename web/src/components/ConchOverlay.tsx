@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Shell, X, RefreshCw, Play } from 'lucide-react';
 import { conchAsk, type ConchAskResponseApi, type ConchWindow } from '../lib/api.js';
+import { saveConchStartMark } from '../lib/conch-mark.js';
 import { useClockStore } from '../lib/store.js';
 
 const WINDOW_LABELS: Record<ConchWindow, string> = { all: '从始至今', '30d': '近 30 天', '7d': '近 7 天' };
@@ -138,13 +139,17 @@ export default function ConchOverlay({ onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  /** 一键开始：以推荐语作为 intent_note 直接开工（可事后在时间轴改） */
+  /** 一键开始：以推荐语作为 intent_note 直接开工；结束时预填同句为结束备注 */
   const startSubject = async (subjectId: string, nextAction: string) => {
     if (activeSession) return;
     setStartingId(subjectId);
-    const ok = await store.start(subjectId, nextAction.slice(0, 200));
+    const note = nextAction.slice(0, 200);
+    const sessionId = await store.start(subjectId, note);
     setStartingId(null);
-    if (ok) onClose();
+    if (sessionId) {
+      saveConchStartMark({ sessionId, note });
+      onClose();
+    }
   };
 
   const colorOf = (subjectId: string) => store.subjects.find((s) => s.subject_id === subjectId)?.color_id ?? 'amber';

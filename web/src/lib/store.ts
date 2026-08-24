@@ -29,7 +29,7 @@ export interface ClockStore {
   setupPassword: (p: string) => Promise<boolean>;
   login: (p: string) => Promise<boolean>;
   logout: () => Promise<void>;
-  start: (subjectId: string, intentNote: string | null) => Promise<boolean>;
+  start: (subjectId: string, intentNote: string | null) => Promise<string | null>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
   stop: (endNote: string | null) => Promise<void>;
@@ -346,7 +346,7 @@ export function useClockStore(): ClockStore {
         const errCode = res.data && (res.data as { error?: string }).error;
         flashError(errCode === 'ACTIVE_SESSION_EXISTS' ? '已有进行中的会话' : '开始失败，请重试');
         refresh(); // 可能别处已有活动会话，拉取真实状态
-        return false;
+        return null;
       }
       notifyPeers();
       // 乐观进入运行态：立即渲染，不等 refresh 往返
@@ -373,7 +373,7 @@ export function useClockStore(): ClockStore {
         );
       }
       refresh();
-      return true;
+      return d?.session_id ?? null;
     },
     [beginWrite, refresh, flashError, notifyPeers],
   );

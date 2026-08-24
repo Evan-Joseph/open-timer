@@ -8,6 +8,7 @@ import type { SyncAnchor } from '../lib/clock.js';
 import { useMonotonicSeconds, useDualMonotonic, useWallSeconds, useBeijingTime, formatHms, formatHmsShort, formatDurationZh, formatBeijingTime, restPlanForFocus, restStageOf, restStageLabel } from '../lib/clock.js';
 import { useAnimationsEnabled, useSettings } from '../lib/settings.js';
 import { PREFS_APPLIED_EVT, schedulePrefsPush } from '../lib/prefs.js';
+import { consumeConchStartMark } from '../lib/conch-mark.js';
 import { playFinishChime, playAwayReminder } from '../lib/sound.js';
 import { isQuietMinute } from '@clock/shared';
 
@@ -204,6 +205,8 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     if (snapshot) {
       if (settings.finishSound) playFinishChime();
       setLastStopped(snapshot); // 立即呈现结束反馈（store.stop 内部乐观清空活动会话）
+      // 海螺推荐开工的会话：结束备注预填推荐语（一次性标记）；其余清空草稿
+      setNoteDraft(consumeConchStartMark(snapshot.sessionId) ?? '');
       // 从运行态结束时休息从 0 开始；从暂停态结束时沿用已经发生的休息。
       // 锚点用服务端校准时钟（与暂停态口径一致），不用本机 Date.now()——
       // 设备时钟偏移不得导致两种空闲态的休息计时快慢不同。
