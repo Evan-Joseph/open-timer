@@ -782,24 +782,21 @@ test.describe('多端偏好同步', () => {
     });
   });
 
-  test('跨设备：一端打开近 7 天回顾，另一端登录后经服务端同步跟随打开', async ({ page, browser }) => {
+  test('跨设备：浮层开合态为设备本地——一端打开近 7 天回顾，另一端不跟随（2026-08-24 同步下线）', async ({ page, browser }) => {
     await doSetup(page);
     await page.getByTestId('history-toggle').click();
     await expect(page.getByTestId('history-strip')).toBeVisible();
-    await page.waitForTimeout(1200); // 等防抖推送落地
+    await page.waitForTimeout(1200); // 即便偏好推送落地，开合态也不再同步
 
-    // 端 B（独立设备）：登录后 7 天面板应自动打开
+    // 端 B（独立设备）：登录后 7 天面板应保持关闭（开合态设备本地，避免多端重复发请求）
     const { ctxB, pageB } = await freshDevice(browser);
-    await expect(pageB.getByTestId('history-strip')).toBeVisible({ timeout: 15_000 });
+    await pageB.waitForTimeout(2000);
+    await expect(pageB.getByTestId('history-strip')).toHaveCount(0);
     await ctxB.close();
 
-    // 复位：Esc 关闭面板（关闭状态同样经服务端同步）
+    // 复位：Esc 关闭面板（仅本端生效）
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('history-strip')).toHaveCount(0);
-    await page.waitForTimeout(1000);
-    await page.request.put('/api/v1/prefs', {
-      data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false, selectedSubject: 'math' },
-    });
   });
 
   test('计时对表：一端开始计时，另一端同步进入运行且秒数对齐（±2s）', async ({ page, context }) => {

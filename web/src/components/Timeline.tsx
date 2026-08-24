@@ -20,6 +20,7 @@ import { apiGet } from '../lib/api.js';
 import { formatBeijingTime, formatDurationZh } from '../lib/clock.js';
 import { useAnimationsEnabled } from '../lib/settings.js';
 import { PREFS_APPLIED_EVT, schedulePrefsPush, setConchOpenLocal, setHistoryOpenLocal } from '../lib/prefs.js';
+import { detectDeviceRole } from '../lib/device.js';
 import ConchOverlay from './ConchOverlay.js';
 import { LEARNING_DAY, QUIET_PERIODS, shanghaiDayRangeUtc, timelineRange, type TimelineScale } from '@clock/shared';
 
@@ -97,8 +98,11 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const [historySessions, setHistorySessions] = useState<SessionApi[]>([]);
   /** 单日历史数据加载中：避免数据未到时闪现上一天片段或误报「这一天还没有记录」 */
   const [dayLoading, setDayLoading] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [conchOpen, setConchOpen] = useState(false);
+  // 浮层开合态为设备本地：刷新/重开标签页时从 localStorage 恢复（2026-08-24 起不再多端同步）
+  const [historyOpen, setHistoryOpen] = useState(() => localStorage.getItem('clock-history-open') === '1');
+  const [conchOpen, setConchOpen] = useState(() => localStorage.getItem('clock-conch-open') === '1');
+  /** 设备角色：Pad 副屏不显示会发请求的浮层入口（海螺/近 7 天），电脑主控全功能 */
+  const deviceRole = useMemo(() => detectDeviceRole(), []);
   const [historySummaries, setHistorySummaries] = useState<DailySummaryApi[]>([]);
   const [historyWeekSessions, setHistoryWeekSessions] = useState<Map<string, SessionApi[]>>(new Map());
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -429,18 +433,16 @@ export default function Timeline({ store }: { store: ClockStore }) {
     };
   }, [popover]);
 
-  /** 关闭 7 天面板的统一出口：Esc / 遮罩 / 右上角 X 都走这里，关闭状态同样多端同步。 */
+  /** 关闭 7 天面板的统一出口：Esc / 遮罩 / 右上角 X 都走这里。开合态为设备本地（不同步）。 */
   const closeHistory = useCallback(() => {
     setHistoryOpen(false);
     setHistoryOpenLocal(false);
-    schedulePrefsPush({ historyOpen: false });
   }, []);
 
-  /** 关闭神奇海螺浮层（同样多端同步开合态）。 */
+  /** 关闭神奇海螺浮层。开合态为设备本地（不同步，避免多端重复触发 LLM 请求）。 */
   const closeConch = useCallback(() => {
     setConchOpen(false);
     setConchOpenLocal(false);
-    schedulePrefsPush({ conchOpen: false });
   }, []);
 
   // 近 7 天回顾浮层：Esc 关闭（点击遮罩 / 右上角 X 在 JSX 内处理）
@@ -453,23 +455,18 @@ export default function Timeline({ store }: { store: ClockStore }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [historyOpen, closeHistory]);
 
-  // 多端同步：远端偏好到达时重读时间轴尺度/视图模式/7 天面板开合
+  // 多端同步：远端偏好到达时重读时间轴尺度/视图模式。
+  // 浮层开合态（7 天/海螺）不参与同步：设备本地，避免多端重复发请求（2026-08-24）。
   useEffect(() => {
     const reload = () => {
       const s = localStorage.getItem('clock-timeline-scale');
       setScale(s === 'full-day' ? 'full-day' : 'default');
       const m = localStorage.getItem('clock-timeline-mode');
       setMode(m === 'list' ? 'list' : 'track');
-      const next = localStorage.getItem('clock-history-open') === '1';
-      setHistoryOpen((prev) => {
-        if (next && !prev) void loadHistory();
-        return next;
-      });
-      setConchOpen(localStorage.getItem('clock-conch-open') === '1');
     };
     window.addEventListener(PREFS_APPLIED_EVT, reload);
     return () => window.removeEventListener(PREFS_APPLIED_EVT, reload);
-  }, [loadHistory]);
+  }, []);
 
   // 撤回
   const handleWithdraw = useCallback(async () => {
@@ -661,7 +658,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
           {!historyOpen && <button className="icon-btn" aria-label="后一天" title="后一天" onClick={() => setViewDate(shiftDate(viewDate, 1))} disabled={isToday}>
             <ChevronRight size={16} />
           </button>}
-          <button
+          {deviceRole === 'main' && <button
             className={`icon-btn ${historyOpen ? 'selected' : ''}`}
             aria-label="近 7 天回顾"
             title="近 7 天回顾"
@@ -669,7 +666,6 @@ export default function Timeline({ store }: { store: ClockStore }) {
               const next = !historyOpen;
               setHistoryOpen(next);
               setHistoryOpenLocal(next);
-              schedulePrefsPush({ historyOpen: next });
               if (next) {
                 void loadHistory();
               }
@@ -677,8 +673,8 @@ export default function Timeline({ store }: { store: ClockStore }) {
             data-testid="history-toggle"
           >
             <CalendarDays size={16} />
-          </button>
-          {!readOnly && <button
+          </button>}
+          {deviceRole === 'main' && !readOnly && <button
             className={`icon-btn ${conchOpen ? 'selected' : ''}`}
             aria-label="神奇海螺"
             title="神奇海螺 · 下一步做什么"
@@ -686,7 +682,6 @@ export default function Timeline({ store }: { store: ClockStore }) {
               const next = !conchOpen;
               setConchOpen(next);
               setConchOpenLocal(next);
-              schedulePrefsPush({ conchOpen: next });
             }}
             data-testid="conch-toggle"
           >
@@ -947,7 +942,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
 
     {/* 近 7 天执行回顾：居中浮层（drill-down 模态），时钟保持全尺寸不被挤压 */}
     <AnimatePresence initial={false}>
-      {historyOpen && (
+      {deviceRole === 'main' && historyOpen && (
         <motion.div
           key="history-overlay"
           className="history-overlay-backdrop"
@@ -1049,7 +1044,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
 
     {/* 神奇海螺：下一步做什么（居中浮层，同 7 天回顾范式） */}
     <AnimatePresence initial={false}>
-      {conchOpen && <ConchOverlay onClose={closeConch} />}
+      {deviceRole === 'main' && conchOpen && <ConchOverlay onClose={closeConch} />}
     </AnimatePresence>
     </>
   );

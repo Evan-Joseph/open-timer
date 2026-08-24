@@ -7,7 +7,9 @@
  * - 轮询搭车：独立 10s 间隔拉取（仅登录态），变更即应用到本地并广播；
  * - 本地变更防抖 500ms 推送；
  * - local-only 明确排除：ambientVolume（设备响度差异大，默认 0 不同步）、
- *   全屏态、reduced-motion 派生态、各类输入草稿、clock-last-subject（设备习惯）。
+ *   全屏态、reduced-motion 派生态、各类输入草稿、clock-last-subject（设备习惯）、
+ *   浮层开合态 historyOpen/conchOpen（2026-08-24 下线：开合同步会让多端各自打开
+ *   浮层重复发请求，海螺是昂贵 LLM 调用；开合态纯设备本地）。
  */
 
 import type { AmbientKind } from './ambient.js';
@@ -19,12 +21,12 @@ export interface SyncedPrefs {
   ambientKind: AmbientKind;
   timelineScale: 'default' | 'full-day';
   timelineMode: 'track' | 'list';
-  historyOpen: boolean;
-  /** 神奇海螺浮层开合 */
-  conchOpen: boolean;
   /** 空闲页选中的科目（跨端跟随） */
   selectedSubject: string;
 }
+// 注意：浮层开合态（historyOpen/conchOpen）**不在**同步集合内——
+// 2026-08-24 下线：开合同步会让多端各自打开浮层并重复发请求
+// （海螺是昂贵 LLM 调用），开合态为设备本地（见各自 localStorage 键）。
 
 const THEME_KEY = 'clock-theme';
 const ANIM_KEY = 'clock-animations';
@@ -72,8 +74,6 @@ export function readLocalPrefs(): SyncedPrefs {
     ambientKind,
     timelineScale: scale === 'full-day' ? 'full-day' : 'default',
     timelineMode: mode === 'list' ? 'list' : 'track',
-    historyOpen: safeGet(HISTORY_KEY) === '1',
-    conchOpen: safeGet(CONCH_KEY) === '1',
     selectedSubject: safeGet(SUBJECT_KEY) || 'math',
   };
 }
@@ -124,14 +124,6 @@ export function applyRemotePrefs(remote: Partial<SyncedPrefs>): boolean {
   }
   if (remote.timelineMode && remote.timelineMode !== local.timelineMode) {
     safeSet(MODE_KEY, remote.timelineMode);
-    changed = true;
-  }
-  if (typeof remote.historyOpen === 'boolean' && remote.historyOpen !== local.historyOpen) {
-    safeSet(HISTORY_KEY, remote.historyOpen ? '1' : '0');
-    changed = true;
-  }
-  if (typeof remote.conchOpen === 'boolean' && remote.conchOpen !== local.conchOpen) {
-    safeSet(CONCH_KEY, remote.conchOpen ? '1' : '0');
     changed = true;
   }
   if (remote.selectedSubject && remote.selectedSubject !== local.selectedSubject) {
