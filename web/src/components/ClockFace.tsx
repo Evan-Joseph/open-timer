@@ -131,6 +131,56 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       playAwayReminder(0.2);
     }
   }, [awayLevel, quietPeriod]);
+  /* ---------- 动效升级（2026-08-24）：提醒级别跳变事件感 + 状态转换一次性 fx ---------- */
+
+  const prevLevelRef = useRef(reminderLevel);
+  const [levelPulseKey, setLevelPulseKey] = useState(0);
+  useEffect(() => {
+    if (reminderLevel > prevLevelRef.current) setLevelPulseKey((k) => k + 1);
+    prevLevelRef.current = reminderLevel;
+  }, [reminderLevel]);
+
+  const phaseNow = active ? (paused ? 'paused' : 'running') : lastStopped ? 'finish' : 'idle';
+  const prevPhaseRef = useRef(phaseNow);
+  const [fx, setFx] = useState<{ kind: 'ignite' | 'settle' | 'recover'; key: number } | null>(null);
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = phaseNow;
+    if (prev === phaseNow) return;
+    const kind =
+      prev === 'idle' && phaseNow === 'running'
+        ? 'ignite'
+        : prev === 'running' && phaseNow === 'paused'
+          ? 'settle'
+          : (prev === 'paused' || prev === 'finish') && phaseNow === 'running'
+            ? 'recover'
+            : null;
+    if (kind) setFx((f) => ({ kind, key: (f?.key ?? 0) + 1 }));
+  }, [phaseNow]);
+
+  // 级别上升一次性注意力动效：away-line 敲击 + 全视口内缘闪光（降级时 CSS 隐藏）
+  const awayLineCls = `away-line${reminderLevel >= 2 ? ' strong' : reminderLevel >= 1 ? ' urgent' : ''}${reminderLevel > 0 && levelPulseKey > 0 ? ' knock' : ''}`;
+  const edgeFlash =
+    reminderLevel >= 2 && levelPulseKey > 0 ? (
+      <div
+        key={`ef-${levelPulseKey}`}
+        className={`edge-flash ${reminderLevel >= 3 ? 'edge-flash-l3' : 'edge-flash-l2'}`}
+        aria-hidden
+      />
+    ) : null;
+  /** 回归专注召唤：L2 静态、L3 浮沉；非阻断入口（继承 2026-08-21 不做弹窗的决策） */
+  const returnCta = (onClick: () => void) =>
+    reminderLevel >= 2 ? (
+      <button
+        type="button"
+        className={`return-cta${reminderLevel >= 3 ? ' call' : ''}`}
+        onClick={onClick}
+        data-testid="return-cta"
+      >
+        <Play size={14} aria-hidden /> 回到专注
+      </button>
+    ) : null;
+
   const handleWithdrawLastStopped = async () => {
     if (!lastStopped) return;
     const ok = await store.withdraw(lastStopped.sessionId, '误记');
@@ -254,6 +304,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     const isMisfire = lastStopped.seconds < 10;
     return (
       <section className="clockface" data-away-level={reminderLevel} aria-live="polite">
+        {edgeFlash}
         <M className="finish-card">
           <div className="finish-glow" aria-hidden />
           <div className="subject-pill" data-color={subj?.color_id}>
@@ -271,7 +322,8 @@ export default function ClockFace({ store }: { store: ClockStore }) {
           {/* 离开时长：科目结束后同样进入"已离开"渐进提醒（L1 琥珀 / L2 洗色 / L3 红色氛围） */}
           <div className="away-slot" aria-live="off">
             <div
-              className={`away-line${reminderLevel >= 2 ? ' strong' : reminderLevel >= 1 ? ' urgent' : ''}`}
+              key={`al-${levelPulseKey}`}
+              className={awayLineCls}
               data-testid="away-line"
             >
               {restLabel} · 已休息 {formatHms(awaySeconds)}
@@ -331,6 +383,11 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     const subj = subjectOf(active.subject_id);
     return (
       <section className={`clockface ${paused ? 'is-paused' : 'is-running'}`} data-away-level={reminderLevel}>
+      {edgeFlash}
+      {/* 状态转换一次性 fx：点火（开始）/帷幕（暂停）/回升（继续），key 重触发 */}
+      {fx && ((fx.kind === 'settle' && paused) || (fx.kind !== 'settle' && !paused)) && (
+        <span key={fx.key} className={`clock-fx fx-${fx.kind}`} aria-hidden />
+      )}
         <div className="subject-pill large" data-color={subj?.color_id}>
           <span className="pill-dot" aria-hidden />
           {subj?.display_name ?? active.subject_id}
@@ -357,13 +414,17 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             渐进提醒：L1 琥珀描边 / L2 洗色 / L3 红色氛围（统一氛围表达，无阻断弹窗）。 */}
         <div className="away-slot" aria-live="off">
           {paused && (
-            <div
-              className={`away-line${reminderLevel >= 2 ? ' strong' : reminderLevel >= 1 ? ' urgent' : ''}`}
-              data-testid="away-line"
-            >
-              {restLabel} · 已休息 {formatHms(awaySeconds)}
-              <span className="away-note"> · 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
-            </div>
+            <>
+              <div
+                key={`al-${levelPulseKey}`}
+                className={awayLineCls}
+                data-testid="away-line"
+              >
+                {restLabel} · 已休息 {formatHms(awaySeconds)}
+                <span className="away-note"> · 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
+              </div>
+              {returnCta(() => void store.resume())}
+            </>
           )}
         </div>
 
@@ -421,6 +482,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
 
   return (
     <section className="clockface idle" data-away-level={reminderLevel}>
+      {edgeFlash}
       <div className="idle-clock" data-testid="idle-clock" key={idleTime}>
         {idleTime}
       </div>
@@ -431,12 +493,14 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       {recentRestAnchor && (
         <div className="away-slot idle-rest" aria-live="polite">
           <div
-            className={`away-line${reminderLevel >= 2 ? ' strong' : reminderLevel >= 1 ? ' urgent' : ''}`}
+            key={`al-${levelPulseKey}`}
+            className={awayLineCls}
             data-testid="idle-rest-line"
           >
             {restLabel} · 已休息 {formatHms(awaySeconds)}
             <span className="away-note">· 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
           </div>
+          {returnCta(() => void store.start(selectedSubject, null))}
         </div>
       )}
 

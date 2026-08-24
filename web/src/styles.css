@@ -436,6 +436,7 @@ button:focus-visible, input:focus-visible {
    ========================================================================== */
 
 .clockface {
+  position: relative;
   display: flex; flex-direction: column; align-items: center; gap: var(--clock-gap);
   width: 100%; max-width: 560px; text-align: center;
 }
@@ -603,13 +604,13 @@ button:focus-visible, input:focus-visible {
   padding: var(--space-6) var(--space-5); width: 100%;
   background: var(--surface-1); border: 1px solid var(--border);
   border-radius: var(--radius-lg); box-shadow: var(--shadow);
-  animation: card-in var(--dur-state) var(--ease-standard);
+  animation: card-in var(--dur-state) cubic-bezier(0.3, 1.15, 0.5, 1);
 }
 .finish-glow {
   position: absolute; inset: -40% -20% auto; height: 60%;
   background: radial-gradient(closest-side, var(--sc-bg, rgba(0, 113, 227, 0.12)), transparent);
   pointer-events: none;
-  animation: glow-breathe var(--dur-breathe) ease-in-out;
+  animation: glow-burst var(--dur-glide) var(--ease-expo) both;
 }
 .finish-big { font-family: var(--font-num); font-size: 34px; font-weight: 400; font-variant-numeric: tabular-nums; }
 .finish-line { color: var(--text-2); font-size: var(--fs-base); margin: 0; }
@@ -1202,7 +1203,7 @@ html.animations-off .app::before { animation: none !important; }
 .conch-loading-sub { font-size: var(--fs-xs); color: var(--text-3); }
 .conch-breathe { color: var(--accent); animation: conch-breathe var(--dur-breathe) ease-in-out infinite; }
 @keyframes conch-breathe { 0%, 100% { opacity: 0.55; transform: scale(1); } 50% { opacity: 1; transform: scale(1.08); } }
-.conch-spin { animation: conch-spin 1s linear infinite; }
+.conch-spin { animation: conch-spin var(--dur-pulse) linear infinite; }
 @keyframes conch-spin { to { transform: rotate(360deg); } }
 
 .conch-error {
@@ -1284,3 +1285,83 @@ html.animations-off .conch-spin { animation: none; }
 }
 .auth-card { position: relative; }
 .auth-close { position: absolute; top: var(--space-3); right: var(--space-3); }
+
+/* ---------- 动效与交互升级（2026-08-24；设计：docs/动效与交互升级-设计-2026-08-24.md） ---------- */
+
+/* B. 状态转换一次性 fx（覆盖层，key 重触发；均为合成层友好属性） */
+.clock-fx { position: absolute; inset: 0; pointer-events: none; border-radius: var(--radius-xl); }
+.fx-ignite { animation: fx-ignite var(--dur-wash) var(--ease-expo) both; }
+@keyframes fx-ignite {
+  from { opacity: 1; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--success) 50%, transparent), inset 0 0 60px color-mix(in srgb, var(--success) 16%, transparent); }
+  to { opacity: 0; box-shadow: inset 0 0 0 2px transparent, inset 0 0 140px transparent; }
+}
+.fx-settle { animation: fx-settle 0.5s var(--ease-standard) both; background: color-mix(in srgb, var(--bg) 45%, transparent); }
+@keyframes fx-settle { 0% { opacity: 0; } 35% { opacity: 1; } 100% { opacity: 0; } }
+.fx-recover { animation: fx-recover var(--dur-wash) var(--ease-expo) both; }
+@keyframes fx-recover {
+  from { opacity: 1; box-shadow: inset 0 0 70px color-mix(in srgb, var(--accent) 18%, transparent); }
+  to { opacity: 0; box-shadow: inset 0 0 140px transparent; }
+}
+
+/* A1. 提醒级别跳变事件感：away-line 敲击 + 全视口内缘闪光（L2 琥珀 / L3 红） */
+.away-line.knock { animation: level-knock var(--dur-shake) var(--ease-standard); }
+@keyframes level-knock {
+  0% { transform: translateX(0); } 20% { transform: translateX(-4px); }
+  40% { transform: translateX(3px); } 60% { transform: translateX(-2px); }
+  80% { transform: translateX(1px); } 100% { transform: translateX(0); }
+}
+.edge-flash { position: fixed; inset: 0; z-index: 35; pointer-events: none; animation: edge-flash 0.9s var(--ease-expo) both; }
+.edge-flash-l2 { --edge-c: var(--amber); }
+.edge-flash-l3 { --edge-c: var(--danger); }
+@keyframes edge-flash {
+  0% { opacity: 0; box-shadow: inset 0 0 0 3px transparent; }
+  25% { opacity: 1; box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--edge-c) 55%, transparent), inset 0 0 60px color-mix(in srgb, var(--edge-c) 14%, transparent); }
+  100% { opacity: 0; box-shadow: inset 0 0 0 3px transparent; }
+}
+
+/* A2. 回归专注召唤：非阻断入口；L3 附加 2.4s 慢浮沉（WCAG 频率下限） */
+.return-cta {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  height: 40px; padding: 0 var(--space-4); margin-top: var(--space-2);
+  border-radius: 999px; border: 1px solid color-mix(in srgb, var(--success) 45%, transparent);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success); font-size: var(--fs-md); font-weight: 600;
+}
+.return-cta:hover { background: color-mix(in srgb, var(--success) 17%, transparent); }
+.return-cta:active { transform: scale(0.97); }
+.return-cta.call { animation: cta-call var(--dur-breathe) ease-in-out infinite; }
+@keyframes cta-call {
+  0%, 100% { transform: translateY(0); box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 30%, transparent); }
+  50% { transform: translateY(-3px); box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--success) 50%, transparent); }
+}
+
+/* B4. 结束卡光晕：呼吸 → 一次性绽放 */
+@keyframes glow-burst {
+  0% { opacity: 0; transform: scale(0.7); }
+  35% { opacity: 1; transform: scale(1.08); }
+  100% { opacity: 0.45; transform: scale(1); }
+}
+
+/* C. 微交互：选科弹跳 / 海螺轻摆 */
+.subject-chip.selected { animation: pill-pop 0.25s var(--ease-standard); }
+@keyframes pill-pop { 0% { transform: scale(1.07); } 100% { transform: scale(1); } }
+[data-testid='conch-toggle']:hover svg { animation: conch-wiggle 0.5s ease-in-out; }
+@keyframes conch-wiggle {
+  0%, 100% { transform: rotate(0); } 25% { transform: rotate(-8deg); }
+  50% { transform: rotate(6deg); } 75% { transform: rotate(-3deg); }
+}
+
+/* D. 降级：reduced-motion / 应用内关动画 → 一次性动效隐藏、循环动效静止 */
+@media (prefers-reduced-motion: reduce) {
+  .clock-fx, .edge-flash, .away-line.knock, .subject-chip.selected, [data-testid='conch-toggle']:hover svg { animation: none; }
+  .clock-fx, .edge-flash { opacity: 0; }
+  .return-cta.call { animation: none; }
+}
+html.animations-off .clock-fx,
+html.animations-off .edge-flash,
+html.animations-off .away-line.knock,
+html.animations-off .subject-chip.selected,
+html.animations-off .return-cta.call,
+html.animations-off [data-testid='conch-toggle']:hover svg { animation: none; }
+html.animations-off .clock-fx,
+html.animations-off .edge-flash { opacity: 0; }
