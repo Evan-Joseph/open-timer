@@ -1,7 +1,7 @@
 /** 时钟主区：空闲 / 运行 / 暂停 / 结束反馈四态。 */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { motion } from 'motion/react';
+import { motion, useMotionValue, useSpring, useReducedMotion } from 'motion/react';
 import { Pause, Play, Square, Flag, Undo2 } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
 import type { SyncAnchor } from '../lib/clock.js';
@@ -23,6 +23,51 @@ function M({ children, ...props }: any) {
       {children}
     </motion.div>
   );
+}
+
+/** 休息进度环：复刻 Pomotroid TimerDial 的 dasharray/dashoffset 结构
+ *  （Splode/pomotroid 2026 Svelte 重写版；原作以 tweened 800ms 补间，
+ *  此处改 CSS transition 由每秒 awaySeconds tick 驱动）。弧度随休息额度消耗增长，颜色随级别。 */
+function RestRing({ seconds, recommended }: { seconds: number; recommended: number }) {
+  const R = 15.5;
+  const C = 2 * Math.PI * R;
+  const ratio = recommended > 0 ? Math.min(1, seconds / recommended) : 0;
+  return (
+    <svg className="rest-ring" viewBox="0 0 36 36" aria-hidden>
+      <circle className="rest-ring-track" cx="18" cy="18" r={R} fill="none" strokeWidth="3" />
+      <circle
+        className="rest-ring-arc"
+        cx="18"
+        cy="18"
+        r={R}
+        fill="none"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeDasharray={C}
+        strokeDashoffset={C * (1 - ratio)}
+        transform="rotate(-90 18 18)"
+      />
+    </svg>
+  );
+}
+
+/** 数字滚动：复刻 Magic UI number-ticker（useMotionValue + useSpring，damping 60 / stiffness 100）。
+ *  二次开发：整数秒经 formatDurationZh 输出中文时长。 */
+function DurationTicker({ seconds }: { seconds: number }) {
+  const reduced = useReducedMotion();
+  const animationsEnabled = useAnimationsEnabled();
+  const skip = reduced || !animationsEnabled;
+  const [display, setDisplay] = useState(skip ? seconds : 0);
+  const motionValue = useMotionValue(0);
+  const springValue = useSpring(motionValue, { damping: 60, stiffness: 100 });
+  useEffect(() => {
+    if (!skip) motionValue.set(seconds);
+  }, [motionValue, seconds, skip]);
+  useEffect(() => {
+    if (skip) return;
+    return springValue.on('change', (latest) => setDisplay(Math.max(0, Math.round(latest))));
+  }, [springValue, skip]);
+  return <>{formatDurationZh(display)}</>;
 }
 
 export default function ClockFace({ store }: { store: ClockStore }) {
@@ -312,7 +357,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             {subj?.display_name ?? lastStopped.subjectId}
           </div>
           <div className="finish-big" data-testid="finish-duration">
-            {formatDurationZh(lastStopped.seconds)}
+            <DurationTicker seconds={lastStopped.seconds} />
           </div>
           <p className="finish-line">
             {isMisfire
@@ -326,6 +371,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
               className={awayLineCls}
               data-testid="away-line"
             >
+              <RestRing seconds={awaySeconds} recommended={restPlan.recommendedSeconds} />
               {restLabel} · 已休息 {formatHms(awaySeconds)}
               <span className="away-note"> · 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
             </div>
@@ -420,6 +466,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
                 className={awayLineCls}
                 data-testid="away-line"
               >
+                <RestRing seconds={awaySeconds} recommended={restPlan.recommendedSeconds} />
                 {restLabel} · 已休息 {formatHms(awaySeconds)}
                 <span className="away-note"> · 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
               </div>
@@ -497,6 +544,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             className={awayLineCls}
             data-testid="idle-rest-line"
           >
+            <RestRing seconds={awaySeconds} recommended={restPlan.recommendedSeconds} />
             {restLabel} · 已休息 {formatHms(awaySeconds)}
             <span className="away-note">· 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
           </div>

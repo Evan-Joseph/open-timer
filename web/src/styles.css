@@ -1329,11 +1329,6 @@ html.animations-off .conch-spin { animation: none; }
 }
 .return-cta:hover { background: color-mix(in srgb, var(--success) 17%, transparent); }
 .return-cta:active { transform: scale(0.97); }
-.return-cta.call { animation: cta-call var(--dur-breathe) ease-in-out infinite; }
-@keyframes cta-call {
-  0%, 100% { transform: translateY(0); box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 30%, transparent); }
-  50% { transform: translateY(-3px); box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--success) 50%, transparent); }
-}
 
 /* B4. 结束卡光晕：呼吸 → 一次性绽放 */
 @keyframes glow-burst {
@@ -1365,3 +1360,36 @@ html.animations-off .return-cta.call,
 html.animations-off [data-testid='conch-toggle']:hover svg { animation: none; }
 html.animations-off .clock-fx,
 html.animations-off .edge-flash { opacity: 0; }
+
+/* ---------- 复刻：同类项目技法落地（2026-08-24，出处见 docs/调研笔记-同类项目与动效库-2026-08-24.md） ---------- */
+
+/* 休息进度环：复刻 Pomotroid TimerDial（dasharray/dashoffset；CSS transition 替代 tweened） */
+.rest-ring { width: 22px; height: 22px; flex: none; }
+.rest-ring-track { stroke: color-mix(in srgb, var(--text-3) 30%, transparent); }
+.rest-ring-arc { stroke: var(--text-2); transition: stroke-dashoffset var(--dur-glide) linear; }
+.clockface[data-away-level='1'] .rest-ring-arc,
+.clockface[data-away-level='2'] .rest-ring-arc { stroke: var(--amber); }
+.clockface[data-away-level='3'] .rest-ring-arc { stroke: var(--danger); }
+
+/* CTA 脉冲环：复刻 Magic UI pulsating-button 的 ripple 变体
+   （box-shadow 0→8px 扩散，cubic-bezier(0.16,1,0.3,1)；周期按其 1.5s 放慢到 --dur-breathe） */
+.return-cta.call {
+  animation:
+    cta-call var(--dur-breathe) ease-in-out infinite,
+    cta-ripple var(--dur-breathe) cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+@keyframes cta-call {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+@keyframes cta-ripple {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 45%, transparent); }
+  100% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--success) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rest-ring-arc { transition: none; }
+  .return-cta.call { animation: none; }
+}
+html.animations-off .rest-ring-arc { transition: none; }
+html.animations-off .return-cta.call { animation: none; }
