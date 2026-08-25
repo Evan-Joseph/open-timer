@@ -832,6 +832,10 @@ test.describe('多端偏好同步', () => {
     await pageB.getByRole('button', { name: '好，继续' }).click();
     await pageB.waitForTimeout(800);
 
+    // 端 A 正在等备注的结束卡应在快轮询确认 end_note 后自动收回主页（≤5s）
+    await expect(page.getByTestId('finish-duration')).toHaveCount(0, { timeout: 5_000 });
+    await expect(page.getByTestId('idle-clock')).toBeVisible({ timeout: 5_000 });
+
     // 备注落库：sessions API 可见 end_note
     const today = (await pageB.locator('.topbar-date').textContent())!.slice(0, 10);
     const res = await pageB.request.get(`/api/v1/sessions?date=${today}`);

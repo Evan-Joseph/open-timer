@@ -160,6 +160,8 @@ test('视觉审计样式断言', async ({ page }) => {
   await page.getByRole('button', { name: '设置' }).click();
   await page.getByRole('button', { name: '退出登录' }).click();
   await page.waitForTimeout(800);
+  // 退出后产品进入只读监督态；点锁图标才打开 PIN 解锁层。
+  await page.getByTestId('unlock-btn').click();
   const del = page.getByRole('button', { name: '删除一位' });
   expect(await del.getAttribute('aria-disabled')).toBe('true');
   console.log('del-key aria-disabled OK');

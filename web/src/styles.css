@@ -604,7 +604,7 @@ button:focus-visible, input:focus-visible {
   padding: var(--space-6) var(--space-5); width: 100%;
   background: var(--surface-1); border: 1px solid var(--border);
   border-radius: var(--radius-lg); box-shadow: var(--shadow);
-  animation: card-in var(--dur-state) cubic-bezier(0.3, 1.15, 0.5, 1);
+  animation: card-in var(--dur-state) var(--ease-expo);
 }
 .finish-glow {
   position: absolute; inset: -40% -20% auto; height: 60%;
@@ -733,8 +733,36 @@ button:focus-visible, input:focus-visible {
 .history-subject-list strong { color: var(--text-1); font-family: var(--font-num); font-weight: 600; font-variant-numeric: tabular-nums; }
 .history-subject-list small { color: var(--text-3); font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 .history-empty { color: var(--text-2); padding: 8px 0 2px; font-size: var(--fs-sm); }
+
+/* 宽屏回顾：汇总与科目分布并列，泳道独占整行；窄屏自然回落为单栏。 */
+@media (min-width: 760px) {
+  .history-report:has(.history-subjects) {
+    grid-template-columns: minmax(0, 1fr) 230px;
+    grid-template-areas:
+      "metrics subjects"
+      "lanes lanes";
+    column-gap: var(--space-5);
+    row-gap: var(--space-4);
+    align-items: start;
+  }
+  .history-metrics { grid-area: metrics; min-height: 100%; }
+  .history-lanes { grid-area: lanes; }
+  .history-subjects {
+    grid-area: subjects;
+    min-height: 100%;
+    padding-left: var(--space-4);
+    border-left: 1px solid var(--border);
+  }
+  .history-subject-list { display: grid; gap: var(--space-2); }
+}
 .timeline-total { color: var(--text-3); font-weight: 400; }
 .timeline-nav { display: flex; align-items: center; gap: var(--space-2); }
+.timeline-nav-group { display: inline-flex; align-items: center; gap: var(--space-2); }
+.timeline-nav-group + .timeline-nav-group {
+  padding-left: var(--space-2);
+  border-left: 1px solid var(--border);
+}
+.timeline-nav-insights { gap: var(--space-1); }
 .now-btn { display: inline-flex; align-items: center; gap: var(--space-1); }
 
 .timeline-scroll {
@@ -1032,6 +1060,14 @@ button:focus-visible, input:focus-visible {
 .setting-label { font-size: var(--fs-md); font-weight: 600; color: var(--text-2); }
 .setting-hint { font-size: var(--fs-sm); color: var(--text-3); margin: 0; }
 .setting-hint-error { color: var(--danger); }
+.setting-hint strong { color: var(--text-2); font-weight: 600; }
+.setting-row-inline {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+}
+.setting-row-inline > .seg-control { justify-self: end; }
 
 /* 分段控件容器：iOS Settings 风格（中性底 + 白色滑块 + 阴影） */
 .seg-control {
@@ -1114,6 +1150,34 @@ button:active:not(:disabled) { transform: scale(0.98); }
   .big-timer { font-size: 56px; min-height: 62px; }
   .idle-clock { font-size: 44px; }
   .main { padding: var(--space-5) var(--space-4); }
+  .timeline { min-width: 0; padding-inline: var(--space-3); }
+  .timeline-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .timeline-title { width: 100%; }
+  .timeline-nav {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: var(--space-1);
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+  .timeline-nav::-webkit-scrollbar { display: none; }
+  .timeline-nav-group { flex: none; gap: var(--space-1); }
+  .timeline-nav-group + .timeline-nav-group {
+    padding-left: var(--space-1);
+  }
+  .seg-preview,
+  .seg-popover {
+    left: var(--space-3) !important;
+    right: var(--space-3);
+    width: auto;
+    max-width: none;
+  }
   .history-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .history-chart { gap: 2px; }
   .history-day { padding-inline: 2px; }
@@ -1124,6 +1188,8 @@ button:active:not(:disabled) { transform: scale(0.98); }
   .seg-popover { padding: var(--space-4); }
   .popover-edit-grid { grid-template-columns: 1fr; }
   .popover-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .setting-row-inline { display: flex; align-items: flex-start; }
+  .setting-row-inline > .seg-control { justify-self: auto; }
 }
 
 @media (max-height: 760px) {
@@ -1168,19 +1234,17 @@ button:active:not(:disabled) { transform: scale(0.98); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    animation: none !important;
+    transition: none !important;
   }
-  /* 循环动画归零会停在起始帧：wash 层关闭动画、保留全量静态告警色 */
+  /* 保留静态终态（尤其 L2/L3 wash），而非 0.01ms 动画导致起始帧闪现。 */
   .app::before { animation: none !important; }
 }
 
 /* 应用内动画开关（设置 → 动画）：CSS 层同样归零，与组件层 motion 跳过并存 */
 html.animations-off *, html.animations-off *::before, html.animations-off *::after {
-  animation-duration: 0.01ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: 0.01ms !important;
+  animation: none !important;
+  transition: none !important;
 }
 html.animations-off .app::before { animation: none !important; }
 
@@ -1243,7 +1307,11 @@ html.animations-off .app::before { animation: none !important; }
 .conch-next { font-size: var(--fs-2xl); font-weight: 600; color: var(--text-1); line-height: 1.35; }
 .conch-rationale { font-size: var(--fs-sm); color: var(--text-2); }
 .conch-footnote { display: flex; flex-wrap: wrap; gap: var(--space-3); font-size: var(--fs-xs); color: var(--text-3); }
-.conch-card-actions { display: flex; justify-content: flex-end; }
+.conch-card-actions {
+  display: flex; justify-content: flex-end;
+  margin-top: var(--space-1); padding-top: var(--space-2);
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
 .conch-card-actions .ghost-btn { display: inline-flex; align-items: center; gap: var(--space-1); }
 
 .conch-skipped {
@@ -1364,7 +1432,7 @@ html.animations-off .edge-flash { opacity: 0; }
 .conch-alts-label { font-size: var(--fs-xs); color: var(--text-3); }
 .conch-alt-btn {
   display: inline-flex; align-items: center; gap: var(--space-1);
-  height: 32px; padding: 0 var(--space-3);
+  min-height: 36px; padding: 0 var(--space-3);
   border: none; border-radius: 999px;
   background: var(--surface-2); color: var(--text-1);
   font-size: var(--fs-sm);
@@ -1376,7 +1444,7 @@ html.animations-off .edge-flash { opacity: 0; }
 .conch-alt-btn:focus-visible, .conch-alt-shuffle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .conch-alt-shuffle {
   display: inline-flex; align-items: center; gap: 4px;
-  height: 32px; padding: 0 var(--space-2);
+  min-height: 36px; padding: 0 var(--space-2);
   border: none; border-radius: var(--radius-sm); background: transparent;
   color: var(--text-3); font-size: var(--fs-xs);
   transition: color var(--dur-hover) var(--ease-standard), background var(--dur-hover) var(--ease-standard);

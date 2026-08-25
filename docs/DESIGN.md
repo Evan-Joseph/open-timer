@@ -83,7 +83,7 @@ docs/     API、设计、审计、交接
 
 约束：告警只作为背景氛围与边界强调，文字/科目色/片段色/时间 Flag 保持可读；呼吸动画只挂在一个全视口层，避免频率相位分裂；`prefers-reduced-motion` 或应用内关动画时保留静态告警色（wash 层 `animation: none`，全量终态）、停止呼吸。
 
-**动效与交互升级（2026-08-24）**：在"不阻断"前提下补事件感——① 提醒级别**上升瞬间**一次性触发 away-line 敲击（0.6s）+ 全视口内缘闪光（L2 琥珀 / L3 红，0.9s）；② L2/L3 出现「回到专注」召唤胶囊（非阻断入口，L3 附加 2.4s 慢浮沉）；③ 状态转换一次性 fx：开始点火（内缘光环 0.7s）/ 暂停帷幕（0.5s）/ 继续回升（0.6s）/ 结束卡弹簧入场 + 光晕绽放；④ 微交互：选科弹跳、海螺 hover 轻摆。所有循环 ≥2.4s、一次性 ≤0.9s，reduced-motion/关动画全量降级。详见 `docs/动效与交互升级-设计-2026-08-24.md`。
+**动效与交互升级（2026-08-24，2026-08-25 收敛）**：在"不阻断"前提下补事件感——① 提醒级别**上升瞬间**一次性触发 away-line 敲击（0.4s）+ 全视口内缘闪光（L2 琥珀 / L3 红，0.9s）；② 召回仍只由洗色、敲击、升级音和既有开始/继续入口承担（重复的「回到专注」绿色按钮已移除）；③ 状态转换一次性 fx：开始点火（内缘光环 0.5s）/ 暂停帷幕（0.5s）/ 继续回升（0.5s）/ 结束卡标准 expo 入场 + 光晕绽放；④ 微交互：选科弹跳、海螺 hover 轻摆。所有循环 ≥2.4s、一次性 ≤0.9s，reduced-motion/关动画全量降级。详见 `docs/动效与交互升级-设计-2026-08-24.md`。
 
 ## 6. 布局骨架与响应式
 
@@ -93,20 +93,22 @@ docs/     API、设计、审计、交接
 - 验收断点（仅 Pad/Desktop 横屏）：1024×640、1024×768、1180×820、1280×720、1440×900，首屏不产生文档滚动、不遮挡。
 - 全屏与窗口模式**共用同一套布局**（用户决策），进入全屏只是视口变大，尺寸由既有 dvh/clamp 自适应，无第二套全屏 UI。
 - **近 7 天执行回顾是居中浮层**（drill-down 模态，2026-08-21 重构）：盖在主界面之上、时钟保持全尺寸不被挤压。参数参照 shadcn/Radix Dialog 与本项目设置弹窗——面板 `min(960px, 100vw-64px)`、`max-height: 100dvh-64px` 内滚兜底、遮罩 `--overlay-scrim`、材质 `--popover-surface`、250ms 入场；关闭三通道：Esc / 点遮罩 / 右上角 X。**不再**用 `.app:has()` 压缩主时钟把周图塞进同一屏（单屏竖向零和，会挤压主角并留白）。
+- 时间轴工具栏按语义分为“视图 / 日期浏览 / 回顾与建议”三组，组内 `--space-2`、组间用细分隔；窄屏保留同一顺序但收至 `--space-1`，避免不可见的微量横向溢出。会话详情/预览在 ≤560px 时固定在 12px 安全边距内，禁止依据被撑宽的时间轴容器越出视口。
+- 宽屏近 7 天报告：有科目数据时使用“汇总指标 + 科目分布”双栏，全天泳道独占下行；无科目数据时指标占满宽度；窄屏自然回落单栏。设置中简单二值/三值偏好使用标签-控件同行，连续/说明型项维持全宽纵向。
 
 ## 7. 动效与无障碍
 
 - 只用 CSS transition + 已有 `motion/react`，不新增 GSAP。
 - 状态切换进入/退出各自定义；页面级状态变化只过渡背景/边框/透明度/transform，不用 `transition: all`。
-- 全局 `@media (prefers-reduced-motion: reduce)` 与 `html.animations-off` 双兜底，动画时长归零但布局功能不变。
+- 全局 `@media (prefers-reduced-motion: reduce)` 与 `html.animations-off` 双兜底：停掉动画与过渡、保留静态终态和布局功能，避免 0.01ms 动画闪回起始帧。
 - 计时数字 `font-variant-numeric: tabular-nums` + `font-synthesis: none`，秒变化零布局跳动。
 
 ## 8. 多端同步与误触（2026-08-21）
 
 **UI 偏好同步**（服务端 `user_pref` 单行 JSON，`GET/PUT /api/v1/prefs`，owner-only）：
 - localStorage 即时层 + 服务端事实层；last-write-wins；登录态 15s 轮询拉取偏好、空闲 30s / 运行中 3s 轮询状态、本地变更 500ms 防抖推送；在途窗口 3s 内拉取不得回滚本地变更（防竞态）。轮询间隔依据：Workers 免费档 100,000 请求/天是紧约束（单设备约 3.5 万请求/天，三设备内安全）；304 只省 D1 读、不省请求数，故不用作优化手段。
-- 同步键：theme / animations / finishSound / ambientKind / timelineScale / timelineMode / historyOpen / selectedSubject（空闲页选中科目）。
-- local-only 明确排除：ambientVolume（设备响度差异，默认 0）、全屏态、reduced-motion 派生态、输入草稿、clock-last-subject。
+- 同步键：theme / animations / finishSound / ambientKind / timelineScale / timelineMode / selectedSubject（空闲页选中科目）。
+- local-only 明确排除：ambientVolume（设备响度差异，默认 0）、全屏态、reduced-motion 派生态、输入草稿、clock-last-subject、historyOpen / conchOpen（浮层开合会触发本地读/LLM 请求，2026-08-24 起不跨端同步）。
 - 参照 Super Productivity sync/local-only-keys 与 Pomotroid 后端持久化范式。
 
 **时钟同步正确姿势**（2026-08-22 联网核验背书：本实现 = Cristian 中点锚定算法，与微软 Live Share SDK 同构）：
@@ -116,6 +118,7 @@ docs/     API、设计、审计、交接
 
 **轮询间隔与资源**（依据 Cloudflare 免费档：Workers 100,000 请求/天、D1 5,000,000 行读/天）：
 - 状态：运行中 3s / 空闲 30s；偏好：15s；单设备 ≈2 万请求/天，三设备内安全。
+- 例外：结束卡“等待补备注”是短暂跨端协作态，展示期间仅该客户端每 2s 刷新状态与会话；另一端保存 end_note / 撤回后立即收卡回主页，常态轮询预算不变。
 - `sessionsOverlapping` 必须走 `session_ended(ended_at_ms)` 索引（「窗口起点后结束 ∪ 仍开放」改写）——全表扫描会在约 250 个历史会话时撞穿 D1 行读日额度导致应用整体不可用。
 
 **误触过滤**：短于 `CLOCK_MIN_SEGMENT_SECONDS`（默认 10s）的已关闭片段不计入 sessions/daily-summary/state（开放段不受影响）。领域规则 `isCountedSegment` 在 shared，服务端配置注入。参照 Clockify「可配置阈值丢弃」；不做静默删除会话（事件链完整保留），不做自动合并（无业界先例）。

@@ -610,86 +610,98 @@ export default function Timeline({ store }: { store: ClockStore }) {
           {!historyOpen && totalSeconds > 0 && <span className="timeline-total"> · 共 {formatDurationZh(totalSeconds)}</span>}
         </h2>
         <div className="timeline-nav">
-          {!historyOpen && mode === 'track' && (
-            <div className="timeline-scale" role="radiogroup" aria-label="时间轴尺度">
-              {([
-                ['default', '默认'],
-                ['full-day', '全天'],
-              ] as const).map(([value, label]) => (
-                <button
-                  key={value}
-                  role="radio"
-                  aria-checked={scale === value}
-                  className={scale === value ? 'selected' : ''}
-                  onClick={() => {
-                    setScale(value);
-                    localStorage.setItem('clock-timeline-scale', value);
-                  schedulePrefsPush({ timelineScale: value });
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
+          {!historyOpen && (
+            <div className="timeline-nav-group" role="group" aria-label="视图">
+              {mode === 'track' && (
+                <div className="timeline-scale" role="radiogroup" aria-label="时间轴尺度">
+                  {([
+                    ['default', '默认'],
+                    ['full-day', '全天'],
+                  ] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      role="radio"
+                      aria-checked={scale === value}
+                      className={scale === value ? 'selected' : ''}
+                      onClick={() => {
+                        setScale(value);
+                        localStorage.setItem('clock-timeline-scale', value);
+                        schedulePrefsPush({ timelineScale: value });
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                className="icon-btn"
+                aria-label={mode === 'track' ? '切换到流水账视图' : '切换到时间轴视图'}
+                title={mode === 'track' ? '流水账' : '时间轴'}
+                onClick={() => {
+                  const next = mode === 'track' ? 'list' : 'track';
+                  setMode(next);
+                  localStorage.setItem('clock-timeline-mode', next);
+                  schedulePrefsPush({ timelineMode: next });
+                }}
+                data-testid="timeline-mode-btn"
+              >
+                {mode === 'track' ? <List size={16} /> : <GanttChart size={16} />}
+              </button>
             </div>
           )}
-          {!historyOpen && <button
-            className="icon-btn"
-            aria-label={mode === 'track' ? '切换到流水账视图' : '切换到时间轴视图'}
-            title={mode === 'track' ? '流水账' : '时间轴'}
-            onClick={() => {
-              const next = mode === 'track' ? 'list' : 'track';
-              setMode(next);
-              localStorage.setItem('clock-timeline-mode', next);
-              schedulePrefsPush({ timelineMode: next });
-            }}
-            data-testid="timeline-mode-btn"
-          >
-            {mode === 'track' ? <List size={16} /> : <GanttChart size={16} />}
-          </button>}
-          {!historyOpen && <button className="icon-btn" aria-label="前一天" title="前一天" onClick={() => setViewDate(shiftDate(viewDate, -1))}>
-            <ChevronLeft size={16} />
-          </button>}
-          {!historyOpen && (isToday ? (
-            <button className="text-btn now-btn" onClick={scrollToNow} aria-label="滚动到当前时间" data-testid="scroll-now-btn">
-              <LocateFixed size={14} aria-hidden /> 现在
-            </button>
-          ) : (
-            <button className="text-btn" onClick={() => setViewDate(store.todayDate)}>
-              回今天
-            </button>
-          ))}
-          {!historyOpen && <button className="icon-btn" aria-label="后一天" title="后一天" onClick={() => setViewDate(shiftDate(viewDate, 1))} disabled={isToday}>
-            <ChevronRight size={16} />
-          </button>}
-          {deviceRole === 'main' && <button
-            className={`icon-btn ${historyOpen ? 'selected' : ''}`}
-            aria-label="近 7 天回顾"
-            title="近 7 天回顾"
-            onClick={() => {
-              const next = !historyOpen;
-              setHistoryOpen(next);
-              setHistoryOpenLocal(next);
-              if (next) {
-                void loadHistory();
-              }
-            }}
-            data-testid="history-toggle"
-          >
-            <CalendarDays size={16} />
-          </button>}
-          {deviceRole === 'main' && !readOnly && <button
-            className={`icon-btn ${conchOpen ? 'selected' : ''}`}
-            aria-label="神奇海螺"
-            title="神奇海螺 · 下一步做什么"
-            onClick={() => {
-              const next = !conchOpen;
-              setConchOpen(next);
-              setConchOpenLocal(next);
-            }}
-            data-testid="conch-toggle"
-          >
-            <Shell size={16} />
-          </button>}
+          {!historyOpen && (
+            <div className="timeline-nav-group" role="group" aria-label="日期浏览">
+              <button className="icon-btn" aria-label="前一天" title="前一天" onClick={() => setViewDate(shiftDate(viewDate, -1))}>
+                <ChevronLeft size={16} />
+              </button>
+              {isToday ? (
+                <button className="text-btn now-btn" onClick={scrollToNow} aria-label="滚动到当前时间" data-testid="scroll-now-btn">
+                  <LocateFixed size={14} aria-hidden /> 现在
+                </button>
+              ) : (
+                <button className="text-btn" onClick={() => setViewDate(store.todayDate)}>
+                  回今天
+                </button>
+              )}
+              <button className="icon-btn" aria-label="后一天" title="后一天" onClick={() => setViewDate(shiftDate(viewDate, 1))} disabled={isToday}>
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          )}
+          {deviceRole === 'main' && (
+            <div className="timeline-nav-group timeline-nav-insights" role="group" aria-label="回顾与建议">
+              <button
+                className={`icon-btn ${historyOpen ? 'selected' : ''}`}
+                aria-label="近 7 天回顾"
+                title="近 7 天回顾"
+                onClick={() => {
+                  const next = !historyOpen;
+                  setHistoryOpen(next);
+                  setHistoryOpenLocal(next);
+                  if (next) void loadHistory();
+                }}
+                data-testid="history-toggle"
+              >
+                <CalendarDays size={16} />
+              </button>
+              {!readOnly && (
+                <button
+                  className={`icon-btn ${conchOpen ? 'selected' : ''}`}
+                  aria-label="神奇海螺"
+                  title="神奇海螺 · 下一步做什么"
+                  onClick={() => {
+                    const next = !conchOpen;
+                    setConchOpen(next);
+                    setConchOpenLocal(next);
+                  }}
+                  data-testid="conch-toggle"
+                >
+                  <Shell size={16} />
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

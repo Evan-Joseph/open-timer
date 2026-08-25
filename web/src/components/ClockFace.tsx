@@ -248,6 +248,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       remoteStopSeenRef.current.add(lastStopped.sessionId);
       return;
     }
+    if (!store.isOwner) return; // 只读监督端只看时钟/休息，不伪装成可编辑的结束卡
     if (store.state?.active_session) return; // 运行/暂停中不水合旧结束卡，避免污染休息锚点
     const nowMs = store.state?.server_now_ms ?? Date.now();
     const cand = store.sessions
@@ -282,7 +283,27 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       anchorPerfMs: performance.now(),
       serverNowMs: nowMs,
     });
-  }, [store.sessions, store.state?.server_now_ms, lastStopped]);
+  }, [store.sessions, store.state?.server_now_ms, store.isOwner, lastStopped]);
+
+  // 跨端收回：本端正在展示结束卡时，另一端可能已经补完备注或撤回。
+  // 一旦最新 sessions 快照确认 end_note / voided，立即收卡回主页。
+  useEffect(() => {
+    if (!lastStopped) return;
+    const latest = store.sessions.find((s) => s.session_id === lastStopped.sessionId);
+    if (!latest || (latest.status !== 'voided' && !latest.end_note)) return;
+    remoteStopSeenRef.current.add(lastStopped.sessionId);
+    setLastStopped(null);
+    setNoteDraft('');
+    setAwayAnchorOverride(null);
+  }, [lastStopped, store.sessions]);
+
+  // 空闲态的全局轮询是 30s，但「等待补备注」是短暂协作状态。
+  // 仅在结束卡展示期间每 2s 对表，保证跨设备补完后及时收回，不把常态资源预算拉高。
+  useEffect(() => {
+    if (!lastStopped) return;
+    const timer = window.setInterval(() => void store.refresh(), 2_000);
+    return () => window.clearInterval(timer);
+  }, [lastStopped, store.refresh]);
 
   const handleWithdrawLastStopped = async () => {
     if (!lastStopped) return;

@@ -39,7 +39,7 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
         <Dialog.Content className="dialog-content" aria-describedby={undefined}>
           <Dialog.Title className="dialog-title">设置</Dialog.Title>
 
-          <div className="setting-row">
+          <div className="setting-row setting-row-inline">
             <span className="setting-label">外观</span>
             <div className="seg-control" role="radiogroup" aria-label="主题">
               {[
@@ -60,7 +60,7 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
             </div>
           </div>
 
-          <div className="setting-row">
+          <div className="setting-row setting-row-inline">
             <span className="setting-label">结束提示音</span>
             <div className="seg-control" role="radiogroup" aria-label="结束提示音">
               {[
@@ -111,7 +111,7 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
             </p>
           </div>
 
-          <div className="setting-row">
+          <div className="setting-row setting-row-inline">
             <span className="setting-label">动画</span>
             <div className="seg-control" role="radiogroup" aria-label="动画">
               {[
@@ -145,7 +145,9 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
               </button>
             </div>
             {fullscreenError && <p className="setting-hint setting-hint-error" role="status">{fullscreenError}</p>}
-            <p className="setting-hint">外部进入全屏（F11 或系统手势）同样会被自动识别。设备角色：{deviceRole === 'secondary' ? '副屏（Pad）' : '主控（电脑）'}，识别不对可用 ?role=secondary / ?role=main 覆盖。</p>
+            <p className="setting-hint">
+              副屏会在首次触摸后尝试全屏。当前识别：<strong>{deviceRole === 'secondary' ? '副屏（Pad）' : '主控（电脑）'}</strong>。
+            </p>
           </div>
 
           <div className="setting-row">
@@ -157,7 +159,13 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
 
           {isOwner && (
             <div className="setting-row">
-              <button className="danger-btn" onClick={() => void onLogout()}>
+              <button
+                className="danger-btn"
+                onClick={async () => {
+                  await onLogout();
+                  onOpenChange(false);
+                }}
+              >
                 退出登录
               </button>
             </div>

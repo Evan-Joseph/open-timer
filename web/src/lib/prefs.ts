@@ -170,7 +170,7 @@ async function pushRemote(prefs: SyncedPrefs): Promise<boolean> {
   }
 }
 
-/** 本地偏好变更后调用：防抖 500ms 推送远端。overrides 覆盖瞬时态（如 historyOpen）。 */
+/** 本地偏好变更后调用：防抖 500ms 推送远端。overrides 仅用于同步键的瞬时值。 */
 export function schedulePrefsPush(overrides?: Partial<SyncedPrefs>): void {
   // 3s 在途窗口：覆盖防抖 + RTT；期间远端拉取不得回滚本地变更
   dirtyUntilMs = Date.now() + 3000;
