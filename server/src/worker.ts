@@ -12,11 +12,12 @@ import type { AppConfig } from './config.js';
 import migrationSql0001 from '../../migrations/0001_init.sql';
 import migrationSql0002 from '../../migrations/0002_user_pref.sql';
 import migrationSql0003 from '../../migrations/0003_index_session_ended.sql';
+import migrationSql0004 from '../../migrations/0004_conch_revision.sql';
 
 /** 全部迁移 SQL（按序号拼接；均为幂等，可重复执行）。
  *  注意：新增迁移文件必须在此显式导入，否则 Worker 不会执行
  *  （SQLite 适配器按目录加载，两边加载方式不同，曾因此漏掉 0003）。 */
-const migrationSql = `${migrationSql0001}\n${migrationSql0002}\n${migrationSql0003}`;
+const migrationSql = `${migrationSql0001}\n${migrationSql0002}\n${migrationSql0003}\n${migrationSql0004}`;
 
 /** Workers 运行时上下文（本地声明，不引入 workers-types 以免与 Node 类型冲突） */
 interface ExecutionContext {

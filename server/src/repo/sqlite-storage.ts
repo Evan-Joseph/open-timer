@@ -396,6 +396,17 @@ export class SqliteStorage implements Storage {
     return r.m;
   }
 
+  async getConchRevision(): Promise<number> {
+    const row = this.db.prepare('SELECT revision FROM conch_timeline_state WHERE id = 1').get() as
+      | { revision: number }
+      | undefined;
+    return row?.revision ?? 0;
+  }
+
+  async bumpConchRevision(): Promise<void> {
+    this.db.prepare('UPDATE conch_timeline_state SET revision = revision + 1 WHERE id = 1').run();
+  }
+
   /* ---- API 凭据 ---- */
 
   async listCredentials(): Promise<ApiCredentialRow[]> {

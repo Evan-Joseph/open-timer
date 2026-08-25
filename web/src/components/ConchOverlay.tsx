@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Shell, X, RefreshCw, Play, Shuffle } from 'lucide-react';
-import { conchAsk, type ConchAskResponseApi, type ConchSubjectApi, type ConchWindow } from '../lib/api.js';
+import { conchAsk, getConchRevision, type ConchAskResponseApi, type ConchSubjectApi, type ConchWindow } from '../lib/api.js';
 import { saveConchStartMark } from '../lib/conch-mark.js';
 import { useClockStore } from '../lib/store.js';
 
@@ -32,10 +32,9 @@ const ERROR_TEXT: Record<string, string> = {
 };
 const RETRYABLE = new Set(['timeout', 'upstream', 'invalid', 'network']);
 
-const CACHE_KEY = 'clock-conch-cache';
-/** 安全上限：过老的缓存弃用（防跨版本 schema 漂移） */
-const CACHE_MAX_AGE_MS = 7 * 86_400_000;
-/** revision 不可用（state 未就绪）时的兜底 TTL */
+// v3 = `conch_revision` 语义缓存；旧 revision 缓存不复用，避免一次性迁移歧义。
+const CACHE_KEY = 'clock-conch-cache-v3';
+/** state 不可用（极短启动窗口）时的唯一兜底 TTL；正常状态下不按时间过期。 */
 const CACHE_TTL_FALLBACK_MS = 30 * 60 * 1000;
 
 interface CacheEntry {
@@ -55,16 +54,17 @@ function readCacheMap(): CacheMap {
 }
 
 /**
- * 缓存命中纪律：时间线无事件 → /state 的 revision 不变 → 永久命中、零 token。
- * 任何计时事件（开始/暂停/结束/备注…）都会推高 revision 使缓存失效。
+ * 缓存命中纪律：已完成时间线无事实变化 → conch_revision 不变 → 长期命中、零 token。
+ * 开始/暂停/继续/运行秒数不会推进它；完成、备注、修正、撤回、重开才会失效。
  * 三个窗口各自独立缓存，切换窗口互不覆盖。
  */
-function readCache(window: ConchWindow, currentRevision: number | null): ConchAskResponseApi | null {
+function readCache(window: ConchWindow, currentConchRevision: number | null): ConchAskResponseApi | null {
   const entry = readCacheMap()[window];
   if (!entry) return null;
   const age = Date.now() - entry.ts;
-  if (age > CACHE_MAX_AGE_MS) return null;
-  if (currentRevision !== null) return entry.data.revision === currentRevision ? entry.data : null;
+  if (currentConchRevision !== null) {
+    return entry.data.conch_revision === currentConchRevision ? entry.data : null;
+  }
   return age < CACHE_TTL_FALLBACK_MS ? entry.data : null;
 }
 
@@ -174,7 +174,7 @@ export default function ConchOverlay({ onClose }: Props) {
   const [startingId, setStartingId] = useState<string | null>(null);
 
   const activeSession = store.state?.active_session ?? null;
-  /** 用 ref 读 revision：避免 load 身份随 state 轮询变化触发重复请求 */
+  /** 用 ref 读 semantic revision：避免 load 身份随 state 轮询变化触发重复请求 */
   const stateRef = useRef(store.state);
   stateRef.current = store.state;
 
@@ -182,8 +182,15 @@ export default function ConchOverlay({ onClose }: Props) {
     setPhase('loading');
     setFromCache(false);
     if (!force) {
-      const revision = stateRef.current?.revision ?? null;
-      const cached = readCache(w, revision);
+      // 缓存命中前用单行 revision 做语义校验：不拉时间轴、不调模型。
+      // 这让跨端完成/备注也能立刻使缓存失效，而普通开始/暂停/继续仍长期命中。
+      let conchRevision = stateRef.current?.conch_revision ?? null;
+      try {
+        conchRevision = (await getConchRevision()).conch_revision;
+      } catch {
+        // 离线/瞬断时，仍按最近 state 的语义版本或短暂兜底缓存展示，不把网络波动变成强制重问。
+      }
+      const cached = readCache(w, conchRevision);
       if (cached) {
         setData(cached);
         setPhase('ready');
@@ -301,9 +308,9 @@ export default function ConchOverlay({ onClose }: Props) {
             <div className="conch-loading" role="status">
               <div className="conch-loading-main">
                 <Shell size={20} aria-hidden className="conch-breathe" />
-                <span>神奇海螺正在看你的记录…</span>
+                <span>神奇海螺正在看已完成的记录…</span>
               </div>
-              <span className="conch-loading-sub">推理约需半分钟，问一次缓存很久</span>
+              <span className="conch-loading-sub">推理约需半分钟；完成时间线不变就不会重新问</span>
             </div>
           )}
 

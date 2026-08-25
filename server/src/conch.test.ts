@@ -98,6 +98,12 @@ function ask(h: Harness, window: string) {
   });
 }
 
+async function conchRevision(h: Harness): Promise<number> {
+  const res = await h.app.request('/api/v1/state');
+  expect(res.status).toBe(200);
+  return (await res.json()).conch_revision;
+}
+
 describe('POST /api/v1/conch/ask', () => {
   it('未登录 401；未配置 503；非法窗口 400', async () => {
     const h = await setupHarness(CONCH_STUB, { content: '' });
@@ -138,6 +144,75 @@ describe('POST /api/v1/conch/ask', () => {
     rmSync(h.tmp, { recursive: true, force: true });
   });
 
+  it('conch_revision 只随已完成时间线事实变化，不随开始/暂停/继续推进', async () => {
+    const h = await setupHarness(CONCH_STUB, { content: JSON.stringify({ subjects: [] }) });
+    const t0 = Date.now();
+    const headers = (key: string) => ({
+      'content-type': 'application/json',
+      cookie: h.cookie,
+      'idempotency-key': key,
+    });
+
+    expect(await conchRevision(h)).toBe(0);
+    h.setClock(t0);
+    const started = await h.app.request('/api/v1/sessions', {
+      method: 'POST',
+      headers: headers('semantic-start-001'),
+      body: JSON.stringify({ subject_id: 'math', intent_note: '第六章看课' }),
+    });
+    const created = await started.json();
+    expect(started.status).toBe(201);
+    expect(await conchRevision(h)).toBe(0);
+
+    h.setClock(t0 + 12_000);
+    expect(
+      (await h.app.request(`/api/v1/sessions/${created.session_id}/pause`, {
+        method: 'POST',
+        headers: headers('semantic-pause-001'),
+      })).status,
+    ).toBe(200);
+    expect(await conchRevision(h)).toBe(0);
+
+    h.setClock(t0 + 13_000);
+    expect(
+      (await h.app.request(`/api/v1/sessions/${created.session_id}/resume`, {
+        method: 'POST',
+        headers: headers('semantic-resume-001'),
+      })).status,
+    ).toBe(200);
+    expect(await conchRevision(h)).toBe(0);
+
+    h.setClock(t0 + 25_000);
+    expect(
+      (await h.app.request(`/api/v1/sessions/${created.session_id}/stop`, {
+        method: 'POST',
+        headers: headers('semantic-stop-001'),
+        body: JSON.stringify({}),
+      })).status,
+    ).toBe(200);
+    expect(await conchRevision(h)).toBe(1);
+
+    expect(
+      (await h.app.request(`/api/v1/sessions/${created.session_id}/note`, {
+        method: 'PATCH',
+        headers: headers('semantic-note-001'),
+        body: JSON.stringify({ note: '完成了第六章基础题' }),
+      })).status,
+    ).toBe(200);
+    expect(await conchRevision(h)).toBe(2);
+
+    // 误触继续会将已完成会话重新打开，故它是影响海螺时间线的例外。
+    h.setClock(t0 + 26_000);
+    expect(
+      (await h.app.request(`/api/v1/sessions/${created.session_id}/resume`, {
+        method: 'POST',
+        headers: headers('semantic-reopen-001'),
+      })).status,
+    ).toBe(200);
+    expect(await conchRevision(h)).toBe(3);
+    rmSync(h.tmp, { recursive: true, force: true });
+  });
+
   it('活跃科目：时间线进提示词，LLM 输出被清洗包装', async () => {
     const llmState = {
       content: JSON.stringify({
@@ -166,6 +241,7 @@ describe('POST /api/v1/conch/ask', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.model).toBe('stub-model');
+    expect(body.conch_revision).toBeGreaterThan(0);
     expect(body.subjects).toHaveLength(1);
     const math = body.subjects[0];
     expect(math.subject_id).toBe('math');

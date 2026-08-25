@@ -383,6 +383,17 @@ export class D1Storage implements Storage {
     return r?.m ?? 0;
   }
 
+  async getConchRevision(): Promise<number> {
+    const row = await this.db
+      .prepare('SELECT revision FROM conch_timeline_state WHERE id = 1')
+      .first<{ revision: number }>();
+    return row?.revision ?? 0;
+  }
+
+  async bumpConchRevision(): Promise<void> {
+    await this.db.prepare('UPDATE conch_timeline_state SET revision = revision + 1 WHERE id = 1').run();
+  }
+
   /* ---- API 凭据 ---- */
 
   async listCredentials(): Promise<ApiCredentialRow[]> {

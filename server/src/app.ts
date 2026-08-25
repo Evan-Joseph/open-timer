@@ -118,6 +118,14 @@ export function createApp(deps: AppDeps): Hono {
     return typeof id === 'string' && id.length > 0 ? id : null;
   }
 
+  /** 新停止会话只有存在计入段时才会进入海螺的“已完成时间线”，避免误触短片段打断缓存。 */
+  async function bumpConchRevisionIfCounted(sessionId: string): Promise<void> {
+    const segments = await storage.getSegments(sessionId);
+    if (segments.some((segment) => isCountedSegment(segment, config.minSegmentMs))) {
+      await storage.bumpConchRevision();
+    }
+  }
+
   /* ---------- 幂等辅助 ----------
    * 契约（与 docs/API.md、openapi.yaml 对齐）：
    * - 所有会话写操作（start/pause/resume/stop/switch/void/note/retime/adjust-start）
@@ -270,7 +278,7 @@ export function createApp(deps: AppDeps): Hono {
 
   app.get('/api/v1/state', publicCors, async (c) => {
     const nowMs = now();
-    const revision = await storage.maxEventId();
+    const [revision, conchRevision] = await Promise.all([storage.maxEventId(), storage.getConchRevision()]);
     const active = await storage.getActiveSession('owner');
     const today = shanghaiToday(nowMs);
     const { startMs } = shanghaiDayRangeUtc(today);
@@ -312,6 +320,8 @@ export function createApp(deps: AppDeps): Hono {
       today_date: today,
       /** 事件水位：神奇海螺等客户端用它判断缓存是否失效（无事件则不变） */
       revision,
+      /** 海螺输入的已完成时间线版本：进行中操作不推进，供长期缓存命中。 */
+      conch_revision: conchRevision,
     });
   });
 
@@ -388,6 +398,8 @@ export function createApp(deps: AppDeps): Hono {
       }
       const nowMs = now();
       await storage.resumeSession(id, nowMs, `resume:${c.req.header('idempotency-key')}`);
+      // 重开已结束会话会将其从海螺已完成时间线移除；暂停→继续则不影响。
+      if (session.status === 'stopped') await storage.bumpConchRevision();
       await storage.appendAudit(
         'owner',
         'session_resume',
@@ -416,6 +428,7 @@ export function createApp(deps: AppDeps): Hono {
       const nowMs = now();
       await storage.stopSession(id, nowMs, 'manual', `stop:${c.req.header('idempotency-key')}`);
       if (body.data.end_note) await storage.setSessionNote(id, body.data.end_note, nowMs);
+      await bumpConchRevisionIfCounted(id);
       await storage.appendAudit('owner', 'session_stop', id, null, nowMs);
       return { status: 200, body: sessionResponse((await storage.getSession(id))!) };
     }),
@@ -439,6 +452,7 @@ export function createApp(deps: AppDeps): Hono {
       if (!current || current.session.id !== id) return { status: 409, body: { error: 'NOT_ACTIVE_SESSION' } };
       const nowMs = now();
       await storage.stopSession(id, nowMs, 'subject_switch', `switch-stop:${c.req.header('idempotency-key')}`);
+      await bumpConchRevisionIfCounted(id);
       const newId = ulid(nowMs);
       const newSession = await storage.createSession({
         id: newId,
@@ -469,6 +483,7 @@ export function createApp(deps: AppDeps): Hono {
       if (session.status !== 'stopped') return { status: 409, body: { error: 'ILLEGAL_TRANSITION', status: session.status } };
       const nowMs = now();
       await storage.voidSession(id, nowMs, body.data.reason ?? null, `void:${c.req.header('idempotency-key')}`);
+      await storage.bumpConchRevision();
       await storage.appendAudit('owner', 'session_void', id, JSON.stringify({ reason: body.data.reason ?? null }), nowMs);
       return { status: 200, body: sessionResponse((await storage.getSession(id))!) };
     }),
@@ -487,6 +502,7 @@ export function createApp(deps: AppDeps): Hono {
       if (!session) return { status: 404, body: { error: 'SESSION_NOT_FOUND' } };
       if (session.status !== 'stopped') return { status: 409, body: { error: 'ILLEGAL_TRANSITION' } };
       await storage.setSessionNote(id, body.data.note, now());
+      await storage.bumpConchRevision();
       await storage.appendAudit('owner', 'session_note', id, null, now());
       return { status: 200, body: sessionResponse((await storage.getSession(id))!) };
     }),
@@ -506,6 +522,7 @@ export function createApp(deps: AppDeps): Hono {
       if (session.status !== 'stopped') return { status: 409, body: { error: 'ILLEGAL_TRANSITION' } };
       try {
         await storage.applyRetime(id, body.data.delta_seconds, body.data.reason, now());
+        await storage.bumpConchRevision();
       } catch (error) {
         if ((error as Error).message === 'INVALID_RETIME') return { status: 400, body: { error: 'INVALID_RETIME' } };
         throw error;
@@ -528,6 +545,7 @@ export function createApp(deps: AppDeps): Hono {
       if (session.status !== 'stopped') return { status: 409, body: { error: 'ILLEGAL_TRANSITION' } };
       try {
         await storage.adjustSessionStart(id, Date.parse(body.data.started_at), body.data.reason, now());
+        await storage.bumpConchRevision();
       } catch (error) {
         if ((error as Error).message === 'INVALID_START') return { status: 400, body: { error: 'INVALID_START' } };
         throw error;
@@ -708,6 +726,11 @@ export function createApp(deps: AppDeps): Hono {
   const ConchAskSchema = z.object({ window: z.enum(['all', '30d', '7d']) });
   const conchLimiter = new RateLimiter(3_600_000, 20);
 
+  /** 缓存校验专用：仅读一行 semantic revision，不拉时间轴、不调用 LLM。 */
+  app.get('/api/v1/conch/revision', requireOwner(storage), async (c) =>
+    c.json({ conch_revision: await storage.getConchRevision() }),
+  );
+
   app.post('/api/v1/conch/ask', requireOwner(storage), async (c) => {
     if (!config.conch || deps.conchLlm === null) return c.json({ error: 'CONCH_NOT_CONFIGURED' }, 503);
     const llm = deps.conchLlm ?? createConchLlmClient(config.conch);
@@ -729,10 +752,11 @@ export function createApp(deps: AppDeps): Hono {
       segmentsBySession: segMap,
       minSegmentMs: config.minSegmentMs,
     });
-    const revision = await storage.maxEventId();
+    const [revision, conchRevision] = await Promise.all([storage.maxEventId(), storage.getConchRevision()]);
     const baseResp = {
       window: body.data.window,
       generated_at: toIso(nowMs),
+      conch_revision: conchRevision,
       revision,
       model: config.conch.model,
     };

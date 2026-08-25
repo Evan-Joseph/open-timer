@@ -96,8 +96,20 @@ export function useClockStore(): ClockStore {
   const applyState = useCallback((s: StateApi, epoch: number) => {
     // 写操作进行中：服务端返回的可能是写完成前的旧状态，不得覆盖乐观 UI
     if (writeLockedRef.current || epoch !== syncEpochRef.current) return;
-    // 丢弃滞后的轮询响应（以服务端时间戳为准），防止旧状态回跳
-    if (stateRef.current && s.server_now_ms <= stateRef.current.server_now_ms) return;
+    // 丢弃滞后的轮询响应（以服务端时间戳为主），防止旧状态回跳。
+    // 但同一毫秒内的写后快照可能携带更高 revision / conch_revision；
+    // 不能因时间相等而吞掉它，否则刚完成一段后海螺仍会拿旧缓存。
+    if (stateRef.current) {
+      const current = stateRef.current;
+      if (s.server_now_ms < current.server_now_ms) return;
+      if (
+        s.server_now_ms === current.server_now_ms &&
+        s.revision <= current.revision &&
+        s.conch_revision <= current.conch_revision
+      ) {
+        return;
+      }
+    }
     // RTT 采样：中点锚定要求样本延迟正常，高延迟样本不参与重锚决策
     const rttMs = sendPerfRef.current > 0 ? performance.now() - sendPerfRef.current : 0;
     lastRttMsRef.current = rttMs;
@@ -430,7 +442,9 @@ export function useClockStore(): ClockStore {
         return;
       }
       notifyPeers();
-      refresh();
+      // stop 会推进 conch_revision；等待本次权威快照落地，确保用户刚结束又打开海螺时
+      // 不会拿到旧语义缓存（开始/暂停/继续则仍保持异步刷新，避免不必要阻塞）。
+      await refresh();
     },
     [activeId, beginWrite, refresh, optimisticSetStatus, flashError, notifyPeers],
   );
@@ -449,7 +463,8 @@ export function useClockStore(): ClockStore {
         return;
       }
       notifyPeers();
-      refresh();
+      // switch 会结束旧科目的一段已完成专注，故需等待语义缓存版本更新。
+      await refresh();
     },
     [activeId, beginWrite, refresh, flashError, notifyPeers],
   );
@@ -510,7 +525,8 @@ export function useClockStore(): ClockStore {
     async (sessionId: string, note: string) => {
       const res = await apiPatch(`/api/v1/sessions/${sessionId}/note`, { note }).catch(() => null);
       if (res?.ok) notifyPeers();
-      refresh();
+      // 已完成备注是海螺输入，等待 conch_revision 快照落地再返回。
+      await refresh();
     },
     [refresh, notifyPeers],
   );

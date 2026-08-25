@@ -152,6 +152,8 @@ export interface StateSnapshot {
   /** 今日（Asia/Shanghai）累计净秒数 */
   today_active_seconds: number;
   today_date: string;
+  /** 神奇海螺已完成时间线 revision；开始/暂停/继续不推进。 */
+  conch_revision: number;
 }
 
 export interface HealthResponse {

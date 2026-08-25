@@ -6,7 +6,7 @@
  * 设计：docs/神奇海螺-下一步推荐-设计-2026-08-23.md
  */
 
-import type { ActiveSegmentRow, SessionRow, SessionStatus, SubjectId } from './types.js';
+import type { ActiveSegmentRow, SessionRow, SubjectId } from './types.js';
 import { SUBJECTS, subjectById } from './subjects.js';
 import { DAY_MS, SHANGHAI_OFFSET_MS, utcMsToShanghaiDate } from './shanghai.js';
 import { isCountedSegment } from './state-machine.js';
@@ -59,6 +59,9 @@ export interface ConchSkippedEntry {
 export interface ConchAskResponse {
   window: ConchWindow;
   generated_at: string;
+  /** 仅在海螺已完成时间线事实变化时推进，用于长期缓存失效。 */
+  conch_revision: number;
+  /** 通用审计 revision，保留给诊断/兼容；不作为海螺缓存键。 */
   revision: number;
   model: string;
   subjects: ConchSubjectResult[];
@@ -70,7 +73,7 @@ export interface ConchAskResponse {
 export interface ConchBuildInput {
   nowMs: number;
   window: ConchWindow;
-  /** 全时段非作废会话（调用方一次取全量，窗口过滤在此完成，保证门槛判定有全量数据）。 */
+  /** 全时段会话（调用方一次取全量，内部只保留已完成且计入的专注事实）。 */
   sessions: SessionRow[];
   segmentsBySession: Map<string, ActiveSegmentRow[]>;
   minSegmentMs: number;
@@ -129,14 +132,6 @@ export function conchSessionSeconds(
   return secs;
 }
 
-const CONCH_WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'] as const;
-
-function beijingNowLine(nowMs: number): string {
-  const d = new Date(nowMs + SHANGHAI_OFFSET_MS);
-  const wd = CONCH_WEEKDAYS[d.getUTCDay()];
-  return `${utcMsToShanghaiDate(nowMs)} ${fmtBeijing(nowMs, false)}（周${wd}）`;
-}
-
 interface MonthAgg {
   key: string;
   count: number;
@@ -155,8 +150,15 @@ export function buildConchContext(input: ConchBuildInput): ConchContextResult {
 
   const bySubject = new Map<SubjectId, SessionRow[]>();
   for (const s of SUBJECTS) bySubject.set(s.id, []);
-  const usable = sessions.filter((s) => s.status !== 'voided' && subjectById(s.subjectId));
-  for (const s of usable) bySubject.get(s.subjectId)!.push(s);
+  // 海螺只依据“已完成且计入”的专注事实。不让正在开始/暂停/继续中的会话、
+  // 误触短片段进入 prompt，故这些操作不会改变建议也不需要打断缓存。
+  const completed = sessions.filter(
+    (s) =>
+      s.status === 'stopped' &&
+      subjectById(s.subjectId) &&
+      conchSessionSeconds(segmentsBySession.get(s.id) ?? [], 0, nowMs, minSegmentMs) > 0,
+  );
+  for (const s of completed) bySubject.get(s.subjectId)!.push(s);
 
   const active: SubjectId[] = [];
   const skipped: ConchSkippedEntry[] = [];
@@ -167,17 +169,13 @@ export function buildConchContext(input: ConchBuildInput): ConchContextResult {
     const all = bySubject.get(def.id)!;
     const secsOf = (s: SessionRow, startMs: number) =>
       conchSessionSeconds(segmentsBySession.get(s.id) ?? [], startMs, nowMs, minSegmentMs);
-    const isOpenSession = (s: SessionRow) => s.status === 'running' || s.status === 'paused';
-
-    const allTimeCount = all.filter((s) => secsOf(s, 0) > 0 || isOpenSession(s)).length;
+    const allTimeCount = all.length;
     if (allTimeCount === 0) {
       skipped.push({ subject_id: def.id, display_name: def.displayName, reason: 'not_started' });
       continue;
     }
-    // 活跃 = 近 7 个北京日有计入秒数（纯误触/作废不算），或有进行中的会话
-    const recentCount = all.filter(
-      (s) => secsOf(s, recentStartMs) > 0 || (isOpenSession(s) && s.startedAtMs >= recentStartMs),
-    ).length;
+    // 活跃 = 近 7 个北京日有已完成、计入的专注事实（纯误触/作废/进行中不算）。
+    const recentCount = all.filter((s) => secsOf(s, recentStartMs) > 0).length;
     if (recentCount === 0) {
       skipped.push({ subject_id: def.id, display_name: def.displayName, reason: 'inactive' });
       continue;
@@ -205,9 +203,7 @@ export function buildConchContext(input: ConchBuildInput): ConchContextResult {
 
     let lastActivity = '';
     const lastEnded = [...inWindow].reverse().find((s) => s.endedAtMs !== null);
-    const running = inWindow.find((s) => s.status === 'running' || s.status === 'paused');
-    if (running) lastActivity = '进行中';
-    else if (lastEnded) lastActivity = fmtBeijing(lastEnded.endedAtMs!);
+    if (lastEnded) lastActivity = fmtBeijing(lastEnded.endedAtMs!);
 
     const detailCutoffMs = nowMs - CONCH_FULL_DETAIL_DAYS * DAY_MS;
     const needAggregate = inWindow.length > CONCH_MAX_LINES_PER_SUBJECT;
@@ -218,9 +214,7 @@ export function buildConchContext(input: ConchBuildInput): ConchContextResult {
       const secs = secsOf(s, windowStartMs);
       const note = s.endNote ?? s.intentNote;
       const notePart = note ? ` "${note}"` : '';
-      const isOpen = s.status === 'running' || s.status === 'paused';
-
-      if (needAggregate && s.startedAtMs < detailCutoffMs && !isOpen) {
+      if (needAggregate && s.startedAtMs < detailCutoffMs) {
         const key = utcMsToShanghaiDate(s.startedAtMs).slice(0, 7); // YYYY-MM
         let agg = aggMonths.get(key);
         if (!agg) {
@@ -233,15 +227,9 @@ export function buildConchContext(input: ConchBuildInput): ConchContextResult {
         continue;
       }
 
-      if (isOpen) {
-        lines.push(
-          `${fmtBeijing(s.startedAtMs)} 起 · 进行中 ${fmtDur(secs)}${notePart}`,
-        );
-      } else {
-        lines.push(
-          `${fmtBeijing(s.startedAtMs)}–${fmtBeijing(s.endedAtMs!, false)} ${fmtDur(secs)}${notePart}`,
-        );
-      }
+      lines.push(
+        `${fmtBeijing(s.startedAtMs)}–${fmtBeijing(s.endedAtMs!, false)} ${fmtDur(secs)}${notePart}`,
+      );
     }
 
     // 聚合月行置于明细之前（时间升序）
@@ -275,8 +263,7 @@ export function buildConchContext(input: ConchBuildInput): ConchContextResult {
   const userPrompt =
     active.length === 0
       ? ''
-      : `当前北京时间：${beijingNowLine(nowMs)}\n` +
-        `统计窗口：${CONCH_WINDOW_LABEL[window]}\n` +
+      : `统计窗口：${CONCH_WINDOW_LABEL[window]}\n` +
         `以下是 ${active.length} 个近期活跃科目的时间线（旧→新），请按要求返回 JSON。\n${skippedNote}\n` +
         blocks.join('\n\n') +
         '\n\n请返回符合 schema 的原始 JSON。';

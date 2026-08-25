@@ -47,8 +47,10 @@ export interface StateApi {
   active_session: ActiveSessionApi | null;
   today_active_seconds: number;
   today_date: string;
-  /** 事件水位（= 最大事件 id）：无计时事件则不变，可作缓存失效依据 */
+  /** 通用审计事件水位（= 最大审计 id）；ETag/诊断使用，不作为海螺缓存键。 */
   revision: number;
+  /** 海螺已完成时间线 revision；仅完成/备注/修正/撤回/重开推进。 */
+  conch_revision: number;
 }
 
 export interface DailySummaryApi {
@@ -84,6 +86,7 @@ export interface ConchSkippedApi {
 export interface ConchAskResponseApi {
   window: ConchWindow;
   generated_at: string;
+  conch_revision: number;
   revision: number;
   model: string;
   subjects: ConchSubjectApi[];
@@ -92,6 +95,11 @@ export interface ConchAskResponseApi {
 
 export function conchAsk(window: ConchWindow) {
   return apiPost<ConchAskResponseApi>('/api/v1/conch/ask', { window });
+}
+
+/** 海螺缓存校验专用：仅取已完成时间线的 semantic revision。 */
+export function getConchRevision() {
+  return apiGet<{ conch_revision: number }>('/api/v1/conch/revision');
 }
 
 function newIdempotencyKey(): string {

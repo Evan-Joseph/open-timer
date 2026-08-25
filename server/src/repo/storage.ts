@@ -67,6 +67,10 @@ export interface Storage {
    *  note/retime/adjust-start 这类不写 session_event 的变更）。用于 ETag 确定性：
    *  任何影响资源的写操作都使 revision 前进、ETag 失效。 */
   maxEventId(): Promise<number>;
+  /** 神奇海螺输入的已完成时间线 revision；开始/暂停/继续不推进。 */
+  getConchRevision(): Promise<number>;
+  /** 仅在已完成时间线事实变化后调用。 */
+  bumpConchRevision(): Promise<void>;
 
   /* ---- API 凭据 ---- */
   listCredentials(): Promise<ApiCredentialRow[]>;

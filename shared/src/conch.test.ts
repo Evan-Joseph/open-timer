@@ -99,15 +99,15 @@ describe('buildConchContext 活动门槛', () => {
     expect(ctx.skipped.find((s) => s.subject_id === 'math')?.reason).toBe('not_started');
   });
 
-  it('进行中会话（7 天内开始）算活跃且时间线标注进行中', () => {
+  it('进行中会话不进入海螺已完成时间线，也不让建议缓存失效', () => {
     const running = session({ subjectId: 'math', startedAtMs: NOW - 1_500_000, status: 'running', intentNote: '第6章 看课' });
     const ctx = buildConchContext({
       nowMs: NOW, window: 'all', sessions: [running],
       segmentsBySession: segs([[running.id, running.startedAtMs, null]]), minSegmentMs: 10_000,
     });
-    expect(ctx.active).toEqual(['math']);
-    expect(ctx.userPrompt).toContain('进行中');
-    expect(ctx.userPrompt).toContain('"第6章 看课"');
+    expect(ctx.active).toEqual([]);
+    expect(ctx.skipped.find((s) => s.subject_id === 'math')?.reason).toBe('not_started');
+    expect(ctx.userPrompt).toBe('');
   });
 });
 

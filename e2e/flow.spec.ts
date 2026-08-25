@@ -845,6 +845,59 @@ test.describe('多端偏好同步', () => {
     await ctxB.close();
   });
 
+  test('神奇海螺缓存只随已完成时间线变化：开始/暂停/继续不重新问，完成后才重新问', async ({ page }) => {
+    await doSetup(page);
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v3'));
+    const initialState = await (await page.request.get('/api/v1/state')).json();
+
+    let askCount = 0;
+    await page.route('**/api/v1/conch/ask', async (route) => {
+      askCount += 1;
+      const stateRes = await page.request.get('/api/v1/state');
+      const state = await stateRes.json();
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          window: 'all',
+          generated_at: new Date().toISOString(),
+          revision: state.revision,
+          conch_revision: state.conch_revision,
+          model: 'e2e-stub',
+          subjects: [],
+          skipped: [],
+        }),
+      });
+    });
+
+    // 首问：请求一次并落本地语义缓存
+    await page.getByTestId('conch-toggle').click();
+    await page.locator('.conch-empty').waitFor();
+    expect(askCount).toBe(1);
+    await page.keyboard.press('Escape');
+
+    // 进行中状态变化不会改变完成时间线，不应再次问模型
+    await page.getByRole('radio', { name: '数学二' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForSelector('.control-btn.pause', { timeout: 10_000 });
+    await page.getByRole('button', { name: '暂停计时' }).click();
+    await page.getByRole('button', { name: '继续计时' }).click();
+    await page.getByTestId('conch-toggle').click();
+    await page.locator('.conch-empty').waitFor();
+    expect(askCount).toBe(1);
+    await page.keyboard.press('Escape');
+
+    // 完成一段专注会推进 conch_revision，下一次打开才重新问
+    await page.waitForTimeout(1_100);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+    await page.waitForTimeout(500);
+    const completedState = await (await page.request.get('/api/v1/state')).json();
+    expect(completedState.conch_revision).toBeGreaterThan(initialState.conch_revision);
+    await page.getByTestId('conch-toggle').click();
+    await page.locator('.conch-empty').waitFor();
+    expect(askCount).toBe(2);
+  });
+
   test('计时对表：一端开始计时，另一端同步进入运行且秒数对齐（±2s）', async ({ page, context }) => {
     await doSetup(page);
     await page.getByRole('radio', { name: '数学二' }).click();
