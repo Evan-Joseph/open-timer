@@ -62,11 +62,13 @@ async function doSetup(page: Page) {
   }
   // 跨端结束卡水合（2026-08-25 新功能）：多条「未备注刚结束」可能排队水合，循环排空并填备注断污染
   for (let i = 0; i < 6; i++) {
+    // 先等一拍让水合落地再检查，杜绝「drain 后才水合」的竞态
+    await page.waitForTimeout(350);
     if ((await page.getByTestId('finish-duration').count()) === 0) break;
     await page.locator('.finish-note').fill('e2e 隔离清理');
     const contBtn = page.getByRole('button', { name: '好，继续' });
     if ((await contBtn.count()) > 0) await contBtn.click();
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(300);
   }
   // 测试隔离：偏好是服务端多端同步的，上一个用例的深色/视图模式会泄漏给后续用例。
   // 每个用例开始时重置为默认偏好（theme=auto 等）。

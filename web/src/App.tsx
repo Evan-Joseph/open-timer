@@ -85,6 +85,8 @@ export default function App() {
     const removeListeners = () => {
       window.removeEventListener('pointerdown', enter);
       window.removeEventListener('keydown', enter);
+      window.removeEventListener('touchend', enter);
+      window.removeEventListener('click', enter);
     };
     const enter = () => {
       if (settled) return;
@@ -100,6 +102,8 @@ export default function App() {
     };
     window.addEventListener('pointerdown', enter);
     window.addEventListener('keydown', enter);
+    window.addEventListener('touchend', enter);
+    window.addEventListener('click', enter);
     document.addEventListener('fullscreenchange', onFullscreenChange);
     return () => {
       removeListeners();
