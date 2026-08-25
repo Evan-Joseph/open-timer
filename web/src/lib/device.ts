@@ -47,3 +47,42 @@ export function detectDeviceRole(
   }
   return 'main';
 }
+
+/* ---------- 全屏兼容层：部分安卓 WebView/旧内核需要厂商前缀 ---------- */
+
+type FsDoc = Document & {
+  webkitFullscreenEnabled?: boolean;
+  mozFullScreenEnabled?: boolean;
+  msFullscreenEnabled?: boolean;
+  webkitFullscreenElement?: Element | null;
+  mozFullScreenElement?: Element | null;
+  msFullscreenElement?: Element | null;
+};
+type FsEl = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+  mozRequestFullScreen?: () => Promise<void> | void;
+  msRequestFullscreen?: () => Promise<void> | void;
+};
+
+export function isAppFullscreen(): boolean {
+  const d = document as FsDoc;
+  return !!(d.fullscreenElement ?? d.webkitFullscreenElement ?? d.mozFullScreenElement ?? d.msFullscreenElement);
+}
+
+/** 发起全屏（含厂商前缀回退）。返回是否成功发起请求；失败静默，由调用方决定是否重试。 */
+export function requestAppFullscreen(): boolean {
+  const d = document as FsDoc;
+  const enabled = d.fullscreenEnabled ?? d.webkitFullscreenEnabled ?? d.mozFullScreenEnabled ?? d.msFullscreenEnabled;
+  if (enabled === false) return false;
+  if (isAppFullscreen()) return true;
+  const el = document.documentElement as FsEl;
+  const req = el.requestFullscreen ?? el.webkitRequestFullscreen ?? el.mozRequestFullScreen ?? el.msRequestFullscreen;
+  if (typeof req !== 'function') return false;
+  try {
+    const p = req.call(el);
+    if (p && typeof (p as Promise<void>).catch === 'function') (p as Promise<void>).catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
+}

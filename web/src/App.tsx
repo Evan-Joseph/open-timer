@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useClockStore } from './lib/store.js';
 import { useAnimationsEnabled, useSettings } from './lib/settings.js';
 import { PREFS_APPLIED_EVT, pullRemotePrefs, schedulePrefsPush } from './lib/prefs.js';
-import { detectDeviceRole } from './lib/device.js';
+import { detectDeviceRole, isAppFullscreen, requestAppFullscreen } from './lib/device.js';
 import { ambient } from './lib/ambient.js';
 import AuthGate from './components/AuthGate.js';
 import ClockFace from './components/ClockFace.js';
@@ -90,15 +90,19 @@ export default function App() {
     };
     const enter = () => {
       if (settled) return;
-      settled = true;
-      removeListeners();
-      if (!document.fullscreenEnabled || document.fullscreenElement) return;
-      document.documentElement.requestFullscreen?.().catch(() => {
-        /* 环境拒绝（权限/不支持）静默降级为普通窗口 */
-      });
+      if (isAppFullscreen()) {
+        settled = true;
+        removeListeners();
+        return;
+      }
+      // 发起失败（无 API/被拒）不 settled，下一次手势继续重试
+      requestAppFullscreen();
     };
     const onFullscreenChange = () => {
-      if (!document.fullscreenElement) settled = true;
+      if (isAppFullscreen()) {
+        settled = true;
+        removeListeners();
+      }
     };
     window.addEventListener('pointerdown', enter);
     window.addEventListener('keydown', enter);

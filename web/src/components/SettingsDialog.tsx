@@ -3,6 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { Maximize, X } from 'lucide-react';
 import { setAnimationsEnabled, useAnimationsEnabled, useSettings, updateSettings } from '../lib/settings.js';
 import { AMBIENT_LABELS } from '../lib/ambient.js';
+import { detectDeviceRole, requestAppFullscreen } from '../lib/device.js';
 
 interface Props {
   open: boolean;
@@ -21,16 +22,15 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
   /** 进入全屏被浏览器拒绝时的可理解反馈（权限、iframe 沙箱或不支持） */
   const [fullscreenError, setFullscreenError] = useState<string | null>(null);
 
-  const enterFullscreen = async () => {
+  const enterFullscreen = () => {
     setFullscreenError(null);
-    try {
-      if (!document.fullscreenEnabled) throw new Error('fullscreen-disabled');
-      await document.documentElement.requestFullscreen();
+    if (requestAppFullscreen()) {
       onOpenChange(false);
-    } catch {
+    } else {
       setFullscreenError('浏览器拒绝了全屏请求。请改用 F11 或浏览器菜单进入全屏，应用会自动切换布局。');
     }
   };
+  const deviceRole = detectDeviceRole();
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -145,7 +145,7 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
               </button>
             </div>
             {fullscreenError && <p className="setting-hint setting-hint-error" role="status">{fullscreenError}</p>}
-            <p className="setting-hint">外部进入全屏（F11 或系统手势）同样会被自动识别。</p>
+            <p className="setting-hint">外部进入全屏（F11 或系统手势）同样会被自动识别。设备角色：{deviceRole === 'secondary' ? '副屏（Pad）' : '主控（电脑）'}，识别不对可用 ?role=secondary / ?role=main 覆盖。</p>
           </div>
 
           <div className="setting-row">
