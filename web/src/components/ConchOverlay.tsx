@@ -5,8 +5,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { Shell, X, RefreshCw, Play } from 'lucide-react';
-import { conchAsk, type ConchAskResponseApi, type ConchWindow } from '../lib/api.js';
+import { Shell, X, RefreshCw, Play, Shuffle } from 'lucide-react';
+import { conchAsk, type ConchAskResponseApi, type ConchSubjectApi, type ConchWindow } from '../lib/api.js';
 import { saveConchStartMark } from '../lib/conch-mark.js';
 import { useClockStore } from '../lib/store.js';
 
@@ -80,6 +80,88 @@ function writeCache(window: ConchWindow, data: ConchAskResponseApi): void {
 
 interface Props {
   onClose: () => void;
+}
+
+/** 单科目推荐卡：备选方案支持点击开工与「换一换」轮换（本地轮换，不重新请求）。 */
+function ConchCard({
+  s,
+  colorId,
+  hasActiveSession,
+  starting,
+  onStart,
+}: {
+  s: ConchSubjectApi;
+  colorId: string;
+  hasActiveSession: boolean;
+  starting: boolean;
+  onStart: (subjectId: string, note: string) => void;
+}) {
+  const [altIndex, setAltIndex] = useState(0);
+  const alts = s.alternatives;
+  const alt = alts.length > 0 ? alts[altIndex % alts.length] : null;
+  const startDisabled = hasActiveSession || starting;
+
+  return (
+    <div className="conch-card" data-color={colorId}>
+      <div className="conch-card-head">
+        <span className="conch-subject-dot" aria-hidden />
+        <span className="conch-subject-name">{s.display_name}</span>
+        {s.running_now && <span className="conch-running-badge">进行中</span>}
+        <span className="conch-meta">最近活动 {s.last_active_date.slice(5)}</span>
+        <span className={`conch-conf conch-conf-${s.confidence}`} title={CONF_LABELS[s.confidence]}>
+          {CONF_LABELS[s.confidence]}
+        </span>
+      </div>
+      <div className="conch-action-line">
+        <span className="conch-chip">{KIND_LABELS[s.action_kind] ?? '其他'}</span>
+        {s.topic && <span className="conch-topic">{s.topic}</span>}
+      </div>
+      <div className="conch-next">{s.next_action}</div>
+      {s.rationale && <div className="conch-rationale">{s.rationale}</div>}
+      {alt && (
+        <div className="conch-alts">
+          <span className="conch-alts-label">或者</span>
+          <button
+            type="button"
+            className="conch-alt-btn"
+            disabled={startDisabled}
+            title={hasActiveSession ? '先结束当前会话' : '以这条备选为备注开始计时'}
+            onClick={() => onStart(s.subject_id, alt)}
+            data-testid={`conch-alt-${s.subject_id}`}
+          >
+            <Play size={12} aria-hidden />
+            {alt}
+          </button>
+          {alts.length > 1 && (
+            <button
+              type="button"
+              className="conch-alt-shuffle"
+              onClick={() => setAltIndex((i) => (i + 1) % alts.length)}
+              aria-label="换一条备选"
+              title="换一条备选"
+              data-testid={`conch-alt-shuffle-${s.subject_id}`}
+            >
+              <Shuffle size={13} aria-hidden />
+              换一换
+            </button>
+          )}
+        </div>
+      )}
+      {s.pattern && <div className="conch-footnote">节奏：{s.pattern}</div>}
+      <div className="conch-card-actions">
+        <button
+          className="ghost-btn"
+          disabled={startDisabled}
+          title={hasActiveSession ? '先结束当前会话' : '以该建议为备注开始计时'}
+          onClick={() => onStart(s.subject_id, s.next_action)}
+          data-testid={`conch-start-${s.subject_id}`}
+        >
+          <Play size={14} aria-hidden />
+          {starting ? '开始中…' : '开始这个科目'}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function ConchOverlay({ onClose }: Props) {
@@ -242,41 +324,14 @@ export default function ConchOverlay({ onClose }: Props) {
                 <div className="conch-empty">最近没有活跃科目，先去学一会儿吧。</div>
               )}
               {data.subjects.map((s) => (
-                <div key={s.subject_id} className="conch-card" data-color={colorOf(s.subject_id)}>
-                  <div className="conch-card-head">
-                    <span className="conch-subject-dot" aria-hidden />
-                    <span className="conch-subject-name">{s.display_name}</span>
-                    {s.running_now && <span className="conch-running-badge">进行中</span>}
-                    <span className="conch-meta">最近活动 {s.last_active_date.slice(5)}</span>
-                    <span className={`conch-conf conch-conf-${s.confidence}`} title={CONF_LABELS[s.confidence]}>
-                      {CONF_LABELS[s.confidence]}
-                    </span>
-                  </div>
-                  <div className="conch-action-line">
-                    <span className="conch-chip">{KIND_LABELS[s.action_kind] ?? '其他'}</span>
-                    {s.topic && <span className="conch-topic">{s.topic}</span>}
-                  </div>
-                  <div className="conch-next">{s.next_action}</div>
-                  {s.rationale && <div className="conch-rationale">{s.rationale}</div>}
-                  {(s.pattern || s.alternative) && (
-                    <div className="conch-footnote">
-                      {s.pattern && <span>节奏：{s.pattern}</span>}
-                      {s.alternative && <span>或者：{s.alternative}</span>}
-                    </div>
-                  )}
-                  <div className="conch-card-actions">
-                    <button
-                      className="ghost-btn"
-                      disabled={!!activeSession || startingId === s.subject_id}
-                      title={activeSession ? '先结束当前会话' : '以该建议为备注开始计时'}
-                      onClick={() => void startSubject(s.subject_id, s.next_action)}
-                      data-testid={`conch-start-${s.subject_id}`}
-                    >
-                      <Play size={14} aria-hidden />
-                      {startingId === s.subject_id ? '开始中…' : '开始这个科目'}
-                    </button>
-                  </div>
-                </div>
+                <ConchCard
+                  key={s.subject_id}
+                  s={s}
+                  colorId={colorOf(s.subject_id)}
+                  hasActiveSession={!!activeSession}
+                  starting={startingId === s.subject_id}
+                  onStart={(subjectId, note) => void startSubject(subjectId, note)}
+                />
               ))}
               {data.skipped.length > 0 && (
                 <div className="conch-skipped">

@@ -150,7 +150,7 @@ describe('POST /api/v1/conch/ask', () => {
             pattern: '看课→基础题→强化题',
             rationale: '上一步是看课，按节奏下一步做题',
             confidence: 'high',
-            alternative: null,
+            alternatives: ['回头补第4章错题', '预习第6章'],
           },
           { subject_id: 'politics', next_action: '不该出现', action_kind: 'other', rationale: '', confidence: 'low' },
         ],
@@ -173,6 +173,7 @@ describe('POST /api/v1/conch/ask', () => {
     expect(math.next_action).toBe('做第5章 定积分的基础题');
     expect(math.running_now).toBe(false);
     expect(math.last_active_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(math.alternatives).toEqual(['回头补第4章错题', '预习第6章']);
     // politics 不在活跃集合 → 被解析层丢弃，出现在 skipped（inactive）
     expect(body.skipped.find((s: { subject_id: string }) => s.subject_id === 'politics')?.reason).toBe('not_started');
     expect(body.skipped.find((s: { subject_id: string }) => s.subject_id === 'english')?.reason).toBe('inactive');

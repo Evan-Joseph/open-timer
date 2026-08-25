@@ -70,7 +70,7 @@ export interface ConchSubjectApi {
   pattern: string | null;
   rationale: string;
   confidence: 'high' | 'medium' | 'low';
-  alternative: string | null;
+  alternatives: string[];
 }
 
 export interface ConchSkippedApi {

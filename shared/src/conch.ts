@@ -40,7 +40,8 @@ export interface ConchSubjectRec {
   pattern: string | null;
   rationale: string;
   confidence: ConchConfidence;
-  alternative: string | null;
+  /** 备选下一步（可多条，前端可「换一换」轮换、逐条点击开工） */
+  alternatives: string[];
 }
 
 export interface ConchSubjectResult extends ConchSubjectRec {
@@ -298,6 +299,25 @@ function strOrNull(v: unknown, max: number): string | null {
   return t ? truncate(t, max) : null;
 }
 
+/** 备选列表解析：优先 `alternatives` 数组；兼容旧版单条 `alternative`。去重、截断、至多 3 条。 */
+function parseAlternatives(o: Record<string, unknown>): string[] {
+  const rawList = Array.isArray(o.alternatives)
+    ? o.alternatives
+    : typeof o.alternative === 'string' && o.alternative.trim()
+      ? [o.alternative]
+      : [];
+  const out: string[] = [];
+  for (const item of rawList) {
+    if (typeof item !== 'string') continue;
+    const t = item.trim();
+    if (!t) continue;
+    const cut = truncate(t, 80);
+    if (!out.includes(cut)) out.push(cut);
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
 /**
  * 解析并清洗 LLM 原始输出。expected 为本次活跃科目集合。
  * 返回按 SUBJECTS 排序的建议数组；结构性失败（非 JSON / 无 subjects 数组）返回 null。
@@ -341,7 +361,7 @@ export function parseConchLlmOutput(raw: string, expected: readonly SubjectId[])
       pattern: strOrNull(o.pattern, 120),
       rationale: truncate(typeof o.rationale === 'string' ? o.rationale.trim() : '', 120),
       confidence: CONFIDENCES.includes(o.confidence as ConchConfidence) ? (o.confidence as ConchConfidence) : 'low',
-      alternative: strOrNull(o.alternative, 80),
+      alternatives: parseAlternatives(o),
     });
   }
 
@@ -370,6 +390,8 @@ export const CONCH_SYSTEM_PROMPT = `你是「神奇海螺」，一名 11408 考�
    坏例子："继续学数学"。
 6. 若某科目历史太稀疏或规律不明，confidence 给 "low"，给出最稳妥的一般性下一步
    （如"继续上次未完成的进度"），并在 rationale 说明缺什么信息。
+7. alternatives 给 1–3 条与 next_action 不同方向的备选（如主推荐是补题，备选可以是
+   推进下一章、回看错题、换一种学习形式），每条同样具体、≤40 汉字；没有合适备选时给 []。
 
 【硬约束】
 - 只输出输入中给出的科目；不得新增、不得遗漏。
@@ -386,7 +408,7 @@ export const CONCH_SYSTEM_PROMPT = `你是「神奇海螺」，一名 11408 考�
       "pattern": "string|null，观察到的节奏一句话，如「看课→基础题→强化题」",
       "rationale": "string，≤60 汉字，为什么推荐这一步",
       "confidence": "high|medium|low",
-      "alternative": "string|null，备选下一步"
+      "alternatives": ["string，1–3 条与主推荐不同方向的备选下一步，没有则空数组"]
     }
   ]
 }`;

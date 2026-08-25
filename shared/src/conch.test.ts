@@ -186,8 +186,28 @@ describe('parseConchLlmOutput', () => {
     const long = '做'.repeat(120);
     const recs = parseConchLlmOutput(JSON.stringify({ subjects: [{ subject_id: 'math', next_action: long, rationale: '' }] }), expected)!;
     expect(recs[0].next_action).toHaveLength(80);
+    expect(recs[0].alternatives).toEqual([]);
     expect(parseConchLlmOutput('完全不是 JSON', expected)).toBeNull();
     expect(parseConchLlmOutput('{"foo": 1}', expected)).toBeNull();
+  });
+
+  it('alternatives：数组去重截断至多 3 条，兼容旧版单条 alternative', () => {
+    const recs = parseConchLlmOutput(
+      JSON.stringify({
+        subjects: [
+          {
+            subject_id: 'math',
+            next_action: '主推荐',
+            rationale: '',
+            alternatives: ['备选一', '备选一', '备选二', '备选三', '备选四'],
+          },
+          { subject_id: 'data-structures', next_action: '主推荐2', rationale: '', alternative: '旧版单条备选' },
+        ],
+      }),
+      expected,
+    )!;
+    expect(recs[0].alternatives).toEqual(['备选一', '备选二', '备选三']);
+    expect(recs[1].alternatives).toEqual(['旧版单条备选']);
   });
 
   it('system prompt 含 schema 关键约束', () => {

@@ -1240,7 +1240,7 @@ html.animations-off .app::before { animation: none !important; }
   background: var(--surface-2); border-radius: 999px; padding: 0 var(--space-2); line-height: 1.7;
 }
 .conch-topic { font-size: var(--fs-sm); color: var(--text-2); }
-.conch-next { font-size: var(--fs-xl); font-weight: 600; color: var(--text-1); line-height: 1.4; }
+.conch-next { font-size: var(--fs-2xl); font-weight: 600; color: var(--text-1); line-height: 1.35; }
 .conch-rationale { font-size: var(--fs-sm); color: var(--text-2); }
 .conch-footnote { display: flex; flex-wrap: wrap; gap: var(--space-3); font-size: var(--fs-xs); color: var(--text-3); }
 .conch-card-actions { display: flex; justify-content: flex-end; }
@@ -1322,10 +1322,10 @@ html.animations-off .conch-spin { animation: none; }
 /* A2. 回归专注召唤：非阻断入口；L3 附加 2.4s 慢浮沉（WCAG 频率下限） */
 .return-cta {
   display: inline-flex; align-items: center; gap: var(--space-2);
-  height: 40px; padding: 0 var(--space-4); margin-top: var(--space-2);
+  height: 44px; padding: 0 var(--space-5); margin-top: var(--space-2);
   border-radius: 999px; border: 1px solid color-mix(in srgb, var(--success) 45%, transparent);
   background: color-mix(in srgb, var(--success) 10%, transparent);
-  color: var(--success); font-size: var(--fs-md); font-weight: 600;
+  color: var(--success); font-size: var(--fs-lg); font-weight: 600;
 }
 .return-cta:hover { background: color-mix(in srgb, var(--success) 17%, transparent); }
 .return-cta:active { transform: scale(0.97); }
@@ -1393,3 +1393,27 @@ html.animations-off .edge-flash { opacity: 0; }
 }
 html.animations-off .rest-ring-arc { transition: none; }
 html.animations-off .return-cta.call { animation: none; }
+
+/* 海螺备选：可点开工 + 换一换（静默档控件，不抢主推荐层级） */
+.conch-alts { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.conch-alts-label { font-size: var(--fs-xs); color: var(--text-3); }
+.conch-alt-btn {
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  height: 32px; padding: 0 var(--space-3);
+  border: none; border-radius: 999px;
+  background: var(--surface-2); color: var(--text-1);
+  font-size: var(--fs-sm);
+  transition: background var(--dur-hover) var(--ease-standard), color var(--dur-hover) var(--ease-standard);
+}
+.conch-alt-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); color: var(--accent); }
+.conch-alt-btn:active:not(:disabled) { transform: scale(0.97); }
+.conch-alt-btn:disabled { opacity: 0.4; }
+.conch-alt-btn:focus-visible, .conch-alt-shuffle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.conch-alt-shuffle {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 32px; padding: 0 var(--space-2);
+  border: none; border-radius: var(--radius-sm); background: transparent;
+  color: var(--text-3); font-size: var(--fs-xs);
+  transition: color var(--dur-hover) var(--ease-standard), background var(--dur-hover) var(--ease-standard);
+}
+.conch-alt-shuffle:hover { color: var(--text-1); background: var(--surface-2); }
