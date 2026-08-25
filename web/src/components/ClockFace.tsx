@@ -70,6 +70,31 @@ function DurationTicker({ seconds }: { seconds: number }) {
   return <>{formatDurationZh(display)}</>;
 }
 
+/** 结束卡「本端已关闭不再提示」标记：`[sessionId, 本端stop时刻]`。
+ *  本端 stop 时刻与服务端 ended_at 有 RTT 级偏差，水合匹配用 ±10s 容差。 */
+const FINISH_DISMISS_KEY = 'clock-finish-dismissed';
+function readFinishDismissed(): Array<{ id: string; t: number }> {
+  try {
+    return (JSON.parse(localStorage.getItem(FINISH_DISMISS_KEY) ?? '[]') as Array<[string, number]>)
+      .filter((e) => Array.isArray(e) && typeof e[0] === 'string' && typeof e[1] === 'number')
+      .map(([id, t]) => ({ id, t }));
+  } catch {
+    return [];
+  }
+}
+function markFinishDismissed(id: string, t: number): void {
+  try {
+    const arr = (JSON.parse(localStorage.getItem(FINISH_DISMISS_KEY) ?? '[]') as unknown[]).slice(-19);
+    arr.push([id, t]);
+    localStorage.setItem(FINISH_DISMISS_KEY, JSON.stringify(arr));
+  } catch {
+    /* 隐私模式静默 */
+  }
+}
+function isFinishDismissed(id: string, endedAtMs: number): boolean {
+  return readFinishDismissed().some((e) => e.id === id && Math.abs(e.t - endedAtMs) <= 10_000);
+}
+
 export default function ClockFace({ store }: { store: ClockStore }) {
   const { state, subjects, anchor, busy } = store;
   const active = state?.active_session ?? null;
@@ -213,18 +238,51 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         aria-hidden
       />
     ) : null;
-  /** 回归专注召唤：L2 静态、L3 浮沉；非阻断入口（继承 2026-08-21 不做弹窗的决策） */
-  const returnCta = (onClick: () => void) =>
-    reminderLevel >= 2 ? (
-      <button
-        type="button"
-        className={`return-cta${reminderLevel >= 3 ? ' call' : ''}`}
-        onClick={onClick}
-        data-testid="return-cta"
-      >
-        <Play size={14} aria-hidden /> 回到专注
-      </button>
-    ) : null;
+
+  /* 跨端结束卡：任一端结束会话未填结束备注时，其他端在 5 分钟窗口内
+     也呈现同一张结束卡可补备注（确认后 end_note 落库，各端卡片随之消失）。
+     seen 集合保证：本端已展示/已关闭的不重复弹出。 */
+  const remoteStopSeenRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (lastStopped) {
+      remoteStopSeenRef.current.add(lastStopped.sessionId);
+      return;
+    }
+    if (store.state?.active_session) return; // 运行/暂停中不水合旧结束卡，避免污染休息锚点
+    const nowMs = store.state?.server_now_ms ?? Date.now();
+    const cand = store.sessions
+      .filter(
+        (s) =>
+          s.status === 'stopped' &&
+          s.ended_at !== null &&
+          !s.end_note &&
+          nowMs - Date.parse(s.ended_at) <= 5 * 60_000 &&
+          !remoteStopSeenRef.current.has(s.session_id) &&
+          !isFinishDismissed(s.session_id, Date.parse(s.ended_at)),
+      )
+      .sort((a, b) => Date.parse(b.ended_at!) - Date.parse(a.ended_at!))[0];
+    if (!cand) return;
+    remoteStopSeenRef.current.add(cand.session_id);
+    const endedMs = Date.parse(cand.ended_at!);
+    const lastSeg = cand.segments.at(-1);
+    const focusSeconds =
+      lastSeg?.ended_at != null
+        ? Math.max(0, Math.round((Date.parse(lastSeg.ended_at) - Date.parse(lastSeg.started_at)) / 1000))
+        : cand.active_seconds;
+    setLastStopped({
+      sessionId: cand.session_id,
+      subjectId: cand.subject_id,
+      seconds: cand.active_seconds,
+      focusSeconds,
+      focusEndedAtMs: endedMs,
+    });
+    setAwayAnchorOverride({
+      confirmedSeconds: Math.max(0, (nowMs - endedMs) / 1000),
+      running: true,
+      anchorPerfMs: performance.now(),
+      serverNowMs: nowMs,
+    });
+  }, [store.sessions, store.state?.server_now_ms, lastStopped]);
 
   const handleWithdrawLastStopped = async () => {
     if (!lastStopped) return;
@@ -329,6 +387,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       if (lastStopped && !active) {
         // 结束反馈卡：确认关闭（等同「好，继续」）
         if (noteDraft.trim()) void store.setNote(lastStopped.sessionId, noteDraft.trim());
+        markFinishDismissed(lastStopped.sessionId, lastStopped.focusEndedAtMs);
         setLastStopped(null);
         setNoteDraft('');
         return;
@@ -412,6 +471,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
               className={isMisfire ? 'ghost-btn' : 'primary-btn'}
               onClick={() => {
                 if (noteDraft.trim()) void store.setNote(lastStopped.sessionId, noteDraft.trim());
+                markFinishDismissed(lastStopped.sessionId, lastStopped.focusEndedAtMs);
                 setLastStopped(null);
                 setNoteDraft('');
               }}
@@ -460,18 +520,15 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             渐进提醒：L1 琥珀描边 / L2 洗色 / L3 红色氛围（统一氛围表达，无阻断弹窗）。 */}
         <div className="away-slot" aria-live="off">
           {paused && (
-            <>
-              <div
-                key={`al-${levelPulseKey}`}
-                className={awayLineCls}
-                data-testid="away-line"
-              >
-                <RestRing seconds={awaySeconds} recommended={restPlan.recommendedSeconds} />
-                {restLabel} · 已休息 {formatHms(awaySeconds)}
-                <span className="away-note"> · 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
-              </div>
-              {returnCta(() => void store.resume())}
-            </>
+            <div
+              key={`al-${levelPulseKey}`}
+              className={awayLineCls}
+              data-testid="away-line"
+            >
+              <RestRing seconds={awaySeconds} recommended={restPlan.recommendedSeconds} />
+              {restLabel} · 已休息 {formatHms(awaySeconds)}
+              <span className="away-note"> · 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
+            </div>
           )}
         </div>
 
@@ -548,7 +605,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             {restLabel} · 已休息 {formatHms(awaySeconds)}
             <span className="away-note">· 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
           </div>
-          {returnCta(() => void store.start(selectedSubject, null))}
         </div>
       )}
 

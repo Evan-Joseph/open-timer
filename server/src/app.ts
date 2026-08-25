@@ -572,6 +572,7 @@ export function createApp(deps: AppDeps): Hono {
         status: s.status,
         end_reason: s.endReason,
         note: s.endNote ?? s.intentNote ?? null,
+        end_note: s.endNote ?? null,
         segments: clippedSegs,
       };
     });

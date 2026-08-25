@@ -31,6 +31,14 @@ async function enterReadyState(page: Page) {
       if (await cont.count()) await cont.click();
     }
   }
+  // 跨端结束卡水合（2026-08-25 新功能）：多条「未备注刚结束」可能排队水合，循环排空并填备注断污染
+  for (let i = 0; i < 6; i++) {
+    if ((await page.getByTestId('finish-duration').count()) === 0) break;
+    await page.locator('.finish-note').fill('e2e 隔离清理');
+    const contBtn = page.getByRole('button', { name: '好，继续' });
+    if ((await contBtn.count()) > 0) await contBtn.click();
+    await page.waitForTimeout(400);
+  }
   // 测试隔离：重置服务端同步偏好与本地键（跨用例泄漏防护）
   await page.request.put('/api/v1/prefs', {
     data: { theme: 'auto', animations: true, finishSound: false, ambientKind: 'none', timelineScale: 'default', timelineMode: 'track', historyOpen: false, selectedSubject: 'math' },
@@ -50,6 +58,8 @@ async function recordRecentSession(page: Page, subjectName: string, durationMs =
   await page.getByTestId('start-btn').click();
   await page.waitForTimeout(durationMs);
   await page.getByRole('button', { name: '结束并保存' }).click();
+  // 填上结束备注：避免「无备注刚结束会话」水合到后续新页面的结束卡（跨用例污染）
+  await page.locator('.finish-note').fill(`e2e ${subjectName}`);
   await page.getByRole('button', { name: '好，继续' }).click();
   await expect(page.getByTestId('idle-clock')).toBeVisible();
 }

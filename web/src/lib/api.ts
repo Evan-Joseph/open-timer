@@ -22,6 +22,8 @@ export interface SessionApi {
   status: 'running' | 'paused' | 'stopped' | 'voided';
   end_reason: 'manual' | 'subject_switch' | 'void' | null;
   note: string | null;
+  /** 仅结束备注（跨端判断「刚结束待补备注」用） */
+  end_note: string | null;
   segments: SegmentApi[];
 }
 

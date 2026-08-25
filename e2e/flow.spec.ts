@@ -60,6 +60,14 @@ async function doSetup(page: Page) {
       if ((await continueBtn.count()) > 0) await continueBtn.click();
     }
   }
+  // 跨端结束卡水合（2026-08-25 新功能）：多条「未备注刚结束」可能排队水合，循环排空并填备注断污染
+  for (let i = 0; i < 6; i++) {
+    if ((await page.getByTestId('finish-duration').count()) === 0) break;
+    await page.locator('.finish-note').fill('e2e 隔离清理');
+    const contBtn = page.getByRole('button', { name: '好，继续' });
+    if ((await contBtn.count()) > 0) await contBtn.click();
+    await page.waitForTimeout(400);
+  }
   // 测试隔离：偏好是服务端多端同步的，上一个用例的深色/视图模式会泄漏给后续用例。
   // 每个用例开始时重置为默认偏好（theme=auto 等）。
   await page.request.put('/api/v1/prefs', {
@@ -250,8 +258,13 @@ test.describe('多标签页同步', () => {
     await expect(peer.getByText('· 进行中')).toBeVisible({ timeout: 3_000 });
 
     await page.getByRole('button', { name: '结束并保存' }).click();
-    await expect(peer.getByTestId('idle-clock')).toBeVisible({ timeout: 3_000 });
+    // 2026-08-25 新功能：他端对「刚结束未备注」会话水合结束卡（跨端可补备注）
+    await expect(peer.getByTestId('finish-duration')).toBeVisible({ timeout: 3_000 });
     await page.getByTestId('finish-withdraw-btn').click();
+    // 撤回后会话作废；B 端关闭结束卡回空闲
+    const contB = peer.getByRole('button', { name: '好，继续' });
+    if ((await contB.count()) > 0) await contB.click();
+    await expect(peer.getByTestId('idle-clock')).toBeVisible({ timeout: 3_000 });
     await peer.close();
   });
 });
@@ -797,6 +810,33 @@ test.describe('多端偏好同步', () => {
     // 复位：Esc 关闭面板（仅本端生效）
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('history-strip')).toHaveCount(0);
+  });
+
+  test('跨设备：一端结束会话未填备注，另一端结束卡可补填（5 分钟窗口）', async ({ page, browser }) => {
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数学二' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForSelector('.control-btn.pause', { timeout: 10_000 });
+    await page.waitForTimeout(1500);
+    await page.locator('.control-btn.stop').click();
+    await page.getByTestId('finish-duration').waitFor();
+    // 端 A 不填备注直接确认
+    await page.getByRole('button', { name: '好，继续' }).click();
+
+    // 端 B（独立设备）：轮询到「刚结束且无结束备注」→ 呈现结束卡可补填
+    const { ctxB, pageB } = await freshDevice(browser);
+    await pageB.getByTestId('finish-duration').waitFor({ timeout: 30_000 });
+    await pageB.locator('.finish-note').fill('跨端补的备注');
+    await pageB.getByRole('button', { name: '好，继续' }).click();
+    await pageB.waitForTimeout(800);
+
+    // 备注落库：sessions API 可见 end_note
+    const today = (await pageB.locator('.topbar-date').textContent())!.slice(0, 10);
+    const res = await pageB.request.get(`/api/v1/sessions?date=${today}`);
+    const body = await res.json();
+    const noted = body.sessions.find((s: any) => s.end_note === '跨端补的备注');
+    expect(noted).toBeTruthy();
+    await ctxB.close();
   });
 
   test('计时对表：一端开始计时，另一端同步进入运行且秒数对齐（±2s）', async ({ page, context }) => {
