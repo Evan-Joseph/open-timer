@@ -172,10 +172,13 @@ export default function Timeline({ store }: { store: ClockStore }) {
     return () => window.clearInterval(t);
   }, [readServerNowMs]);
 
-  // 跨午夜：若用户停留在"旧的今天"，跟随到新的今天
+  // 跨午夜：若用户停留在"旧的今天"，跟随到新的今天。
+  // 同时清掉引用旧日期会话的 popover/hover，避免跨日后残留陈旧详情。
   useEffect(() => {
     if (prevTodayRef.current !== store.todayDate) {
       setViewDate((prev) => (prev === prevTodayRef.current ? store.todayDate : prev));
+      setPopover(null);
+      setHoverPreview(null);
       prevTodayRef.current = store.todayDate;
     }
   }, [store.todayDate]);

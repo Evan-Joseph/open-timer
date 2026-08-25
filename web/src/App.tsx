@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useClockStore } from './lib/store.js';
 import { useAnimationsEnabled, useSettings } from './lib/settings.js';
 import { PREFS_APPLIED_EVT, pullRemotePrefs, schedulePrefsPush } from './lib/prefs.js';
+import { detectDeviceRole } from './lib/device.js';
 import { ambient } from './lib/ambient.js';
 import AuthGate from './components/AuthGate.js';
 import ClockFace from './components/ClockFace.js';
@@ -73,6 +74,38 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('animations-off', !animationsEnabled);
   }, [animationsEnabled]);
+
+  // 副屏（Pad）自动全屏：浏览器强制要求用户手势，故在首次触摸/按键时一次性进入。
+  // iPadOS Safari 已支持任意元素 requestFullscreen（Safari 26+）；不支持的环境静默跳过。
+  // 成功进入后用户手动退出 → 本页生命周期内不再打扰。
+  const deviceRole = useMemo(() => detectDeviceRole(), []);
+  useEffect(() => {
+    if (deviceRole !== 'secondary') return;
+    let settled = false;
+    const removeListeners = () => {
+      window.removeEventListener('pointerdown', enter);
+      window.removeEventListener('keydown', enter);
+    };
+    const enter = () => {
+      if (settled) return;
+      settled = true;
+      removeListeners();
+      if (!document.fullscreenEnabled || document.fullscreenElement) return;
+      document.documentElement.requestFullscreen?.().catch(() => {
+        /* 环境拒绝（权限/不支持）静默降级为普通窗口 */
+      });
+    };
+    const onFullscreenChange = () => {
+      if (!document.fullscreenElement) settled = true;
+    };
+    window.addEventListener('pointerdown', enter);
+    window.addEventListener('keydown', enter);
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => {
+      removeListeners();
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+    };
+  }, [deviceRole]);
 
   // 标签页标题反映运行状态
   useEffect(() => {
