@@ -53,20 +53,36 @@ export default function App() {
     schedulePrefsPush({ theme: t as 'light' | 'dark' | 'auto' });
   };
 
-  // 远端偏好轮询（15s，仅登录态；偏好是低频变更，15s 足够且省资源；last-write-wins 应用）
+  // 偏好是低频数据：5 分钟后台校验，返回前台/聚焦时立即校验。
+  // 同源标签页的偏好变化由 storage/BroadcastChannel 即时到达，不需要 15 秒烧 Worker 配额。
+  const PREFS_POLL_MS = 5 * 60_000;
   const prefsUpdatedAtRef = useRef(0);
   useEffect(() => {
     if (store.phase !== 'ready') return;
     let cancelled = false;
+    let timer: number | null = null;
     const pull = async () => {
       const next = await pullRemotePrefs(prefsUpdatedAtRef.current);
       if (!cancelled) prefsUpdatedAtRef.current = next;
     };
-    void pull();
-    const t = window.setInterval(() => void pull(), 15_000);
+    const restartPolling = () => {
+      if (timer !== null) {
+        window.clearInterval(timer);
+        timer = null;
+      }
+      if (document.visibilityState !== 'visible') return;
+      void pull();
+      timer = window.setInterval(() => void pull(), PREFS_POLL_MS);
+    };
+    restartPolling();
+    const onVisible = () => restartPolling();
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
     return () => {
       cancelled = true;
-      window.clearInterval(t);
+      if (timer !== null) window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
     };
   }, [store.phase]);
 

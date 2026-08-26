@@ -438,21 +438,14 @@ test.describe('时间轴空态与窗口', () => {
 
     // 模拟：记录在清晨 06–07 点；state 的 server_now_ms 为 20:00。
     // 默认尺度窗口锚定当前时刻（20:00），不含清晨片段 → 不得误报「这一天还没有记录」。
-    const realState = await (await page.request.get('/api/v1/state')).json();
-    await page.route('**/api/v1/state', (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ ...realState, server_now_ms: startMs + 20 * 3_600_000, server_now_iso: at(20), active_session: null }),
-      }),
-    );
-    await page.route('**/api/v1/sessions*', (route) =>
+    const realSnapshot = await (await page.request.get('/api/v1/snapshot')).json();
+    await page.route('**/api/v1/snapshot', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          date: today,
-          timezone: 'Asia/Shanghai',
+          ...realSnapshot,
+          state: { ...realSnapshot.state, server_now_ms: startMs + 20 * 3_600_000, server_now_iso: at(20), active_session: null },
           sessions: [
             {
               session_id: 'TESTSESS',
@@ -463,6 +456,11 @@ test.describe('时间轴空态与窗口', () => {
               status: 'stopped',
               end_reason: 'manual',
               note: null,
+              end_note: null,
+              session_active_seconds: 3600,
+              longest_continuous_seconds: 3600,
+              last_continuous_seconds: 3600,
+              last_continuous_ended_at: at(7),
               segments: [{ started_at: at(6), ended_at: at(7) }],
             },
           ],
@@ -488,12 +486,12 @@ test.describe('时间轴空态与窗口', () => {
   test('真正无记录的一天显示空日文案', async ({ page }) => {
     await page.clock.install({ time: beijingTodayAt(10) });
     await doSetup(page);
-    const today = shanghaiToday(Date.now());
-    await page.route('**/api/v1/sessions*', (route) =>
+    const realSnapshot = await (await page.request.get('/api/v1/snapshot')).json();
+    await page.route('**/api/v1/snapshot', (route) =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ date: today, timezone: 'Asia/Shanghai', sessions: [] }),
+        body: JSON.stringify({ ...realSnapshot, sessions: [] }),
       }),
     );
     await page.reload();
@@ -1181,18 +1179,22 @@ test.describe('离开渐进提醒', () => {
     await page.waitForTimeout(1_000);
     await page.getByRole('button', { name: '暂停计时' }).click();
 
-    const pausedState = await (await page.request.get('/api/v1/state')).json();
+    const pausedSnapshot = await (await page.request.get('/api/v1/snapshot')).json();
+    const pausedState = pausedSnapshot.state;
     const quietNowMs = beijingTodayAt(11, 8).getTime();
-    await page.route('**/api/v1/state', async (route) => {
+    await page.route('**/api/v1/snapshot', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          ...pausedState,
-          server_now_ms: quietNowMs,
-          active_session: {
-            ...pausedState.active_session,
-            paused_at: new Date(quietNowMs - 10 * 60_000).toISOString(),
+          ...pausedSnapshot,
+          state: {
+            ...pausedState,
+            server_now_ms: quietNowMs,
+            active_session: {
+              ...pausedState.active_session,
+              paused_at: new Date(quietNowMs - 10 * 60_000).toISOString(),
+            },
           },
         }),
       });
@@ -1204,7 +1206,7 @@ test.describe('离开渐进提醒', () => {
     await expect(page.locator('.clockface.is-paused')).toHaveAttribute('data-away-level', '0');
     await expect(page.getByRole('dialog', { name: '离开提醒' })).toHaveCount(0);
 
-    await page.unroute('**/api/v1/state');
+    await page.unroute('**/api/v1/snapshot');
     await page.getByRole('button', { name: '继续计时' }).click();
     await page.getByRole('button', { name: '结束并保存' }).click();
     const continueBtn = page.getByRole('button', { name: '好，继续' });
@@ -1220,17 +1222,21 @@ test.describe('离开渐进提醒', () => {
     await page.getByRole('button', { name: '暂停计时' }).click();
     await expect(page.getByTestId('away-line')).toBeVisible();
 
-    const pausedState = await (await page.request.get('/api/v1/state')).json();
+    const pausedSnapshot = await (await page.request.get('/api/v1/snapshot')).json();
+    const pausedState = pausedSnapshot.state;
     let pausedAgeMs = 6 * 60 * 1000;
-    await page.route('**/api/v1/state', async (route) => {
+    await page.route('**/api/v1/snapshot', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          ...pausedState,
-          active_session: {
-            ...pausedState.active_session,
-            paused_at: new Date(pausedState.server_now_ms - pausedAgeMs).toISOString(),
+          ...pausedSnapshot,
+          state: {
+            ...pausedState,
+            active_session: {
+              ...pausedState.active_session,
+              paused_at: new Date(pausedState.server_now_ms - pausedAgeMs).toISOString(),
+            },
           },
         }),
       });
@@ -1248,7 +1254,7 @@ test.describe('离开渐进提醒', () => {
     await expect(page.getByRole('dialog', { name: '离开提醒' })).toHaveCount(0);
 
     // 回到学习：常规控件恢复运行，提醒复位
-    await page.unroute('**/api/v1/state');
+    await page.unroute('**/api/v1/snapshot');
     await page.getByRole('button', { name: '继续计时' }).click();
     await expect(page.getByText('· 进行中')).toBeVisible();
     await expect(page.locator('.clockface.is-running')).toHaveAttribute('data-away-level', '0');

@@ -90,7 +90,7 @@ describe('API 集成', () => {
     expect(body.version).toBe('test');
   });
 
-  it('公开只读：subjects / state / sessions / daily-summary 无凭据可读', async () => {
+  it('公开只读：subjects / state / snapshot / sessions / daily-summary 无凭据可读', async () => {
     // subjects：无需任何凭据（公开只读 API，供其他 Agent 读取）
     const noauth = await ctx.app.request('/api/v1/subjects');
     expect(noauth.status).toBe(200);
@@ -110,6 +110,15 @@ describe('API 集成', () => {
     expect(st.status).toBe(200);
     expect(st.headers.get('cache-control')).toBe('no-store');
     expect((await st.json()).active_session).toBeNull();
+
+    // snapshot：SPA 合并轮询端点，一次请求返回同次 state + 今天 sessions
+    const snapshot = await ctx.app.request('/api/v1/snapshot');
+    expect(snapshot.status).toBe(200);
+    expect(snapshot.headers.get('cache-control')).toBe('no-store');
+    const snapshotBody = await snapshot.json();
+    expect(snapshotBody.state.active_session).toBeNull();
+    expect(snapshotBody.state.today_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(snapshotBody.sessions).toEqual([]);
 
     // sessions?date：无凭据可读
     const sess = await ctx.app.request('/api/v1/sessions?date=2026-01-01');

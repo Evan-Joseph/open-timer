@@ -1,7 +1,7 @@
 /** 应用状态：鉴权、服务端状态同步、写动作。所有秒数以服务端为准。 */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { SubjectApi, StateApi, SessionApi, StopSessionApi } from './api.js';
+import type { SubjectApi, StateApi, SessionApi, SnapshotApi, StopSessionApi } from './api.js';
 import { apiGet, apiPost, apiPatch } from './api.js';
 import type { SyncAnchor } from './clock.js';
 import { shanghaiTodayLocal } from './clock.js';
@@ -42,8 +42,10 @@ export interface ClockStore {
   adjustStart: (sessionId: string, startedAt: string) => Promise<boolean>;
 }
 
-const POLL_MS_IDLE = 30_000; // 空闲慢轮询（30s：空闲显示由服务端锚定墙钟，间隔不敏感；省一半请求）
-const POLL_MS_ACTIVE = 3_000; // 运行中快轮询（3s：状态变更传播上限，对表足够；勿再压小，免费档 100k req/天 受限）
+// UI 显示用 performance.now 单调外推，轮询仅负责跨端状态校准/事实同步。
+// 75% Workers 限额告警后收敛：活动 10s、空闲 120s；可见/聚焦仍即时刷新。
+const POLL_MS_IDLE = 120_000;
+const POLL_MS_ACTIVE = 10_000;
 const ERROR_TTL_MS = 6_000;
 const TOAST_TTL_MS = 2_600;
 const SYNC_PULSE_KEY = 'clock-sync-pulse';
@@ -174,17 +176,11 @@ export function useClockStore(): ClockStore {
     const sequence = ++refreshSeqRef.current;
     sendPerfRef.current = performance.now(); // RTT 半程锚点：记录发出时刻
     try {
-      // sessions 的日期必须跟随服务端权威的 today_date（而非客户端墙钟）。
-      // 首次加载无 state 时用客户端兜底；之后一律以服务端日期为准，跨北京时间午夜
-      // 时不会因客户端墙钟/时区偏差拉错当天会话（契约：客户端不自行换算日期）。
-      const today = stateRef.current?.today_date ?? shanghaiTodayLocal();
-      const [s] = await Promise.all([
-        apiGet<StateApi>('/api/v1/state'),
-        apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${today}`)
-          .then((d) => applySessions(d.sessions, epoch, sequence))
-          .catch(() => {}),
-      ]);
-      applyState(s, epoch);
+      // 一次 Worker 请求：state 与当天 sessions 共享服务端同次 D1 快照，避免原先每轮两次请求、
+      // 日期临界点 state/sessions 跨日不一致，以及重复的 D1 session/segment 查询。
+      const snapshot = await apiGet<SnapshotApi>('/api/v1/snapshot');
+      applySessions(snapshot.sessions, epoch, sequence);
+      applyState(snapshot.state, epoch);
       if (!writeLockedRef.current) setError(null);
     } catch {
       if (epoch === syncEpochRef.current) flashError('暂时无法同步，正在重试');
@@ -224,8 +220,7 @@ export function useClockStore(): ClockStore {
         if (!me.setup_done) setPhase('setup');
         else if (!me.authenticated) setPhase('readonly');
         else setPhase('ready');
-        const subs = await apiGet<SubjectApi[]>('/api/v1/subjects').catch(() => [] as SubjectApi[]);
-        setSubjects(subs);
+        // subjects 由 phase 变化后的专用 effect 拉一次，避免首屏重复 Worker 请求。
       } catch {
         setPhase('readonly');
       }
@@ -236,28 +231,35 @@ export function useClockStore(): ClockStore {
   const isActive = state?.active_session != null;
   useEffect(() => {
     if (phase !== 'ready' && phase !== 'readonly') return;
-    refresh();
     const interval = isActive ? POLL_MS_ACTIVE : POLL_MS_IDLE;
-    pollRef.current = window.setInterval(refresh, interval);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') refresh();
+    const restartPolling = () => {
+      if (pollRef.current) {
+        window.clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+      // 后台标签不需要网络校准；恢复可见时立即刷新且重新安排。
+      if (document.visibilityState !== 'visible') return;
+      void refresh();
+      pollRef.current = window.setInterval(() => void refresh(), interval);
     };
+    restartPolling();
+    const onVisibility = () => restartPolling();
     // bfcache（往返缓存）恢复只触发 pageshow，不走 focus/visibilitychange；
     // 冻结（Page Lifecycle freeze/resume）恢复也不触发二者，需单独监听。
     // 冻结期间 performance.now() 继续走，恢复后 compute() 自动算出含冻结时长的正确 elapsed；
     // 这里补 refresh 只是消除「解冻后到下一次轮询前」的显示滞后。
     const onPageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) refresh();
+      if (event.persisted) restartPolling();
     };
-    const onResume = () => refresh();
-    document.addEventListener('visibilitychange', onVisible);
-    window.addEventListener('focus', onVisible);
+    const onResume = () => restartPolling();
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', onVisibility);
     window.addEventListener('pageshow', onPageShow);
     document.addEventListener('resume', onResume);
     return () => {
       if (pollRef.current) window.clearInterval(pollRef.current);
-      document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', onVisibility);
       window.removeEventListener('pageshow', onPageShow);
       document.removeEventListener('resume', onResume);
     };

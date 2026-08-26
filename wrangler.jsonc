@@ -6,7 +6,10 @@
   "assets": {
     "directory": "./web/dist",
     "binding": "ASSETS",
-    "run_worker_first": true
+    // API 走 Worker；静态 HTML/JS/CSS/字体 asset-first 直接由边缘服务，避免每个资源消耗 Workers 请求。
+    // SPA fallback 与静态安全头由 not_found_handling + web/public/_headers 承担。
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
   },
   "d1_databases": [
     {

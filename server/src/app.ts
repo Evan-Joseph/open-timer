@@ -307,15 +307,60 @@ export function createApp(deps: AppDeps): Hono {
     ),
   );
 
-  /* ---------- state（前端恢复用；公开只读） ---------- */
+  /** 将底层 session/segment 事实格式化为前端时间轴条目（可被 /sessions 与 /snapshot 复用）。 */
+  function sessionEntriesForDay(
+    sessions: import('@clock/shared').SessionRow[],
+    segMap: Map<string, import('@clock/shared').ActiveSegmentRow[]>,
+    startMs: number,
+    endMs: number,
+    nowMs: number,
+  ) {
+    return sessions.map((s) => {
+      const segs = segMap.get(s.id) ?? [];
+      const metrics = sessionFocusMetrics(segs, nowMs);
+      let secs = 0;
+      const clippedSegs: Array<{ started_at: string; ended_at: string | null }> = [];
+      for (const seg of segs) {
+        // 误触过滤：短于阈值的已关闭片段不计入、不下发（开放段不受影响）
+        if (!isCountedSegment(seg, config.minSegmentMs)) continue;
+        const rawEnd = seg.endedAtMs ?? nowMs;
+        const cs = Math.max(seg.startedAtMs, startMs);
+        const ce = Math.min(rawEnd, endMs);
+        if (ce > cs) {
+          secs += Math.floor((ce - cs) / 1000);
+          clippedSegs.push({
+            started_at: toIso(cs),
+            ended_at: seg.endedAtMs === null ? null : toIso(ce),
+          });
+        }
+      }
+      return {
+        session_id: s.id,
+        subject_id: s.subjectId,
+        started_at: toIso(s.startedAtMs),
+        ended_at: s.endedAtMs !== null ? toIso(s.endedAtMs) : null,
+        active_seconds: secs,
+        status: s.status,
+        end_reason: s.endReason,
+        note: s.endNote ?? s.intentNote ?? null,
+        end_note: s.endNote ?? null,
+        /** 会话全量秒数（结束反馈跨端一致性使用），不按当前 date 窗口裁剪。 */
+        session_active_seconds: metrics.sessionActiveSeconds,
+        longest_continuous_seconds: metrics.longestContinuousSeconds,
+        last_continuous_seconds: metrics.lastContinuousSeconds,
+        last_continuous_ended_at: metrics.lastContinuousEndedAtMs === null ? null : toIso(metrics.lastContinuousEndedAtMs),
+        segments: clippedSegs,
+      };
+    });
+  }
 
-  app.get('/api/v1/state', publicCors, async (c) => {
-    const nowMs = now();
+  /** 前端刷新原子快照：state 与当天 sessions 共用一次 D1 读取，替代两次 Worker 请求。 */
+  async function snapshotPayload(nowMs: number) {
     const [revision, conchRevision] = await Promise.all([storage.maxEventId(), storage.getConchRevision()]);
     const active = await storage.getActiveSession('owner');
     const today = shanghaiToday(nowMs);
-    const { startMs } = shanghaiDayRangeUtc(today);
-    const sessions = await storage.sessionsOverlapping(startMs, nowMs + 1);
+    const { startMs, endMs } = shanghaiDayRangeUtc(today);
+    const sessions = await storage.sessionsOverlapping(startMs, endMs);
     const segMap = await storage.segmentsForSessions(sessions.map((s) => s.id));
     const summary = buildDailySummary({
       date: today,
@@ -339,7 +384,7 @@ export function createApp(deps: AppDeps): Hono {
       const open = active.segments.find((s) => s.endedAtMs === null);
       openSegmentStart = open ? toIso(open.startedAtMs) : null;
     }
-    return c.json({
+    const state = {
       server_now_ms: nowMs,
       server_now_iso: toIso(nowMs),
       active_session: summary.running_session
@@ -355,7 +400,22 @@ export function createApp(deps: AppDeps): Hono {
       revision,
       /** 海螺输入的已完成时间线版本：进行中操作不推进，供长期缓存命中。 */
       conch_revision: conchRevision,
-    });
+    };
+    return { state, sessions: sessionEntriesForDay(sessions, segMap, startMs, endMs, nowMs) };
+  }
+
+  /* ---------- state（前端恢复用；公开只读） ---------- */
+
+  app.get('/api/v1/state', publicCors, async (c) => {
+    return c.json((await snapshotPayload(now())).state);
+  });
+
+  /**
+   * 前端专用合并快照：单个 Worker 请求返回 state + 当天 sessions。
+   * 保留 /state、/sessions 的公开契约供外部 Agent/自动化使用；SPA 内部只调此端点。
+   */
+  app.get('/api/v1/snapshot', publicCors, async (c) => {
+    return c.json(await snapshotPayload(now()));
   });
 
   /* ---------- 写路径 ---------- */
@@ -607,44 +667,7 @@ export function createApp(deps: AppDeps): Hono {
     const nowMs = now();
     const sessions = await storage.sessionsOverlapping(startMs, endMs);
     const segMap = await storage.segmentsForSessions(sessions.map((s) => s.id));
-    const entries = sessions.map((s) => {
-      const segs = segMap.get(s.id) ?? [];
-      const metrics = sessionFocusMetrics(segs, nowMs);
-      let secs = 0;
-      const clippedSegs: Array<{ started_at: string; ended_at: string | null }> = [];
-      for (const seg of segs) {
-        // 误触过滤：短于阈值的已关闭片段不计入、不下发（开放段不受影响）
-        if (!isCountedSegment(seg, config.minSegmentMs)) continue;
-        const rawEnd = seg.endedAtMs ?? nowMs;
-        const cs = Math.max(seg.startedAtMs, startMs);
-        const ce = Math.min(rawEnd, endMs);
-        if (ce > cs) {
-          secs += Math.floor((ce - cs) / 1000);
-          clippedSegs.push({
-            started_at: toIso(cs),
-            ended_at: seg.endedAtMs === null ? null : toIso(ce),
-          });
-        }
-      }
-      return {
-        session_id: s.id,
-        subject_id: s.subjectId,
-        started_at: toIso(s.startedAtMs),
-        ended_at: s.endedAtMs !== null ? toIso(s.endedAtMs) : null,
-        active_seconds: secs,
-        status: s.status,
-        end_reason: s.endReason,
-        note: s.endNote ?? s.intentNote ?? null,
-        end_note: s.endNote ?? null,
-        /** 当前 date 窗口内的秒数（时间轴/日报使用）。 */
-        session_active_seconds: metrics.sessionActiveSeconds,
-        longest_continuous_seconds: metrics.longestContinuousSeconds,
-        last_continuous_seconds: metrics.lastContinuousSeconds,
-        last_continuous_ended_at: metrics.lastContinuousEndedAtMs === null ? null : toIso(metrics.lastContinuousEndedAtMs),
-        segments: clippedSegs,
-      };
-    });
-    return c.json({ date, timezone: TIMEZONE, sessions: entries });
+    return c.json({ date, timezone: TIMEZONE, sessions: sessionEntriesForDay(sessions, segMap, startMs, endMs, nowMs) });
   });
 
   /* ---------- daily-summary（公开只读，带 ETag） ---------- */

@@ -298,12 +298,26 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     setAwayAnchorOverride(null);
   }, [lastStopped, store.sessions]);
 
-  // 空闲态的全局轮询是 30s，但「等待补备注」是短暂协作状态。
-  // 仅在结束卡展示期间每 2s 对表，保证跨设备补完后及时收回，不把常态资源预算拉高。
+  // 空闲态的全局轮询是 120s，但「等待补备注」是短暂协作状态。
+  // 分段退避：前 30s 每 2s（跨端刚填完的及时收回），5min 内每 10s，之后每 30s；
+  // 避免忘记关闭结束卡时持续烧 Workers 请求。
   useEffect(() => {
     if (!lastStopped) return;
-    const timer = window.setInterval(() => void store.refresh(), 2_000);
-    return () => window.clearInterval(timer);
+    let cancelled = false;
+    let timer: number | null = null;
+    const openedAt = performance.now();
+    const tick = async () => {
+      await store.refresh();
+      if (cancelled) return;
+      const elapsed = performance.now() - openedAt;
+      const delay = elapsed < 30_000 ? 2_000 : elapsed < 5 * 60_000 ? 10_000 : 30_000;
+      timer = window.setTimeout(() => void tick(), delay);
+    };
+    timer = window.setTimeout(() => void tick(), 2_000);
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
   }, [lastStopped, store.refresh]);
 
   const handleWithdrawLastStopped = async () => {

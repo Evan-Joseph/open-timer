@@ -71,6 +71,12 @@ export interface StateApi {
   conch_revision: number;
 }
 
+/** SPA 刷新专用原子快照：服务端一次读取同时给状态和当天时间轴，减少 Worker 请求。 */
+export interface SnapshotApi {
+  state: StateApi;
+  sessions: SessionApi[];
+}
+
 export interface DailySummaryApi {
   date: string;
   total_active_seconds: number;
