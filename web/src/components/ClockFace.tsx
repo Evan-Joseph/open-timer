@@ -116,6 +116,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     sessionId: string;
     subjectId: string;
     seconds: number;
+    longestContinuousSeconds: number;
     focusSeconds: number;
     focusEndedAtMs: number;
   } | null>(null);
@@ -128,12 +129,15 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       .sort((a, b) => Date.parse(b.ended_at!) - Date.parse(a.ended_at!))[0] ?? null;
   }, [store.sessions]);
   const recentFocusSeconds = useMemo(() => {
+    if (typeof recentStopped?.last_continuous_seconds === 'number') {
+      return recentStopped.last_continuous_seconds;
+    }
     const segment = recentStopped?.segments.at(-1);
     if (!segment?.ended_at) return 0;
     return Math.max(0, Math.floor((Date.parse(segment.ended_at) - Date.parse(segment.started_at)) / 1000));
   }, [recentStopped]);
   const recentFocusEndMs = useMemo(() => {
-    const segmentEnd = recentStopped?.segments.at(-1)?.ended_at;
+    const segmentEnd = recentStopped?.last_continuous_ended_at ?? recentStopped?.segments.at(-1)?.ended_at;
     const endedMs = Date.parse(segmentEnd ?? recentStopped?.ended_at ?? '');
     return Number.isFinite(endedMs) ? endedMs : null;
   }, [recentStopped]);
@@ -264,17 +268,14 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       .sort((a, b) => Date.parse(b.ended_at!) - Date.parse(a.ended_at!))[0];
     if (!cand) return;
     remoteStopSeenRef.current.add(cand.session_id);
-    const endedMs = Date.parse(cand.ended_at!);
-    const lastSeg = cand.segments.at(-1);
-    const focusSeconds =
-      lastSeg?.ended_at != null
-        ? Math.max(0, Math.round((Date.parse(lastSeg.ended_at) - Date.parse(lastSeg.started_at)) / 1000))
-        : cand.active_seconds;
+    const endedMs = Date.parse(cand.last_continuous_ended_at ?? cand.ended_at!);
     setLastStopped({
       sessionId: cand.session_id,
       subjectId: cand.subject_id,
-      seconds: cand.active_seconds,
-      focusSeconds,
+      // active_seconds 是按“当前北京日”裁剪的时间轴秒数；结束卡须用会话全量指标。
+      seconds: cand.session_active_seconds,
+      longestContinuousSeconds: cand.longest_continuous_seconds,
+      focusSeconds: cand.last_continuous_seconds,
       focusEndedAtMs: endedMs,
     });
     setAwayAnchorOverride({
@@ -373,6 +374,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       sessionId: active.session_id,
       subjectId: active.subject_id,
       seconds,
+      longestContinuousSeconds: segmentSecs,
       focusSeconds: segmentSecs,
       focusEndedAtMs,
     } : null;
@@ -391,7 +393,21 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         serverNowMs: readServerNowMs(),
       });
     }
-    await store.stop(null);
+    const metrics = await store.stop(null);
+    if (snapshot && metrics) {
+      setLastStopped((current) => {
+        if (!current || current.sessionId !== snapshot.sessionId) return current;
+        const serverEndedAtMs = Date.parse(metrics.last_continuous_ended_at ?? metrics.ended_at ?? '');
+        return {
+          ...current,
+          seconds: metrics.session_active_seconds,
+          longestContinuousSeconds: metrics.longest_continuous_seconds,
+          focusSeconds: metrics.last_continuous_seconds,
+          // 从暂停结束时仍沿用已开始的休息锚点；运行态则以服务端最后连续段为准。
+          focusEndedAtMs: paused || !Number.isFinite(serverEndedAtMs) ? current.focusEndedAtMs : serverEndedAtMs,
+        };
+      });
+    }
   };
 
   /* ---------- 空格键主控（FocusTide/Pomotroid 共识：沉浸应用第一快捷键） ----------
@@ -436,14 +452,31 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             <span className="pill-dot" aria-hidden />
             {subj?.display_name ?? lastStopped.subjectId}
           </div>
-          <div className="finish-big" data-testid="finish-duration">
-            <DurationTicker seconds={lastStopped.seconds} />
-          </div>
-          <p className="finish-line">
-            {isMisfire
-              ? `这段只有 ${lastStopped.seconds} 秒，是误触吗？`
-              : `已记录本次投入。今天累计 ${formatDurationZh(state?.today_active_seconds ?? lastStopped.seconds)}。`}
-          </p>
+          {isMisfire ? (
+            <>
+              <div className="finish-big" data-testid="finish-duration">
+                <DurationTicker seconds={lastStopped.seconds} />
+              </div>
+              <p className="finish-line">这段只有 {lastStopped.seconds} 秒，是误触吗？</p>
+            </>
+          ) : (
+            <>
+              <p className="finish-line">已记录本次投入。</p>
+              <div className="finish-metrics" aria-label="本次专注指标">
+                <div>
+                  <span>本次总专注</span>
+                  <strong className="finish-big" data-testid="finish-duration">
+                    <DurationTicker seconds={lastStopped.seconds} />
+                  </strong>
+                </div>
+                <div>
+                  <span>最长连续专注</span>
+                  <strong data-testid="finish-longest-continuous">{formatDurationZh(lastStopped.longestContinuousSeconds)}</strong>
+                </div>
+              </div>
+              <p className="finish-context">今天累计 {formatDurationZh(state?.today_active_seconds ?? lastStopped.seconds)}</p>
+            </>
+          )}
           {/* 离开时长：科目结束后同样进入"已离开"渐进提醒（L1 琥珀 / L2 洗色 / L3 红色氛围） */}
           <div className="away-slot" aria-live="off">
             <div

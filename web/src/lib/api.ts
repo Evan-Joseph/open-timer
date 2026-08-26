@@ -24,7 +24,25 @@ export interface SessionApi {
   note: string | null;
   /** 仅结束备注（跨端判断「刚结束待补备注」用） */
   end_note: string | null;
+  /** 会话全量净专注秒数，不按当前 date 查询窗口裁剪（结束反馈跨端一致性使用）。 */
+  session_active_seconds: number;
+  /** 所有计入片段中最长的一段，训练长时专注时的真实连续时长。 */
+  longest_continuous_seconds: number;
+  /** 最后一个计入片段的时长，休息预算使用。 */
+  last_continuous_seconds: number;
+  /** 最后一个计入片段结束时刻，跨端休息锚点使用。 */
+  last_continuous_ended_at: string | null;
   segments: SegmentApi[];
+}
+
+/** stop 写路径返回的会话全量指标；发起端结束反馈以服务端事实校正。 */
+export interface StopSessionApi {
+  session_id: string;
+  ended_at: string | null;
+  session_active_seconds: number;
+  longest_continuous_seconds: number;
+  last_continuous_seconds: number;
+  last_continuous_ended_at: string | null;
 }
 
 export interface ActiveSessionApi {

@@ -126,6 +126,39 @@ export function createApp(deps: AppDeps): Hono {
     }
   }
 
+  /** 一个会话的全量专注指标（不按查询日期裁剪），供结束反馈跨端保持同一事实。 */
+  function sessionFocusMetrics(
+    segments: import('@clock/shared').ActiveSegmentRow[],
+    atMs: number,
+  ): {
+    sessionActiveSeconds: number;
+    longestContinuousSeconds: number;
+    lastContinuousSeconds: number;
+    lastContinuousEndedAtMs: number | null;
+  } {
+    let totalMs = 0;
+    let longestMs = 0;
+    let lastMs = 0;
+    let lastEndedAtMs: number | null = null;
+    for (const segment of [...segments].sort((a, b) => a.startedAtMs - b.startedAtMs)) {
+      if (!isCountedSegment(segment, config.minSegmentMs)) continue;
+      const endedAtMs = segment.endedAtMs ?? atMs;
+      const durationMs = Math.max(0, endedAtMs - segment.startedAtMs);
+      totalMs += durationMs;
+      longestMs = Math.max(longestMs, durationMs);
+      if (lastEndedAtMs === null || endedAtMs >= lastEndedAtMs) {
+        lastMs = durationMs;
+        lastEndedAtMs = endedAtMs;
+      }
+    }
+    return {
+      sessionActiveSeconds: Math.floor(totalMs / 1000),
+      longestContinuousSeconds: Math.floor(longestMs / 1000),
+      lastContinuousSeconds: Math.floor(lastMs / 1000),
+      lastContinuousEndedAtMs: lastEndedAtMs,
+    };
+  }
+
   /* ---------- 幂等辅助 ----------
    * 契约（与 docs/API.md、openapi.yaml 对齐）：
    * - 所有会话写操作（start/pause/resume/stop/switch/void/note/retime/adjust-start）
@@ -399,7 +432,7 @@ export function createApp(deps: AppDeps): Hono {
       const nowMs = now();
       await storage.resumeSession(id, nowMs, `resume:${c.req.header('idempotency-key')}`);
       // 重开已结束会话会将其从海螺已完成时间线移除；暂停→继续则不影响。
-      if (session.status === 'stopped') await storage.bumpConchRevision();
+      if (session.status === 'stopped') await bumpConchRevisionIfCounted(id);
       await storage.appendAudit(
         'owner',
         'session_resume',
@@ -430,7 +463,18 @@ export function createApp(deps: AppDeps): Hono {
       if (body.data.end_note) await storage.setSessionNote(id, body.data.end_note, nowMs);
       await bumpConchRevisionIfCounted(id);
       await storage.appendAudit('owner', 'session_stop', id, null, nowMs);
-      return { status: 200, body: sessionResponse((await storage.getSession(id))!) };
+      const stopped = (await storage.getSession(id))!;
+      const metrics = sessionFocusMetrics(await storage.getSegments(id), nowMs);
+      return {
+        status: 200,
+        body: {
+          ...sessionResponse(stopped),
+          session_active_seconds: metrics.sessionActiveSeconds,
+          longest_continuous_seconds: metrics.longestContinuousSeconds,
+          last_continuous_seconds: metrics.lastContinuousSeconds,
+          last_continuous_ended_at: metrics.lastContinuousEndedAtMs === null ? null : toIso(metrics.lastContinuousEndedAtMs),
+        },
+      };
     }),
   );
 
@@ -483,7 +527,7 @@ export function createApp(deps: AppDeps): Hono {
       if (session.status !== 'stopped') return { status: 409, body: { error: 'ILLEGAL_TRANSITION', status: session.status } };
       const nowMs = now();
       await storage.voidSession(id, nowMs, body.data.reason ?? null, `void:${c.req.header('idempotency-key')}`);
-      await storage.bumpConchRevision();
+      await bumpConchRevisionIfCounted(id);
       await storage.appendAudit('owner', 'session_void', id, JSON.stringify({ reason: body.data.reason ?? null }), nowMs);
       return { status: 200, body: sessionResponse((await storage.getSession(id))!) };
     }),
@@ -502,7 +546,7 @@ export function createApp(deps: AppDeps): Hono {
       if (!session) return { status: 404, body: { error: 'SESSION_NOT_FOUND' } };
       if (session.status !== 'stopped') return { status: 409, body: { error: 'ILLEGAL_TRANSITION' } };
       await storage.setSessionNote(id, body.data.note, now());
-      await storage.bumpConchRevision();
+      await bumpConchRevisionIfCounted(id);
       await storage.appendAudit('owner', 'session_note', id, null, now());
       return { status: 200, body: sessionResponse((await storage.getSession(id))!) };
     }),
@@ -565,6 +609,7 @@ export function createApp(deps: AppDeps): Hono {
     const segMap = await storage.segmentsForSessions(sessions.map((s) => s.id));
     const entries = sessions.map((s) => {
       const segs = segMap.get(s.id) ?? [];
+      const metrics = sessionFocusMetrics(segs, nowMs);
       let secs = 0;
       const clippedSegs: Array<{ started_at: string; ended_at: string | null }> = [];
       for (const seg of segs) {
@@ -591,6 +636,11 @@ export function createApp(deps: AppDeps): Hono {
         end_reason: s.endReason,
         note: s.endNote ?? s.intentNote ?? null,
         end_note: s.endNote ?? null,
+        /** 当前 date 窗口内的秒数（时间轴/日报使用）。 */
+        session_active_seconds: metrics.sessionActiveSeconds,
+        longest_continuous_seconds: metrics.longestContinuousSeconds,
+        last_continuous_seconds: metrics.lastContinuousSeconds,
+        last_continuous_ended_at: metrics.lastContinuousEndedAtMs === null ? null : toIso(metrics.lastContinuousEndedAtMs),
         segments: clippedSegs,
       };
     });

@@ -358,6 +358,8 @@ export default function Timeline({ store }: { store: ClockStore }) {
       label: `${String(Math.floor(minute / 60) % 24).padStart(2, '0')}:${String(Math.round(minute) % 60).padStart(2, '0')}`,
       leftPercent: minuteToPercent(minute),
       major: minute % 60 === 0,
+      // 左边缘的具体时间会与轨道起点/静默区边界文字争夺同一块空间，保留刻度线但不重复标字。
+      showLabel: minute !== visibleRange.startMinute,
     }));
   }, [minuteToPercent, scale, visibleRange]);
 
@@ -772,7 +774,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
           ))}
           {ticks.map((t) => (
             <div key={t.minute} className={`tick ${t.major ? 'major' : ''}`} style={{ left: `${t.leftPercent}%` }}>
-              <span className="tick-label">{t.label}</span>
+              {t.showLabel && <span className="tick-label">{t.label}</span>}
             </div>
           ))}
           {visibleSegs.map((seg, index) => {

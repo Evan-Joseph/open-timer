@@ -1,7 +1,7 @@
 /** 应用状态：鉴权、服务端状态同步、写动作。所有秒数以服务端为准。 */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { SubjectApi, StateApi, SessionApi } from './api.js';
+import type { SubjectApi, StateApi, SessionApi, StopSessionApi } from './api.js';
 import { apiGet, apiPost, apiPatch } from './api.js';
 import type { SyncAnchor } from './clock.js';
 import { shanghaiTodayLocal } from './clock.js';
@@ -32,7 +32,7 @@ export interface ClockStore {
   start: (subjectId: string, intentNote: string | null) => Promise<string | null>;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
-  stop: (endNote: string | null) => Promise<void>;
+  stop: (endNote: string | null) => Promise<StopSessionApi | null>;
   switchSubject: (subjectId: string) => Promise<void>;
   /** 撤回（作废）一个已停止的会话；服务端保留审计，所有汇总自动排除 */
   withdraw: (sessionId: string, reason?: string | null) => Promise<boolean>;
@@ -101,11 +101,13 @@ export function useClockStore(): ClockStore {
     // 不能因时间相等而吞掉它，否则刚完成一段后海螺仍会拿旧缓存。
     if (stateRef.current) {
       const current = stateRef.current;
+      const nextConchRevision = s.conch_revision ?? 0;
+      const currentConchRevision = current.conch_revision ?? 0;
       if (s.server_now_ms < current.server_now_ms) return;
       if (
         s.server_now_ms === current.server_now_ms &&
         s.revision <= current.revision &&
-        s.conch_revision <= current.conch_revision
+        nextConchRevision <= currentConchRevision
       ) {
         return;
       }
@@ -428,23 +430,24 @@ export function useClockStore(): ClockStore {
 
   const stop = useCallback(
     async (endNote: string | null) => {
-      if (!activeId) return;
+      if (!activeId) return null;
       beginWrite();
       optimisticSetStatus(null); // 立即回到空闲/结束反馈
       setBusy(true);
-      const res = await apiPost(`/api/v1/sessions/${activeId}/stop`, { end_note: endNote || null });
+      const res = await apiPost<StopSessionApi>(`/api/v1/sessions/${activeId}/stop`, { end_note: endNote || null });
       setBusy(false);
       await releaseWriteLock();
       if (!res.ok) {
         // 失败回滚：恢复运行态（乐观清空过头了，以服务端为准）
         flashError('结束失败，请重试');
         refresh();
-        return;
+        return null;
       }
       notifyPeers();
       // stop 会推进 conch_revision；等待本次权威快照落地，确保用户刚结束又打开海螺时
       // 不会拿到旧语义缓存（开始/暂停/继续则仍保持异步刷新，避免不必要阻塞）。
       await refresh();
+      return res.data;
     },
     [activeId, beginWrite, refresh, optimisticSetStatus, flashError, notifyPeers],
   );

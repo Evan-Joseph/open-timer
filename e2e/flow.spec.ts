@@ -85,6 +85,13 @@ async function doSetup(page: Page) {
 }
 
 test.describe('核心流程', () => {
+  test('时间轴左端保留刻度线但不重复显示起始具体时间', async ({ page }) => {
+    await doSetup(page);
+    const firstTick = page.locator('.timeline-track .tick').first();
+    await expect(firstTick).toBeVisible();
+    await expect(firstTick.locator('.tick-label')).toHaveCount(0);
+  });
+
   test('setup → start → 独立时间差校验 → pause → resume → stop → 结束反馈', async ({ page }) => {
     await doSetup(page);
 
@@ -845,6 +852,35 @@ test.describe('多端偏好同步', () => {
     await ctxB.close();
   });
 
+  test('跨设备结束反馈：两端展示同一会话总专注与最长连续专注', async ({ page, browser }) => {
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数学二' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForSelector('.control-btn.pause', { timeout: 10_000 });
+    await page.waitForTimeout(6_000);
+    await page.getByRole('button', { name: '暂停计时' }).click();
+    await page.waitForTimeout(250);
+    await page.getByRole('button', { name: '继续计时' }).click();
+    await page.waitForTimeout(6_000);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByTestId('finish-duration').waitFor();
+    await page.waitForTimeout(900); // 等服务端全量指标与数字滚动落定
+
+    const localMetrics = {
+      total: await page.getByTestId('finish-duration').textContent(),
+      longest: await page.getByTestId('finish-longest-continuous').textContent(),
+    };
+    await page.getByRole('button', { name: '好，继续' }).click();
+
+    const { ctxB, pageB } = await freshDevice(browser);
+    await pageB.getByTestId('finish-duration').waitFor({ timeout: 30_000 });
+    await expect(pageB.getByTestId('finish-duration')).toHaveText(localMetrics.total ?? '');
+    await expect(pageB.getByTestId('finish-longest-continuous')).toHaveText(localMetrics.longest ?? '');
+    await pageB.locator('.finish-note').fill('跨端指标确认');
+    await pageB.getByRole('button', { name: '好，继续' }).click();
+    await ctxB.close();
+  });
+
   test('神奇海螺缓存只随已完成时间线变化：开始/暂停/继续不重新问，完成后才重新问', async ({ page }) => {
     await doSetup(page);
     await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v3'));
@@ -1041,7 +1077,8 @@ test.describe('时间轴尺度与流水账视图', () => {
 
     await scales.getByRole('radio', { name: '全天', exact: true }).click();
     await expect(track).toHaveAttribute('data-scale', 'full-day');
-    await expect(track.locator('.tick-label').first()).toHaveText('08:00');
+    // 左端只保留刻度线：08:00 与轨道/静默区边界重合时不重复标字，避免可读性冲突。
+    await expect(track.locator('.tick').first().locator('.tick-label')).toHaveCount(0);
     await expect(track.locator('.tick-label').last()).toHaveText('22:30');
 
     await expect(scales.getByRole('radio', { name: '有效全天' })).toHaveCount(0);

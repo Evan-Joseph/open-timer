@@ -188,6 +188,11 @@ describe('API 集成', () => {
     const stopped = await stopRes.json();
     expect(stopped.status).toBe('stopped');
     expect(stopped.end_note).toBe('今天状态不错');
+    expect(stopped.session_active_seconds).toBeGreaterThanOrEqual(0);
+    expect(stopped.longest_continuous_seconds).toBeGreaterThanOrEqual(0);
+    expect(stopped.longest_continuous_seconds).toBeLessThanOrEqual(stopped.session_active_seconds);
+    expect(stopped.last_continuous_seconds).toBeGreaterThanOrEqual(0);
+    expect(stopped.last_continuous_ended_at).toMatch(/Z$/);
   });
 
   it('adjust-start 同步修改首段、会话起点与净时长', async () => {
