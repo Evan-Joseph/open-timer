@@ -22,7 +22,7 @@ import { useAnimationsEnabled } from '../lib/settings.js';
 import { PREFS_APPLIED_EVT, schedulePrefsPush, setConchOpenLocal, setHistoryOpenLocal } from '../lib/prefs.js';
 import { detectDeviceRole } from '../lib/device.js';
 import ConchOverlay from './ConchOverlay.js';
-import { LEARNING_DAY, QUIET_PERIODS, shanghaiDayRangeUtc, timelineRange, type TimelineScale } from '@clock/shared';
+import { LEARNING_DAY, QUIET_PERIODS, shanghaiDayRangeUtc, timelineRange, type TimelineScale } from '@open-timer/shared';
 
 const NOW_TICK_MS = 30_000;
 

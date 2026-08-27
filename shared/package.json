@@ -1,7 +1,13 @@
 {
-  "name": "@clock/shared",
+  "name": "@open-timer/shared",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Evan-Joseph/open-timer.git",
+    "directory": "shared"
+  },
   "type": "module",
   "main": "src/index.ts",
   "scripts": {

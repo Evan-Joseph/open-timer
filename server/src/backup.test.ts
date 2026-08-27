@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { runBackup, staleBackupKeys, eventToLine, RETENTION_DAYS } from './backup.js';
 import type { BackupBucket } from './backup.js';
 import type { BackupSource } from './backup.js';
-import type { SessionEventRow, SessionRow } from '@clock/shared';
+import type { SessionEventRow, SessionRow } from '@open-timer/shared';
 
 /** 北京 2026-08-20 23:00（= 15:00 UTC，即 cron 触发时刻） */
 const NOW_MS = Date.parse('2026-08-20T15:00:00Z');

@@ -9,7 +9,7 @@ import { createApp } from './app.js';
 import { loadConfig } from './config.js';
 import { SqliteStorage } from './repo/sqlite-storage.js';
 import { hashPassword } from './password.js';
-import { shanghaiDayRangeUtc, shanghaiToday } from '@clock/shared';
+import { shanghaiDayRangeUtc, shanghaiToday } from '@open-timer/shared';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

@@ -14,8 +14,8 @@ import type {
   ActiveSegmentRow,
   ManualAdjustmentRow,
   SubjectId,
-} from '@clock/shared';
-import { DEFAULT_PROJECTS } from '@clock/shared';
+} from '@open-timer/shared';
+import { DEFAULT_PROJECTS } from '@open-timer/shared';
 import type { Storage, ActiveSessionWithSegments } from './storage.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -135,7 +135,7 @@ export class SqliteStorage implements Storage {
 
   /* ---- projects ---- */
 
-  private rowToProject(r: Record<string, unknown>): import('@clock/shared').SubjectDef {
+  private rowToProject(r: Record<string, unknown>): import('@open-timer/shared').SubjectDef {
     return {
       id: r.id as string,
       displayName: r.display_name as string,
@@ -146,19 +146,19 @@ export class SqliteStorage implements Storage {
     };
   }
 
-  async listProjects(includeArchived = false): Promise<import('@clock/shared').SubjectDef[]> {
+  async listProjects(includeArchived = false): Promise<import('@open-timer/shared').SubjectDef[]> {
     const sql = includeArchived
       ? 'SELECT * FROM subject ORDER BY archived_at_ms IS NOT NULL, sort_order, display_name'
       : 'SELECT * FROM subject WHERE archived_at_ms IS NULL ORDER BY sort_order, display_name';
     return (this.db.prepare(sql).all() as Array<Record<string, unknown>>).map((r) => this.rowToProject(r));
   }
 
-  async getProject(id: string): Promise<import('@clock/shared').SubjectDef | null> {
+  async getProject(id: string): Promise<import('@open-timer/shared').SubjectDef | null> {
     const row = this.db.prepare('SELECT * FROM subject WHERE id = ?').get(id) as Record<string, unknown> | undefined;
     return row ? this.rowToProject(row) : null;
   }
 
-  async createProject(project: import('@clock/shared').SubjectDef): Promise<void> {
+  async createProject(project: import('@open-timer/shared').SubjectDef): Promise<void> {
     this.db
       .prepare('INSERT INTO subject (id, display_name, aggregate_group, color_id, sort_order, archived_at_ms) VALUES (?, ?, ?, ?, ?, NULL)')
       .run(project.id, project.displayName, project.aggregateGroup ?? 'General', project.colorId, project.sortOrder);
@@ -166,7 +166,7 @@ export class SqliteStorage implements Storage {
 
   async updateProject(
     id: string,
-    patch: Pick<import('@clock/shared').SubjectDef, 'displayName' | 'aggregateGroup' | 'colorId' | 'sortOrder'>,
+    patch: Pick<import('@open-timer/shared').SubjectDef, 'displayName' | 'aggregateGroup' | 'colorId' | 'sortOrder'>,
   ): Promise<void> {
     this.db
       .prepare('UPDATE subject SET display_name = ?, aggregate_group = ?, color_id = ?, sort_order = ? WHERE id = ?')

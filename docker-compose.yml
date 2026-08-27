@@ -2,7 +2,7 @@ services:
   open-timer:
     build: .
     ports:
-      - "${CLOCK_PORT:-4517}:4517"
+      - "${CLOCK_BIND_ADDRESS:-127.0.0.1}:${CLOCK_PORT:-4517}:4517"
     environment:
       NODE_ENV: production
       # Compose is intentionally served on localhost HTTP. Set true behind HTTPS.
@@ -13,6 +13,16 @@ services:
     volumes:
       - open-timer-data:/data
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:4517/api/v1/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
 volumes:
   open-timer-data:

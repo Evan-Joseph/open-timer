@@ -3,7 +3,25 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "Private, self-hosted timer with owner-managed projects",
+  "description": "A private-by-default, self-hosted work timer with server-authoritative tracking and daily timelines",
+  "author": "Evan-Joseph",
+  "keywords": [
+    "timer",
+    "time-tracker",
+    "productivity",
+    "self-hosted",
+    "sqlite",
+    "docker",
+    "cloudflare-workers"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Evan-Joseph/open-timer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Evan-Joseph/open-timer/issues"
+  },
+  "homepage": "https://github.com/Evan-Joseph/open-timer#readme",
   "engines": {
     "node": ">=22"
   },

@@ -10,7 +10,7 @@ import { useAnimationsEnabled, useSettings } from '../lib/settings.js';
 import { PREFS_APPLIED_EVT, schedulePrefsPush } from '../lib/prefs.js';
 import { consumeConchStartMark } from '../lib/conch-mark.js';
 import { playFinishChime, playAwayReminder } from '../lib/sound.js';
-import { isQuietMinute } from '@clock/shared';
+import { isQuietMinute } from '@open-timer/shared';
 
 /* 逾期（L3）不再使用阻断式全屏召回弹窗：统一由红色洗色氛围 + away-line 文案表达。
    恢复/开始下一段的入口在常规控件里（继续计时 / 空闲页开始），无需独占弹窗。 */

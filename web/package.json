@@ -1,7 +1,13 @@
 {
-  "name": "@clock/web",
+  "name": "@open-timer/web",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Evan-Joseph/open-timer.git",
+    "directory": "web"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +16,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@clock/shared": "*",
+    "@open-timer/shared": "*",
     "@radix-ui/react-dialog": "^1.1.14",
     "@radix-ui/react-tooltip": "^1.2.7",
     "lucide-react": "^1.30.0",

@@ -26,3 +26,29 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --tag open-timer:test .
+      - name: Start container and verify health
+        run: |
+          docker run --detach --rm --name open-timer-ci \
+            --publish 127.0.0.1:4517:4517 \
+            --env CLOCK_COOKIE_SECURE=false \
+            --env CLOCK_INITIAL_OWNER_PIN=123456 \
+            --env AI_CONFIG_ENCRYPTION_KEY=ci-only-not-a-real-secret \
+            open-timer:test
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:4517/api/v1/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs open-timer-ci
+          exit 1
+      - if: always()
+        run: docker logs open-timer-ci || true

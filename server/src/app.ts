@@ -1,6 +1,6 @@
 /**
  * Hono 应用：路由 + 校验 + 鉴权 + 幂等。provider-neutral，可跑在 Node/Workers。
- * 领域规则全部来自 @clock/shared；持久化通过 Storage 接口（全异步）。
+ * 领域规则全部来自 @open-timer/shared；持久化通过 Storage 接口（全异步）。
  */
 
 import { Hono, type Context } from 'hono';
@@ -34,7 +34,7 @@ import {
   buildConchContext,
   parseConchLlmOutput,
   CONCH_SYSTEM_PROMPT,
-} from '@clock/shared';
+} from '@open-timer/shared';
 import { decryptAiSecret, encryptAiSecret } from './ai-secret.js';
 
 
@@ -234,7 +234,7 @@ export function createApp(deps: AppDeps): Hono {
 
   /* ---------- owner-only reads: self-hosted deployments are private by default ---------- */
 
-  function projectResponse(project: import('@clock/shared').SubjectDef) {
+  function projectResponse(project: import('@open-timer/shared').SubjectDef) {
     return {
       subject_id: project.id,
       display_name: project.displayName,
@@ -830,7 +830,7 @@ export function createApp(deps: AppDeps): Hono {
 
   app.notFound((c) => c.json({ error: 'NOT_FOUND' }, 404));
 
-  function sessionResponse(s: import('@clock/shared').SessionRow) {
+  function sessionResponse(s: import('@open-timer/shared').SessionRow) {
     return {
       session_id: s.id,
       subject_id: s.subjectId,

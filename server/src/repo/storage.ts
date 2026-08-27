@@ -10,7 +10,7 @@ import type {
   ActiveSegmentRow,
   ManualAdjustmentRow,
   SubjectId,
-} from '@clock/shared';
+} from '@open-timer/shared';
 
 export interface ActiveSessionWithSegments {
   session: SessionRow;
@@ -31,10 +31,10 @@ export interface Storage {
   deleteOwnerSession(tokenSha: string): Promise<void>;
 
   /* ---- owner-managed projects ---- */
-  listProjects(includeArchived?: boolean): Promise<import('@clock/shared').SubjectDef[]>;
-  getProject(id: string): Promise<import('@clock/shared').SubjectDef | null>;
-  createProject(project: import('@clock/shared').SubjectDef): Promise<void>;
-  updateProject(id: string, patch: Pick<import('@clock/shared').SubjectDef, 'displayName' | 'aggregateGroup' | 'colorId' | 'sortOrder'>): Promise<void>;
+  listProjects(includeArchived?: boolean): Promise<import('@open-timer/shared').SubjectDef[]>;
+  getProject(id: string): Promise<import('@open-timer/shared').SubjectDef | null>;
+  createProject(project: import('@open-timer/shared').SubjectDef): Promise<void>;
+  updateProject(id: string, patch: Pick<import('@open-timer/shared').SubjectDef, 'displayName' | 'aggregateGroup' | 'colorId' | 'sortOrder'>): Promise<void>;
   archiveProject(id: string, nowMs: number): Promise<'archived' | 'not_found' | 'active_session'>;
 
   /* ---- sessions ---- */

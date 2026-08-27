@@ -7,8 +7,8 @@
  * 备份文件可直接用于重放重建。
  */
 
-import { utcMsToShanghaiDate } from '@clock/shared';
-import type { SessionEventRow, SessionRow } from '@clock/shared';
+import { utcMsToShanghaiDate } from '@open-timer/shared';
+import type { SessionEventRow, SessionRow } from '@open-timer/shared';
 
 /** R2 binding 的最小接口（Workers 的 R2Bucket 结构兼容）。 */
 export interface BackupBucket {
