@@ -29,33 +29,6 @@ plain HTTP port directly to the public internet. For public access:
 3. Set `CLOCK_BIND_ADDRESS` to the address your proxy needs, typically
    `127.0.0.1` when the proxy runs on the same host.
 
-## Release image
-
-Every `v*` release publishes an image to GitHub Container Registry:
-
-```sh
-docker pull ghcr.io/evan-joseph/open-timer:v0.1.1
-```
-
-Use a version tag in production rather than `latest`. A minimal image-only
-deployment is:
-
-```sh
-docker volume create open-timer-data
-docker run --detach --name open-timer \
-  --publish 127.0.0.1:4517:4517 \
-  --env NODE_ENV=production \
-  --env CLOCK_COOKIE_SECURE=false \
-  --env CLOCK_INITIAL_OWNER_PIN=123456 \
-  --env AI_CONFIG_ENCRYPTION_KEY='replace-with-a-long-random-secret' \
-  --volume open-timer-data:/data \
-  --restart unless-stopped \
-  ghcr.io/evan-joseph/open-timer:v0.1.1
-```
-
-For public access, use an HTTPS reverse proxy and set
-`CLOCK_COOKIE_SECURE=true`.
-
 ## Data and backups
 
 The named `open-timer-data` volume contains the SQLite database. Back it up

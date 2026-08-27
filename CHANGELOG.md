@@ -4,8 +4,9 @@ All notable changes to Open Timer are documented here.
 
 ## v0.1.2 — 2026-08-27
 
-- Ensure release-published container images are public and anonymously pullable
-  from GitHub Container Registry.
+- Removed the unavailable GitHub Container Registry distribution path from the
+  public documentation. Docker Compose source deployments remain the supported,
+  tested installation path.
 
 ## v0.1.1 — 2026-08-27
 
@@ -19,7 +20,6 @@ All notable changes to Open Timer are documented here.
 - Hardened Docker defaults with localhost-only Compose port binding, a health
   check, non-root application runtime, and an in-container SQLite backup tool.
 - Renamed internal workspace packages from `@clock/*` to `@open-timer/*`.
-- Added versioned GitHub Container Registry publishing for future `v*` tags.
 
 ## v0.1.0 — 2026-08-27
 
