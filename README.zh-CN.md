@@ -24,7 +24,7 @@ Open Timer 适合深度工作、学习、会议、客户项目或任何需要记
 git clone https://github.com/Evan-Joseph/open-timer.git
 cd open-timer
 # 可选：使用命名发布版本，而不是会持续变动的 main 分支。
-git checkout <release-tag>
+# git checkout v0.1.0
 cp .env.example .env
 ```
 

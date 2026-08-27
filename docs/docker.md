@@ -8,7 +8,7 @@ Docker Compose with SQLite is the supported self-hosted path.
 git clone https://github.com/Evan-Joseph/open-timer.git
 cd open-timer
 # Optional: install a named release instead of the moving main branch.
-git checkout <release-tag>
+# git checkout v0.1.0
 cp .env.example .env
 ```
 

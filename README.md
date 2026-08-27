@@ -38,7 +38,7 @@ Prerequisites: Docker Desktop or Docker Engine with the Compose plugin.
 git clone https://github.com/Evan-Joseph/open-timer.git
 cd open-timer
 # Optional: install a named release instead of the moving main branch.
-git checkout <release-tag>
+# git checkout v0.1.0
 cp .env.example .env
 ```
 
