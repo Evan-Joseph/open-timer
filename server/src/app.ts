@@ -24,9 +24,12 @@ import { hashPassword, verifyPassword } from './password.js';
 import { createConchLlmClient, ConchLlmError, type ConchLlmClient } from './conch-client.js';
 import {
   SUBJECTS,
+  AGGREGATE_GROUPS,
   TIMEZONE,
+  DAY_MS,
   buildDailySummary,
   isValidShanghaiDate,
+  isSubjectId,
   shanghaiDayRangeUtc,
   shanghaiToday,
   toIso,
@@ -86,7 +89,10 @@ export function createApp(deps: AppDeps): Hono {
     const path = c.req.path;
     if (path === '/api/v1/subjects' && c.req.method === 'GET') {
       c.header('Cache-Control', 'public, max-age=3600, must-revalidate');
-    } else if (path === '/api/v1/daily-summary' && c.req.method === 'GET') {
+    } else if (
+      (path === '/api/v1/daily-summary' || path === '/api/v1/daily-summaries' || path === '/api/v1/sessions') &&
+      c.req.method === 'GET'
+    ) {
       c.header('Cache-Control', 'private, no-cache, must-revalidate');
     } else {
       c.header('Cache-Control', 'no-store');
@@ -333,15 +339,20 @@ export function createApp(deps: AppDeps): Hono {
             ended_at: seg.endedAtMs === null ? null : toIso(ce),
           });
         }
+
       }
       return {
         session_id: s.id,
         subject_id: s.subjectId,
         started_at: toIso(s.startedAtMs),
         ended_at: s.endedAtMs !== null ? toIso(s.endedAtMs) : null,
+        /** 兼容字段：当前查询窗口内净秒数。 */
         active_seconds: secs,
+        /** 明确字段：与 active_seconds 同值，避免范围消费者误把它当会话全量。 */
+        window_active_seconds: secs,
         status: s.status,
         end_reason: s.endReason,
+        intent_note: s.intentNote ?? null,
         note: s.endNote ?? s.intentNote ?? null,
         end_note: s.endNote ?? null,
         /** 会话全量秒数（结束反馈跨端一致性使用），不按当前 date 窗口裁剪。 */
@@ -352,6 +363,118 @@ export function createApp(deps: AppDeps): Hono {
         segments: clippedSegs,
       };
     });
+  }
+
+  type ReadSessionFilters = {
+    subjectId?: import('@clock/shared').SubjectId;
+    aggregateGroup?: (typeof AGGREGATE_GROUPS)[number];
+    status?: 'running' | 'paused' | 'stopped';
+    hasNote?: boolean;
+  };
+
+  type BeijingRange = {
+    from: string;
+    to: string;
+    startMs: number;
+    endMs: number;
+    dates: string[];
+  };
+
+  /** 校验 date 或 from/to（首尾包含，最多 31 个北京自然日）。 */
+  function parseBeijingRange(c: Context): { range?: BeijingRange; error?: string } {
+    const date = c.req.query('date');
+    const from = c.req.query('from');
+    const to = c.req.query('to');
+    if (date && (from || to)) return { error: 'INVALID_DATE_RANGE' };
+    if (date) {
+      if (!isValidShanghaiDate(date)) return { error: 'INVALID_DATE' };
+      const { startMs, endMs } = shanghaiDayRangeUtc(date);
+      return { range: { from: date, to: date, startMs, endMs, dates: [date] } };
+    }
+    if (!from || !to) return { error: 'INVALID_DATE_RANGE' };
+    if (!isValidShanghaiDate(from) || !isValidShanghaiDate(to)) return { error: 'INVALID_DATE' };
+    const startMs = shanghaiDayRangeUtc(from).startMs;
+    const endMs = shanghaiDayRangeUtc(to).endMs;
+    const days = Math.floor((endMs - startMs) / DAY_MS);
+    if (from > to || days < 1 || days > 31) return { error: 'INVALID_DATE_RANGE' };
+    const dates = Array.from({ length: days }, (_, index) => utcMsToShanghaiDate(startMs + index * DAY_MS));
+    return { range: { from, to, startMs, endMs, dates } };
+  }
+
+  function parseReadSessionFilters(c: Context): { filters?: ReadSessionFilters; error?: string } {
+    const subjectId = c.req.query('subject_id');
+    const aggregateGroup = c.req.query('aggregate_group');
+    const status = c.req.query('status');
+    const hasNote = c.req.query('has_note');
+    if (subjectId && aggregateGroup) return { error: 'INVALID_FILTER' };
+    if (subjectId && !isSubjectId(subjectId)) return { error: 'INVALID_FILTER' };
+    if (aggregateGroup && !AGGREGATE_GROUPS.includes(aggregateGroup as (typeof AGGREGATE_GROUPS)[number])) {
+      return { error: 'INVALID_FILTER' };
+    }
+    if (status && !(['running', 'paused', 'stopped'] as const).includes(status as 'running' | 'paused' | 'stopped')) {
+      return { error: 'INVALID_FILTER' };
+    }
+    if (hasNote !== undefined && hasNote !== 'true' && hasNote !== 'false') return { error: 'INVALID_FILTER' };
+    return {
+      filters: {
+        subjectId: subjectId as import('@clock/shared').SubjectId | undefined,
+        aggregateGroup: aggregateGroup as (typeof AGGREGATE_GROUPS)[number] | undefined,
+        status: status as ReadSessionFilters['status'],
+        hasNote: hasNote === undefined ? undefined : hasNote === 'true',
+      },
+    };
+  }
+
+  function filterReadSessions(
+    sessions: import('@clock/shared').SessionRow[],
+    filters: ReadSessionFilters,
+    includeVoided = false,
+  ) {
+    return sessions
+      .filter((session) => {
+        if (!includeVoided && session.status === 'voided') return false;
+        if (filters.subjectId && session.subjectId !== filters.subjectId) return false;
+        if (filters.aggregateGroup && subjectById(session.subjectId)?.aggregateGroup !== filters.aggregateGroup) return false;
+        if (filters.status && session.status !== filters.status) return false;
+        if (filters.hasNote !== undefined) {
+          const has = Boolean(session.intentNote?.trim() || session.endNote?.trim());
+          if (has !== filters.hasNote) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => a.startedAtMs - b.startedAtMs || a.id.localeCompare(b.id));
+  }
+
+  function adjustmentSummary(
+    adjustments: import('@clock/shared').ManualAdjustmentRow[],
+    sessions: import('@clock/shared').SessionRow[],
+  ) {
+    const byId = new Map(sessions.map((session) => [session.id, session]));
+    return adjustments
+      .map((adjustment) => {
+        const session = byId.get(adjustment.sessionId);
+        if (!session) return null;
+        return {
+          session_id: adjustment.sessionId,
+          subject_id: session.subjectId,
+          status: session.status,
+          kind: adjustment.kind,
+          reason: adjustment.reason,
+          at: toIso(adjustment.createdAtMs),
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+  }
+
+  function runningOverlapsRange(
+    active: import('./repo/storage.js').ActiveSessionWithSegments | null,
+    range: BeijingRange,
+    nowMs: number,
+  ) {
+    return Boolean(
+      active?.session.status === 'running' &&
+        active.segments.some((segment) => segment.endedAtMs === null && segment.startedAtMs < range.endMs && nowMs > range.startMs),
+    );
   }
 
   /** 前端刷新原子快照：state 与当天 sessions 共用一次 D1 读取，替代两次 Worker 请求。 */
@@ -661,13 +784,133 @@ export function createApp(deps: AppDeps): Hono {
   /* ---------- 查询（公开只读） ---------- */
 
   app.get('/api/v1/sessions', publicCors, async (c) => {
-    const date = c.req.query('date');
-    if (!date || !isValidShanghaiDate(date)) return c.json({ error: 'INVALID_DATE' }, 400);
-    const { startMs, endMs } = shanghaiDayRangeUtc(date);
+    const parsedRange = parseBeijingRange(c);
+    if (!parsedRange.range) return c.json({ error: parsedRange.error }, 400);
+    const parsedFilters = parseReadSessionFilters(c);
+    if (!parsedFilters.filters) return c.json({ error: parsedFilters.error }, 400);
+    const { range } = parsedRange;
+    const filters = parsedFilters.filters;
     const nowMs = now();
-    const sessions = await storage.sessionsOverlapping(startMs, endMs);
-    const segMap = await storage.segmentsForSessions(sessions.map((s) => s.id));
-    return c.json({ date, timezone: TIMEZONE, sessions: sessionEntriesForDay(sessions, segMap, startMs, endMs, nowMs) });
+    // 仅一次范围读取（含 voided 供审计），之后全部在内存按北京窗口/过滤切片。
+    const allSessions = await storage.sessionsOverlapping(range.startMs, range.endMs, { includeVoided: true });
+    const matchingSessions = filterReadSessions(allSessions, filters);
+    const segMap = await storage.segmentsForSessions(matchingSessions.map((session) => session.id));
+    const adjustments = await storage.adjustmentsForSessions(allSessions.map((session) => session.id));
+    const revision = await storage.maxEventId();
+    const active = await storage.getActiveSession('owner');
+    const dynamic = runningOverlapsRange(active, range, nowMs);
+    const etag =
+      c.req.query('date')
+        ? null // 旧 date 调用兼容：仍走 no-cache，不增加历史 ETag 行为
+        : `W/"sessions-${range.from}-${range.to}-${filters.subjectId ?? 'all'}-${filters.aggregateGroup ?? 'all'}-${filters.status ?? 'all'}-${filters.hasNote === undefined ? 'any' : String(filters.hasNote)}-${revision}"`;
+    if (etag && !dynamic && c.req.header('if-none-match') === etag) {
+      c.header('ETag', etag);
+      return c.body(null, 304);
+    }
+    if (etag && !dynamic) c.header('ETag', etag);
+    const entries = sessionEntriesForDay(matchingSessions, segMap, range.startMs, range.endMs, nowMs);
+    const auditSessions = filterReadSessions(allSessions, {
+      subjectId: filters.subjectId,
+      aggregateGroup: filters.aggregateGroup,
+      hasNote: filters.hasNote,
+    }, true);
+    const auditIds = new Set(auditSessions.map((session) => session.id));
+    const audit = adjustmentSummary(
+      adjustments.filter((adjustment) => auditIds.has(adjustment.sessionId)),
+      allSessions,
+    );
+    return c.json({
+      // date 保留给旧消费者；范围请求同时显式提供 from/to。
+      ...(range.from === range.to ? { date: range.from } : {}),
+      from: range.from,
+      to: range.to,
+      timezone: TIMEZONE,
+      generated_at: toIso(nowMs),
+      revision,
+      count: entries.length,
+      sessions: entries,
+      adjustments_or_revocations: audit,
+    });
+  });
+
+  /**
+   * 批量日报：一次读取整个范围的会话/段，在领域层按北京日窗口切片。
+   * 不循环发起 31 次数据库查询；空日也显式返回 0。
+   */
+  app.get('/api/v1/daily-summaries', publicCors, async (c) => {
+    const from = c.req.query('from');
+    const to = c.req.query('to');
+    const timezone = c.req.query('timezone');
+    if (!from || !to) return c.json({ error: 'INVALID_DATE_RANGE' }, 400);
+    if (timezone !== TIMEZONE) return c.json({ error: 'TIMEZONE_MUST_BE_ASIA_SHANGHAI' }, 400);
+    // 复用解析器，但它接受 date 或 from/to；这里故意禁止 date，保证批量契约明确。
+    const parsed = parseBeijingRange(c);
+    if (!parsed.range || c.req.query('date')) return c.json({ error: parsed.error ?? 'INVALID_DATE_RANGE' }, 400);
+    const range = parsed.range;
+    const nowMs = now();
+    const [revision, active] = await Promise.all([storage.maxEventId(), storage.getActiveSession('owner')]);
+    const sessions = await storage.sessionsOverlapping(range.startMs, range.endMs, { includeVoided: true });
+    const segMap = await storage.segmentsForSessions(sessions.map((session) => session.id));
+    const adjustments = await storage.adjustmentsForSessions(sessions.map((session) => session.id));
+    const dynamic = runningOverlapsRange(active, range, nowMs);
+    const etag = `W/"daily-summaries-${range.from}-${range.to}-${TIMEZONE}-${revision}"`;
+    if (!dynamic && c.req.header('if-none-match') === etag) {
+      c.header('ETag', etag);
+      return c.body(null, 304);
+    }
+    if (!dynamic) c.header('ETag', etag);
+
+    const days = range.dates.map((date) => {
+      const summary = buildDailySummary({
+        date,
+        sessions,
+        segmentsBySession: segMap,
+        adjustments,
+        revision,
+        generatedAtMs: nowMs,
+        activeSession: date === shanghaiToday(nowMs) ? active?.session ?? null : null,
+        activeSegments: date === shanghaiToday(nowMs) ? active?.segments ?? [] : [],
+        minSegmentMs: config.minSegmentMs,
+      });
+      return {
+        date: summary.date,
+        total_active_seconds: summary.total_active_seconds,
+        by_subject: summary.by_subject,
+        aggregates: summary.aggregates,
+        session_count: summary.sessions.filter((session) => session.active_seconds > 0).length,
+      };
+    });
+
+    const subjectTotals = new Map<string, number>();
+    for (const day of days) {
+      for (const entry of day.by_subject) {
+        subjectTotals.set(entry.subject_id, (subjectTotals.get(entry.subject_id) ?? 0) + entry.active_seconds);
+      }
+    }
+    const by_subject = SUBJECTS.map((subject) => ({
+      subject_id: subject.id,
+      display_name: subject.displayName,
+      active_seconds: subjectTotals.get(subject.id) ?? 0,
+    }));
+    const aggregates = AGGREGATE_GROUPS.map((group) => ({
+      group,
+      active_seconds: SUBJECTS.filter((subject) => subject.aggregateGroup === group).reduce(
+        (sum, subject) => sum + (subjectTotals.get(subject.id) ?? 0),
+        0,
+      ),
+    }));
+    return c.json({
+      from: range.from,
+      to: range.to,
+      timezone: TIMEZONE,
+      generated_at: toIso(nowMs),
+      revision,
+      total_active_seconds: days.reduce((sum, day) => sum + day.total_active_seconds, 0),
+      by_subject,
+      aggregates,
+      active_dates: days.filter((day) => day.total_active_seconds > 0).map((day) => day.date),
+      days,
+    });
   });
 
   /* ---------- daily-summary（公开只读，带 ETag） ---------- */
@@ -680,7 +923,8 @@ export function createApp(deps: AppDeps): Hono {
 
     const nowMs = now();
     const { startMs, endMs } = shanghaiDayRangeUtc(date);
-    const sessions = await storage.sessionsOverlapping(startMs, endMs);
+    // 传入 voided 让 buildDailySummary 在 totals 中排除、但能在审计摘要中保留撤回事实。
+    const sessions = await storage.sessionsOverlapping(startMs, endMs, { includeVoided: true });
     const segMap = await storage.segmentsForSessions(sessions.map((s) => s.id));
     const active = await storage.getActiveSession('owner');
     const revision = await storage.maxEventId();
@@ -689,8 +933,11 @@ export function createApp(deps: AppDeps): Hono {
     // 响应体秒数在涨：若继续用 date-revision 作 ETag，带 If-None-Match 的 Agent 会
     // 拿到 304 却丢失正在增长的暂算秒数。故 running 期间禁用 304 重验证、不设 ETag
     // （Cache-Control 已是 no-cache，每次仍会带请求 revalidate，但拿回完整 200 体）。
-    const runningNow = active?.session.status === 'running';
-    const etag = runningNow ? null : `W/"${date}-${revision}"`;
+    const runningInDay = Boolean(
+      active?.session.status === 'running' &&
+        active.segments.some((segment) => segment.endedAtMs === null && segment.startedAtMs < endMs && nowMs > startMs),
+    );
+    const etag = runningInDay ? null : `W/"${date}-${revision}"`;
 
     const inm = c.req.header('if-none-match');
     if (etag && inm && inm === etag) {
@@ -702,7 +949,8 @@ export function createApp(deps: AppDeps): Hono {
       date,
       sessions,
       segmentsBySession: segMap,
-      adjustments: await storage.adjustmentsSince(startMs),
+      // 会话开始日落在查询日、但修正发生在更晚日期时仍要在审计摘要可见。
+      adjustments: await storage.adjustmentsForSessions(sessions.map((session) => session.id)),
       revision,
       generatedAtMs: nowMs,
       activeSession: active?.session ?? null,

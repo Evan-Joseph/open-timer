@@ -18,10 +18,14 @@ export interface SessionApi {
   subject_id: string;
   started_at: string;
   ended_at: string | null;
+  /** 兼容字段：当前查询窗口（date/from-to）内净秒数。 */
   active_seconds: number;
+  /** 与 active_seconds 同值，供跨日消费者显式使用。 */
+  window_active_seconds: number;
   status: 'running' | 'paused' | 'stopped' | 'voided';
   end_reason: 'manual' | 'subject_switch' | 'void' | null;
   note: string | null;
+  intent_note: string | null;
   /** 仅结束备注（跨端判断「刚结束待补备注」用） */
   end_note: string | null;
   /** 会话全量净专注秒数，不按当前 date 查询窗口裁剪（结束反馈跨端一致性使用）。 */
@@ -75,6 +79,44 @@ export interface StateApi {
 export interface SnapshotApi {
   state: StateApi;
   sessions: SessionApi[];
+}
+
+export interface RangeSessionsApi {
+  date?: string;
+  from: string;
+  to: string;
+  timezone: 'Asia/Shanghai';
+  generated_at: string;
+  revision: number;
+  count: number;
+  sessions: SessionApi[];
+  adjustments_or_revocations: Array<{
+    session_id: string;
+    subject_id: string;
+    status: SessionApi['status'];
+    kind: 'retime' | 'void' | 'note';
+    reason: string | null;
+    at: string;
+  }>;
+}
+
+export interface RangeDailySummaryApi {
+  from: string;
+  to: string;
+  timezone: 'Asia/Shanghai';
+  generated_at: string;
+  revision: number;
+  total_active_seconds: number;
+  by_subject: Array<{ subject_id: string; display_name: string; active_seconds: number }>;
+  aggregates: Array<{ group: 'math' | 'english' | '408' | 'politics'; active_seconds: number }>;
+  active_dates: string[];
+  days: Array<{
+    date: string;
+    total_active_seconds: number;
+    by_subject: DailySummaryApi['by_subject'];
+    aggregates: Array<{ group: 'math' | 'english' | '408' | 'politics'; active_seconds: number }>;
+    session_count: number;
+  }>;
 }
 
 export interface DailySummaryApi {

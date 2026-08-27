@@ -109,6 +109,64 @@ export interface SessionEntry {
   note: string | null;
 }
 
+/**
+ * `/sessions` 详情条目：与 SessionEntry 的单日兼容字段共存，明确区分窗口裁剪值与会话全量事实。
+ * 备注是公开时间执行元数据，不代表任何学习完成/掌握判断。
+ */
+export interface RangeSessionEntry extends SessionEntry {
+  window_active_seconds: number;
+  intent_note: string | null;
+  end_note: string | null;
+  session_active_seconds: number;
+  longest_continuous_seconds: number;
+  last_continuous_seconds: number;
+  last_continuous_ended_at: string | null;
+  segments: Array<{ started_at: string; ended_at: string | null }>;
+}
+
+export interface ReadAdjustmentEntry {
+  session_id: string;
+  subject_id: SubjectId;
+  status: SessionStatus;
+  kind: ManualAdjustmentRow['kind'];
+  reason: string | null;
+  at: string;
+}
+
+export interface RangeSessionsResponse {
+  /** 兼容旧单日调用时存在。 */
+  date?: string;
+  from: string;
+  to: string;
+  timezone: 'Asia/Shanghai';
+  generated_at: string;
+  revision: number;
+  count: number;
+  sessions: RangeSessionEntry[];
+  adjustments_or_revocations: ReadAdjustmentEntry[];
+}
+
+export interface DailyRangeDay {
+  date: string;
+  total_active_seconds: number;
+  by_subject: BySubjectEntry[];
+  aggregates: AggregateEntry[];
+  session_count: number;
+}
+
+export interface DailySummariesResponse {
+  from: string;
+  to: string;
+  timezone: 'Asia/Shanghai';
+  generated_at: string;
+  revision: number;
+  total_active_seconds: number;
+  by_subject: Array<Pick<BySubjectEntry, 'subject_id' | 'display_name' | 'active_seconds'>>;
+  aggregates: AggregateEntry[];
+  active_dates: string[];
+  days: DailyRangeDay[];
+}
+
 export interface RunningSessionEntry {
   session_id: string;
   subject_id: SubjectId;

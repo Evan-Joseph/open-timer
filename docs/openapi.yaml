@@ -69,6 +69,122 @@ components:
         end_reason: { type: [string, 'null'], enum: [manual, subject_switch, void, null] }
         note: { type: [string, 'null'] }
 
+    RangeSessionEntry:
+      type: object
+      required: [session_id, subject_id, started_at, active_seconds, window_active_seconds, session_active_seconds, longest_continuous_seconds, last_continuous_seconds, status, segments]
+      properties:
+        session_id: { type: string }
+        subject_id: { type: string, enum: [math, english, data-structures, computer-organization, operating-systems, computer-networks, politics] }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: [string, 'null'], format: date-time }
+        active_seconds: { type: integer, description: 兼容字段，等同 window_active_seconds }
+        window_active_seconds: { type: integer, description: 查询 date/from-to 北京窗口内净秒数 }
+        session_active_seconds: { type: integer, description: 该会话全量净秒数，不按查询窗口裁剪 }
+        longest_continuous_seconds: { type: integer, description: 所有计入段中最长连续段秒数 }
+        last_continuous_seconds: { type: integer, description: 最后一个计入段秒数 }
+        last_continuous_ended_at: { type: [string, 'null'], format: date-time }
+        status: { type: string, enum: [running, paused, stopped, voided] }
+        end_reason: { type: [string, 'null'], enum: [manual, subject_switch, void, null] }
+        intent_note: { type: [string, 'null'] }
+        end_note: { type: [string, 'null'] }
+        note: { type: [string, 'null'], description: 兼容字段，优先 end_note 否则 intent_note }
+        segments:
+          type: array
+          description: 按查询北京窗口裁剪的段；跨日范围中同一 session 只出现一次
+          items:
+            type: object
+            required: [started_at, ended_at]
+            properties:
+              started_at: { type: string, format: date-time }
+              ended_at: { type: [string, 'null'], format: date-time }
+
+    ReadAdjustmentEntry:
+      type: object
+      required: [session_id, subject_id, status, kind, at]
+      properties:
+        session_id: { type: string }
+        subject_id: { type: string }
+        status: { type: string, enum: [running, paused, stopped, voided] }
+        kind: { type: string, enum: [retime, void, note] }
+        reason: { type: [string, 'null'] }
+        at: { type: string, format: date-time }
+
+    RangeSessionsResponse:
+      type: object
+      required: [from, to, timezone, generated_at, revision, count, sessions, adjustments_or_revocations]
+      properties:
+        date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$', description: 仅兼容旧单日调用时存在 }
+        from: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        to: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        timezone: { type: string, const: Asia/Shanghai }
+        generated_at: { type: string, format: date-time }
+        revision: { type: integer }
+        count: { type: integer }
+        sessions:
+          type: array
+          description: 默认不含 voided；按 started_at、session_id 稳定升序
+          items: { $ref: '#/components/schemas/RangeSessionEntry' }
+        adjustments_or_revocations:
+          type: array
+          description: 关联会话的修正/撤回审计摘要，voided 默认不在 sessions 但在这里可见
+          items: { $ref: '#/components/schemas/ReadAdjustmentEntry' }
+
+    DailyRangeDay:
+      type: object
+      required: [date, total_active_seconds, by_subject, aggregates, session_count]
+      properties:
+        date: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        total_active_seconds: { type: integer }
+        by_subject:
+          type: array
+          items:
+            type: object
+            required: [subject_id, display_name, active_seconds, session_count]
+            properties:
+              subject_id: { type: string }
+              display_name: { type: string }
+              active_seconds: { type: integer }
+              session_count: { type: integer }
+        aggregates:
+          type: array
+          items:
+            type: object
+            required: [group, active_seconds]
+            properties:
+              group: { type: string, enum: [math, english, 408, politics] }
+              active_seconds: { type: integer }
+        session_count: { type: integer, description: 当日有正净秒数的会话数量 }
+
+    DailySummariesResponse:
+      type: object
+      required: [from, to, timezone, generated_at, revision, total_active_seconds, by_subject, aggregates, active_dates, days]
+      properties:
+        from: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        to: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        timezone: { type: string, const: Asia/Shanghai }
+        generated_at: { type: string, format: date-time }
+        revision: { type: integer }
+        total_active_seconds: { type: integer }
+        by_subject:
+          type: array
+          items:
+            type: object
+            required: [subject_id, display_name, active_seconds]
+            properties:
+              subject_id: { type: string }
+              display_name: { type: string }
+              active_seconds: { type: integer }
+        aggregates:
+          type: array
+          items:
+            type: object
+            required: [group, active_seconds]
+            properties:
+              group: { type: string, enum: [math, english, 408, politics] }
+              active_seconds: { type: integer }
+        active_dates: { type: array, items: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' } }
+        days: { type: array, items: { $ref: '#/components/schemas/DailyRangeDay' } }
+
     SessionWriteResult:
       type: object
       description: 写操作成功后的会话快照
@@ -155,7 +271,7 @@ components:
         error:
           type: string
           description: |
-            错误码：INVALID_BODY / INVALID_DATE / INVALID_ID / INVALID_DELTA /
+            错误码：INVALID_BODY / INVALID_DATE / INVALID_DATE_RANGE / INVALID_FILTER / INVALID_ID / INVALID_DELTA /
             TIMEZONE_MUST_BE_ASIA_SHANGHAI / UNAUTHORIZED / INVALID_CREDENTIALS /
             SESSION_NOT_FOUND / ACTIVE_SESSION_EXISTS / ILLEGAL_TRANSITION /
             ALREADY_SETUP / NOT_SETUP / NOT_ACTIVE_SESSION / INVALID_START /
@@ -209,7 +325,37 @@ paths:
                     oneOf: [{ $ref: '#/components/schemas/RunningSessionEntry' }, { type: 'null' }]
                   today_active_seconds: { type: integer }
                   today_date: { type: string }
-                required: [server_now_ms, server_now_iso, active_session, today_active_seconds, today_date]
+                  revision: { type: integer, description: 通用审计 revision，非海螺缓存键 }
+                  conch_revision: { type: integer, description: 已完成时间线 semantic revision }
+                required: [server_now_ms, server_now_iso, active_session, today_active_seconds, today_date, revision, conch_revision]
+
+  /snapshot:
+    get:
+      summary: SPA 原子刷新快照（公开只读）：一次返回同次 state 与当天 sessions
+      security: []
+      responses:
+        '200':
+          description: 前端刷新快照
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state, sessions]
+                properties:
+                  state:
+                    type: object
+                    properties:
+                      server_now_ms: { type: integer }
+                      server_now_iso: { type: string, format: date-time }
+                      active_session:
+                        oneOf: [{ $ref: '#/components/schemas/RunningSessionEntry' }, { type: 'null' }]
+                      today_active_seconds: { type: integer }
+                      today_date: { type: string }
+                      revision: { type: integer }
+                      conch_revision: { type: integer }
+                  sessions:
+                    type: array
+                    items: { $ref: '#/components/schemas/RangeSessionEntry' }
 
   /daily-summary:
     get:
@@ -240,16 +386,49 @@ paths:
 
   /sessions:
     get:
-      summary: 某日会话明细（含 segment；公开只读）
+      summary: 单日或最多 31 日会话明细（含裁剪 segment；公开只读）
       security: []
       parameters:
         - name: date
           in: query
-          required: true
+          required: false
+          description: 兼容单日调用；与 from/to 互斥
           schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        - name: subject_id
+          in: query
+          required: false
+          schema: { type: string, enum: [math, english, data-structures, computer-organization, operating-systems, computer-networks, politics] }
+        - name: aggregate_group
+          in: query
+          required: false
+          schema: { type: string, enum: [math, english, 408, politics] }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [running, paused, stopped] }
+        - name: has_note
+          in: query
+          required: false
+          schema: { type: boolean }
       responses:
-        '200': { description: 会话列表 }
-        '400': { description: date 非法 }
+        '200':
+          description: 会话列表；范围请求可用 ETag，运行中会话与范围相交时不返回 304
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RangeSessionsResponse' }
+        '304': { description: 无运行中会话且 revision 未变化 }
+        '400': { description: 日期范围、过滤器或互斥参数非法 }
     post:
       summary: 开始计时（幂等）
       parameters:
@@ -272,6 +451,86 @@ paths:
               schema: { $ref: '#/components/schemas/SessionWriteResult' }
         '400': { description: 参数非法或缺 Idempotency-Key }
         '409': { description: 已有活动会话（ACTIVE_SESSION_EXISTS） }
+
+  /daily-summaries:
+    get:
+      summary: 最多 31 日的批量北京日报（公开只读；不返回完整 sessions）
+      security: []
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$' }
+        - name: timezone
+          in: query
+          required: true
+          schema: { type: string, enum: [Asia/Shanghai] }
+      responses:
+        '200':
+          description: 范围汇总；空日期显式返回 0
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DailySummariesResponse' }
+        '304': { description: 无运行中会话与范围相交且 revision 未变化 }
+        '400': { description: 日期范围（最大 31 日）或 timezone 非法 }
+
+  /conch/revision:
+    get:
+      summary: 神奇海螺已完成时间线缓存版本（owner）
+      responses:
+        '200':
+          description: 一行 semantic revision；不读取完整时间线、不调用模型
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [conch_revision]
+                properties:
+                  conch_revision: { type: integer }
+        '401': { description: 未登录 }
+
+  /conch/ask:
+    post:
+      summary: 神奇海螺下一步建议（owner；LLM 只读取已完成、计入的时间线事实）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [window]
+              properties:
+                window: { type: string, enum: [all, 30d, 7d] }
+      responses:
+        '200':
+          description: 结构化建议；conch_revision 可作为长期本地缓存键
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [window, generated_at, conch_revision, revision, model, subjects, skipped]
+                properties:
+                  window: { type: string, enum: [all, 30d, 7d] }
+                  generated_at: { type: string, format: date-time }
+                  conch_revision: { type: integer }
+                  revision: { type: integer }
+                  model: { type: string }
+                  subjects: { type: array, items: { type: object } }
+                  skipped: { type: array, items: { type: object } }
+        '400': { description: window 非法 }
+        '401': { description: 未登录 }
+        '422': { description: LLM 输出不符合契约 }
+        '429': { description: 请求过频 }
+        '502': { description: LLM 上游错误 }
+        '503': { description: 未配置模型 }
+        '504': { description: LLM 超时 }
 
   /sessions/{id}/pause:
     post:

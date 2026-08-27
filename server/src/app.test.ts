@@ -123,7 +123,7 @@ describe('API 集成', () => {
     // sessions?date：无凭据可读
     const sess = await ctx.app.request('/api/v1/sessions?date=2026-01-01');
     expect(sess.status).toBe(200);
-    expect(sess.headers.get('cache-control')).toBe('no-store');
+    expect(sess.headers.get('cache-control')).toBe('private, no-cache, must-revalidate');
     expect((await sess.json()).sessions).toEqual([]);
 
     // daily-summary：无凭据可读

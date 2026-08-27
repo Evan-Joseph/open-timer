@@ -327,19 +327,20 @@ export class D1Storage implements Storage {
 
   /* ---- 查询 ---- */
 
-  async sessionsOverlapping(startMs: number, endMs: number): Promise<SessionRow[]> {
+  async sessionsOverlapping(startMs: number, endMs: number, options: { includeVoided?: boolean } = {}): Promise<SessionRow[]> {
     // 与 [startMs, endMs) 相交的会话 = 「在窗口起点之后结束的」∪「仍开放的」。
     // 前半走 session_ended(ended_at_ms) 索引 range（只扫近期结束的少量会话），
     // 后半走 one_active_session 部分索引（≤1 行）——避免全表扫描
     // （D1 按行读计费，全表扫会在约 250 个历史会话时撞穿 500 万行读/天免费额度）。
+    const completedWhere = options.includeVoided ? '' : "status != 'voided' AND ";
     const { results } = await this.db
       .prepare(
-        `SELECT * FROM session WHERE status != 'voided' AND ended_at_ms IS NOT NULL AND ended_at_ms > ? AND started_at_ms < ?
+        `SELECT * FROM session WHERE ${completedWhere}ended_at_ms IS NOT NULL AND ended_at_ms > ? AND started_at_ms < ?
          UNION
-         SELECT * FROM session WHERE status IN ('running','paused')
-         ORDER BY started_at_ms`,
+         SELECT * FROM session WHERE status IN ('running','paused') AND started_at_ms < ?
+         ORDER BY started_at_ms, id`,
       )
-      .bind(startMs, endMs)
+      .bind(startMs, endMs, endMs)
       .all<Record<string, unknown>>();
     return results.map(rowToSession);
   }
@@ -365,6 +366,26 @@ export class D1Storage implements Storage {
     const { results } = await this.db
       .prepare('SELECT * FROM manual_adjustment WHERE created_at_ms >= ? ORDER BY created_at_ms')
       .bind(ms)
+      .all<Record<string, unknown>>();
+    return results.map((r) => ({
+      id: r.id as number,
+      sessionId: r.session_id as string,
+      kind: r.kind as ManualAdjustmentRow['kind'],
+      beforeJson: r.before_json as string,
+      afterJson: r.after_json as string,
+      reason: (r.reason as string | null) ?? null,
+      createdAtMs: r.created_at_ms as number,
+    }));
+  }
+
+  async adjustmentsForSessions(sessionIds: string[]): Promise<ManualAdjustmentRow[]> {
+    if (sessionIds.length === 0) return [];
+    const placeholders = sessionIds.map(() => '?').join(',');
+    const { results } = await this.db
+      .prepare(
+        `SELECT * FROM manual_adjustment WHERE session_id IN (${placeholders}) ORDER BY created_at_ms, id`,
+      )
+      .bind(...sessionIds)
       .all<Record<string, unknown>>();
     return results.map((r) => ({
       id: r.id as number,

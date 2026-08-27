@@ -60,9 +60,15 @@ export interface Storage {
   adjustSessionStart(sessionId: string, startedAtMs: number, reason: string | null, nowMs: number): Promise<void>;
 
   /* ---- 查询 ---- */
-  sessionsOverlapping(startMs: number, endMs: number): Promise<SessionRow[]>;
+  /**
+   * 与 [startMs,endMs) 相交的会话，稳定排序 started_at_ms,id。
+   * includeVoided 仅供审计摘要使用；普通时间执行统计仍由调用方默认排除 voided。
+   */
+  sessionsOverlapping(startMs: number, endMs: number, options?: { includeVoided?: boolean }): Promise<SessionRow[]>;
   segmentsForSessions(sessionIds: string[]): Promise<Map<string, ActiveSegmentRow[]>>;
   adjustmentsSince(ms: number): Promise<ManualAdjustmentRow[]>;
+  /** 指定会话的全部修正/撤回链（不受修正发生日期限制，历史归档可定位后续更正）。 */
+  adjustmentsForSessions(sessionIds: string[]): Promise<ManualAdjustmentRow[]>;
   /** revision = 截至 now 的审计日志最大 id（audit_log 覆盖所有写操作，含
    *  note/retime/adjust-start 这类不写 session_event 的变更）。用于 ETag 确定性：
    *  任何影响资源的写操作都使 revision 前进、ETag 失效。 */
