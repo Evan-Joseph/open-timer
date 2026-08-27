@@ -1,0 +1,18 @@
+services:
+  open-timer:
+    build: .
+    ports:
+      - "${CLOCK_PORT:-4517}:4517"
+    environment:
+      NODE_ENV: production
+      # Compose is intentionally served on localhost HTTP. Set true behind HTTPS.
+      CLOCK_COOKIE_SECURE: ${CLOCK_COOKIE_SECURE:-false}
+      CLOCK_DATA_DIR: /data
+      CLOCK_INITIAL_OWNER_PIN: ${CLOCK_INITIAL_OWNER_PIN:?Set a unique six-digit owner PIN in .env}
+      AI_CONFIG_ENCRYPTION_KEY: ${AI_CONFIG_ENCRYPTION_KEY:?Set a long random value in .env}
+    volumes:
+      - open-timer-data:/data
+    restart: unless-stopped
+
+volumes:
+  open-timer-data:

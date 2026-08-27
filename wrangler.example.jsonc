@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "open-timer",
+  "main": "server/dist/worker.mjs",
+  "compatibility_date": "2026-07-01",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./web/dist",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "REPLACE_WITH_YOUR_D1_NAME",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+    }
+  ]
+  // Optional backup: after creating your own R2 bucket, add:
+  // "r2_buckets": [{ "binding": "BACKUP", "bucket_name": "REPLACE_WITH_YOUR_BUCKET" }]
+  // and an optional cron trigger. Do not copy production bindings into this file.
+}

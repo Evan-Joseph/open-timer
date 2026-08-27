@@ -1,0 +1,94 @@
+/**
+ * Repository 契约：领域与存储之间的唯一边界。
+ * 本地实现为 SQLite；Cloudflare D1 / CloudBase 提供同接口的新适配器。
+ * 所有时间戳参数为 UTC epoch ms。所有方法异步，保证跨运行时一致。
+ */
+
+import type {
+  SessionRow,
+  SessionEventRow,
+  ActiveSegmentRow,
+  ManualAdjustmentRow,
+  SubjectId,
+} from '@clock/shared';
+
+export interface ActiveSessionWithSegments {
+  session: SessionRow;
+  segments: ActiveSegmentRow[];
+}
+
+export interface Storage {
+  /* ---- schema / admin ---- */
+  migrate(): Promise<void>;
+  close(): void;
+  nowMs(): number;
+
+  /* ---- owner 凭据 ---- */
+  getOwnerPasswordHash(): Promise<string | null>;
+  setOwnerPasswordHash(hash: string): Promise<void>;
+  getOwnerSession(tokenSha: string): Promise<{ expiresAtMs: number } | null>;
+  createOwnerSession(tokenSha: string, expiresAtMs: number): Promise<void>;
+  deleteOwnerSession(tokenSha: string): Promise<void>;
+
+  /* ---- owner-managed projects ---- */
+  listProjects(includeArchived?: boolean): Promise<import('@clock/shared').SubjectDef[]>;
+  getProject(id: string): Promise<import('@clock/shared').SubjectDef | null>;
+  createProject(project: import('@clock/shared').SubjectDef): Promise<void>;
+  updateProject(id: string, patch: Pick<import('@clock/shared').SubjectDef, 'displayName' | 'aggregateGroup' | 'colorId' | 'sortOrder'>): Promise<void>;
+  archiveProject(id: string, nowMs: number): Promise<'archived' | 'not_found' | 'active_session'>;
+
+  /* ---- sessions ---- */
+  getActiveSession(userId: string): Promise<ActiveSessionWithSegments | null>;
+  getSession(id: string): Promise<SessionRow | null>;
+  getSegments(sessionId: string): Promise<ActiveSegmentRow[]>;
+  /** 创建会话并开第一段 + 写 created 事件。返回 null 表示并发冲突（已有活动会话）。 */
+  createSession(args: {
+    id: string;
+    userId: string;
+    subjectId: SubjectId;
+    intentNote: string | null;
+    nowMs: number;
+    idempotencyKey: string;
+  }): Promise<SessionRow | null>;
+  /** 关闭开放段并追加事件。 */
+  pauseSession(sessionId: string, nowMs: number, idempotencyKey: string): Promise<void>;
+  /** 开新段并追加事件；stopped 会话可被重开（误触继续）：清除结束时刻并开新段。 */
+  resumeSession(sessionId: string, nowMs: number, idempotencyKey: string): Promise<void>;
+  /** 关闭开放段、定格会话。 */
+  stopSession(sessionId: string, nowMs: number, endReason: string, idempotencyKey: string): Promise<void>;
+  /** 作废会话（保留全部事件与段）。 */
+  voidSession(sessionId: string, nowMs: number, reason: string | null, idempotencyKey: string): Promise<void>;
+  /** 修改结束备注（仅 stopped）。 */
+  setSessionNote(sessionId: string, note: string, nowMs: number): Promise<void>;
+  /** 手动改时（retime）：重算 activeSeconds 并记录 adjustment。 */
+  applyRetime(sessionId: string, deltaSeconds: number, reason: string | null, nowMs: number): Promise<void>;
+  /** 调整已结束会话的起点，同时修正首段、净时长并保留审计。 */
+  adjustSessionStart(sessionId: string, startedAtMs: number, reason: string | null, nowMs: number): Promise<void>;
+
+  /* ---- 查询 ---- */
+  sessionsOverlapping(startMs: number, endMs: number): Promise<SessionRow[]>;
+  segmentsForSessions(sessionIds: string[]): Promise<Map<string, ActiveSegmentRow[]>>;
+  adjustmentsSince(ms: number): Promise<ManualAdjustmentRow[]>;
+  /** revision = 截至 now 的审计日志最大 id（audit_log 覆盖所有写操作，含
+   *  note/retime/adjust-start 这类不写 session_event 的变更）。用于 ETag 确定性：
+   *  任何影响资源的写操作都使 revision 前进、ETag 失效。 */
+  maxEventId(): Promise<number>;
+
+  /* ---- 幂等 ---- */
+  getIdempotentResponse(key: string): Promise<{ endpoint: string; responseJson: string } | null>;
+  saveIdempotentResponse(key: string, endpoint: string, responseJson: string, nowMs: number): Promise<void>;
+  purgeIdempotentBefore(ms: number): Promise<void>;
+
+  /* ---- 审计与导出 ---- */
+  appendAudit(actor: string, action: string, target: string, detailJson: string | null, nowMs: number): Promise<void>;
+  allEvents(): Promise<SessionEventRow[]>;
+  allSessions(): Promise<SessionRow[]>;
+
+  /* ---- 用户 UI 偏好（多端同步） ---- */
+  getPrefs(): Promise<{ prefsJson: string; updatedAtMs: number } | null>;
+  setPrefs(prefsJson: string, nowMs: number): Promise<void>;
+
+  /* ---- encrypted AI assistant settings (the key is never returned) ---- */
+  getAiConfig(): Promise<{ provider: string; apiBase: string; model: string; encryptedApiKey: string; updatedAtMs: number } | null>;
+  setAiConfig(row: { provider: string; apiBase: string; model: string; encryptedApiKey: string; updatedAtMs: number }): Promise<void>;
+}
