@@ -2,6 +2,11 @@
 
 All notable changes to Open Timer are documented here.
 
+## v0.1.2 — 2026-08-27
+
+- Ensure release-published container images are public and anonymously pullable
+  from GitHub Container Registry.
+
 ## v0.1.1 — 2026-08-27
 
 - Reworked the public README around product overview, a synthetic-data screenshot,
