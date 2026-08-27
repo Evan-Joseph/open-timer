@@ -67,6 +67,9 @@ before exposing it publicly, then set `CLOCK_COOKIE_SECURE=true`. See the
 [Docker guide](docs/docker.md) for backups, upgrades, remote access, and restore
 guidance.
 
+Version tags publish a container image to
+[`ghcr.io/evan-joseph/open-timer`](https://github.com/Evan-Joseph/open-timer/pkgs/container/open-timer).
+
 ## Documentation
 
 - [Docker deployment, backups, upgrades, and restore](docs/docker.md)

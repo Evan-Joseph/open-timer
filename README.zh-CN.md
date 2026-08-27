@@ -47,6 +47,9 @@ curl http://127.0.0.1:4517/api/v1/health
 
 Compose 默认只绑定本机 `127.0.0.1`。需要公网访问时，请放在 HTTPS 反向代理之后，并设置 `CLOCK_COOKIE_SECURE=true`。完整的备份、升级和恢复说明见 [Docker 指南](docs/docker.md)。
 
+每个版本 tag 都会发布对应容器镜像到
+[`ghcr.io/evan-joseph/open-timer`](https://github.com/Evan-Joseph/open-timer/pkgs/container/open-timer)。
+
 ## 文档
 
 - [Docker 部署、备份、升级与恢复](docs/docker.md)

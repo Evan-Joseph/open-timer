@@ -20,5 +20,7 @@ ENV NODE_ENV=production
 ENV CLOCK_PORT=4517
 ENV CLOCK_DATA_DIR=/data
 EXPOSE 4517
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:4517/api/v1/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 ENTRYPOINT ["./scripts/docker-entrypoint.sh"]
 CMD ["npm", "run", "start", "-w", "server"]
