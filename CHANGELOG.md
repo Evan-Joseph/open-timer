@@ -4,6 +4,12 @@ All notable changes to Open Timer are documented here.
 
 A Simplified Chinese translation is available in [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md).
 
+## v0.1.4 — 2026-08-28
+
+- Rewrote the README around a concise product front page, removing defensive
+  boilerplate. Simplified Chinese remains the default, with an equivalent
+  English README at `README.en.md`.
+
 ## v0.1.3 — 2026-08-28
 
 - Made Simplified Chinese the default README (`README.md`), with the English

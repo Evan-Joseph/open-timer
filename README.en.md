@@ -1,100 +1,60 @@
+<div align="center">
+
 # Open Timer
 
-[简体中文](README.md) · [Documentation](docs/README.en.md) · [Releases](https://github.com/Evan-Joseph/open-timer/releases) · [Report a vulnerability](SECURITY.md)
+Track where your time goes, keep the data on your own server.
+
+[简体中文](README.md) · English
 
 [![CI](https://github.com/Evan-Joseph/open-timer/actions/workflows/ci.yml/badge.svg)](https://github.com/Evan-Joseph/open-timer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Evan-Joseph/open-timer?display_name=tag)](https://github.com/Evan-Joseph/open-timer/releases)
 [![License](https://img.shields.io/github/license/Evan-Joseph/open-timer)](LICENSE)
 
-**A private-by-default, self-hosted work timer for one owner: server-authoritative tracking, projects, and daily timelines.**
+</div>
 
-![Open Timer dashboard with a running Deep work session and daily timeline](docs/images/open-timer-dashboard.png)
+![Open Timer](docs/images/open-timer-dashboard.png)
 
-> The screenshot uses example data only; it contains no real projects, notes, or
-> timer history.
+Open Timer is a self-hosted time tracker for deep work, study, meetings, and
+client projects. Record time per project and review it on a daily timeline.
 
-Open Timer is for people who want a calm timer without sending their work history
-to a hosted service. It works for deep work, study, meetings, client work, or any
-project you want to time.
+## Features
 
-## Highlights
+- **Accurate timing**: the server is the source of truth for time, so refreshes,
+  sleep, and multiple tabs never lose or duplicate time.
+- **Projects**: create projects with groups, colors, ordering, and archival.
+- **Daily timeline**: review how your day was spent.
+- **Optional AI assistant**: SiliconFlow and other OpenAI-compatible endpoints,
+  with keys encrypted on the server.
+- **Two deployment paths**: Docker Compose + SQLite, or Cloudflare Workers + D1.
 
-- **Private by default** — projects, notes, sessions, and reports require the
-  owner session. There is no public dashboard or wildcard CORS.
-- **Accurate timing** — the server is the source of truth; pause, resume, sleep,
-  refresh, and multiple tabs do not create duplicate or lost time.
-- **Projects you control** — create, rename, group, color, order, and archive
-  projects in Settings. Archived projects retain their history.
-- **Useful history** — daily timelines and summaries use Asia/Shanghai for their
-  day boundary while all stored timestamps remain UTC.
-- **Optional AI assistant** — configure SiliconFlow or another public HTTPS
-  OpenAI-compatible provider in Settings. API keys are encrypted on the server
-  and are never returned to the browser.
-- **Self-host your way** — Docker Compose with SQLite is the supported quick
-  start; Cloudflare Workers + D1 is also supported.
+## Quick start
 
-## Quick start with Docker Compose
-
-Prerequisites: Docker Desktop or Docker Engine with the Compose plugin.
+Requires Docker.
 
 ```sh
 git clone https://github.com/Evan-Joseph/open-timer.git
 cd open-timer
-# Optional: choose a fixed tag from the Releases page before continuing.
-# git checkout <release-tag>
 cp .env.example .env
-```
-
-Edit `.env` before starting:
-
-```dotenv
-# Exactly six digits; used to claim the owner account at first boot.
-CLOCK_INITIAL_OWNER_PIN=123456
-
-# Generate a unique value and keep it stable after deployment:
-# openssl rand -base64 32
-AI_CONFIG_ENCRYPTION_KEY=paste-a-long-random-value-here
-```
-
-Then start the app:
-
-```sh
+# Edit .env with CLOCK_INITIAL_OWNER_PIN and AI_CONFIG_ENCRYPTION_KEY.
 docker compose up -d --build
-curl http://127.0.0.1:4517/api/v1/health
 ```
 
-Open <http://localhost:4517> and sign in with `CLOCK_INITIAL_OWNER_PIN`.
+Open <http://localhost:4517> and sign in with the PIN you set.
 
-Compose binds to `127.0.0.1` by default. Put it behind an HTTPS reverse proxy
-before exposing it publicly, then set `CLOCK_COOKIE_SECURE=true`. See the
-[Docker guide](docs/docker.md) for backups, upgrades, remote access, and restore
-guidance.
+Compose listens on localhost by default. Put it behind an HTTPS reverse proxy
+for public access; see the [Docker guide](docs/docker.md).
 
 ## Documentation
 
-- [Documentation home](docs/README.en.md)
-- [Docker deployment, backups, upgrades, and restore](docs/docker.md)
-- [Cloudflare Workers + D1 deployment](docs/cloudflare.md)
+- [Docker deployment, backups, and upgrades](docs/docker.md)
+- [Cloudflare Workers + D1](docs/cloudflare.md)
 - [Configuration reference](docs/configuration.md)
-- [Privacy and security model](docs/security-model.md)
-- [Architecture overview](docs/architecture.md)
-- [Changelog](CHANGELOG.md)
-
-## AI assistant
-
-AI is optional; core timing works without it. In **Settings → AI assistant**, an
-owner can choose SiliconFlow (pre-filled with
-`https://api.siliconflow.cn/v1`) or another public HTTPS OpenAI-compatible
-endpoint, then provide a model and API key.
-
-Keys travel only over the same-origin owner session, are encrypted with
-`AI_CONFIG_ENCRYPTION_KEY` using AES-GCM, and are never returned by the API,
-included in exports, logged, or stored in browser storage. Read the
-[security model](docs/security-model.md) before enabling a provider.
+- [Security model](docs/security-model.md)
+- [Architecture](docs/architecture.md)
 
 ## Development
 
-Open Timer requires Node.js 22 or later.
+Requires Node.js 22 or later.
 
 ```sh
 npm ci
@@ -104,15 +64,10 @@ npm run build
 npm run test:e2e
 ```
 
-## Contributing and security
-
-Bug reports and feature requests are welcome. Please read
-[CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. For security
-issues, use the private reporting route described in [SECURITY.md](SECURITY.md);
-do not include credentials, cookies, exports, or personal timer data in a public
-issue.
+Open an [issue](https://github.com/Evan-Joseph/open-timer/issues) for bugs and
+suggestions. Report security issues through the [private route](SECURITY.md).
 
 ## License
 
-Open Timer is licensed under the [MIT License](LICENSE). Bundled font notices
-are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). Bundled fonts are attributed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
