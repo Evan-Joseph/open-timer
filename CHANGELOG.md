@@ -2,6 +2,17 @@
 
 All notable changes to Open Timer are documented here.
 
+A Simplified Chinese translation is available in [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md).
+
+## v0.1.3 — 2026-08-28
+
+- Made Simplified Chinese the default README (`README.md`), with the English
+  README moved to `README.en.md`.
+- Added a Chinese documentation home (`docs/README.md`) and translated
+  operational documentation under `docs/zh-CN/`.
+- Updated repository description to be bilingual and aligned release notes with
+  the changelog.
+
 ## v0.1.2 — 2026-08-27
 
 - Removed the unavailable GitHub Container Registry distribution path from the

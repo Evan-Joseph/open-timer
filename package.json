@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "A private-by-default, self-hosted work timer with server-authoritative tracking and daily timelines",
+  "description": "私密、准确、可自托管的工作计时器 · A private-by-default, self-hosted work timer",
   "author": "Evan-Joseph",
   "keywords": [
     "timer",

@@ -1,96 +1,87 @@
+<div align="center">
+
 # Open Timer
 
-[中文说明](README.zh-CN.md) · [Documentation](#documentation) · [Report a vulnerability](SECURITY.md)
+**私密、准确、可自托管的工作计时器。**
+
+简体中文 · [English](README.en.md) · [文档](docs/README.md) · [版本发布](https://github.com/Evan-Joseph/open-timer/releases) · [安全报告](SECURITY.md)
 
 [![CI](https://github.com/Evan-Joseph/open-timer/actions/workflows/ci.yml/badge.svg)](https://github.com/Evan-Joseph/open-timer/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Evan-Joseph/open-timer?display_name=tag)](https://github.com/Evan-Joseph/open-timer/releases)
 [![License](https://img.shields.io/github/license/Evan-Joseph/open-timer)](LICENSE)
 
-**A private-by-default, self-hosted work timer with server-authoritative tracking, owner-managed projects, and daily timelines.**
+</div>
 
-![Open Timer dashboard with a running Deep work session and daily timeline](docs/images/open-timer-dashboard.png)
+![Open Timer 仪表盘：正在进行的专注会话和日时间轴](docs/images/open-timer-dashboard.png)
 
-Open Timer is for people who want a calm, single-owner timer without sending their
-work history to a hosted service. It works for deep work, study, meetings, client
-work, or any project you want to time.
+> 截图只使用示例数据，不包含真实项目、备注或计时记录。
 
-## Highlights
+Open Timer 是一个默认私密、单 owner 使用的自托管计时器。适合深度工作、学习、会议、客户项目，或任何你想长期记录投入时间的事情。
 
-- **Private by default** — projects, notes, sessions, and reports require the
-  owner session. There is no public dashboard or wildcard CORS.
-- **Accurate timing** — the server is the source of truth; pause, resume, sleep,
-  refresh, and multiple tabs do not create duplicate or lost time.
-- **Projects you control** — create, rename, group, color, order, and archive
-  projects in Settings. Archived projects retain their history.
-- **Useful history** — daily timelines and summaries use Asia/Shanghai for their
-  day boundary while all stored timestamps remain UTC.
-- **Optional AI assistant** — configure SiliconFlow or another public HTTPS
-  OpenAI-compatible provider in Settings. API keys are encrypted on the server
-  and are never returned to the browser.
-- **Self-host your way** — Docker Compose with SQLite is the supported quick
-  start; Cloudflare Workers + D1 is also supported.
+## 为什么用它？
 
-## Quick start with Docker Compose
+- **默认私密**：项目、备注、会话、日报和导出都要求 owner 登录；没有公开看板和通配 CORS。
+- **计时可信**：服务端是时间事实来源。暂停、继续、休眠、刷新和多标签页不会重复或丢失时间。
+- **项目自己管**：在设置中新增、改名、分组、改颜色、排序和归档；归档不会破坏历史会话。
+- **日时间轴**：时间戳使用 UTC 保存，日视图和汇总按 Asia/Shanghai 划分自然日。
+- **可选 AI 助手**：支持硅基流动和其他 HTTPS OpenAI 兼容接口；API Key 仅在服务端 AES-GCM 加密保存。
+- **不绑平台**：Docker Compose + SQLite 是推荐路径，也支持 Cloudflare Workers + D1。
 
-Prerequisites: Docker Desktop or Docker Engine with the Compose plugin.
+## 快速开始：Docker Compose
+
+前提：Docker Desktop，或带 Compose 插件的 Docker Engine。
 
 ```sh
 git clone https://github.com/Evan-Joseph/open-timer.git
 cd open-timer
-# Optional: install a named release instead of the moving main branch.
-# git checkout v0.1.0
+
+# 可选：想固定到某个发布版本时，在 Releases 页面选好 tag 后执行：
+# git checkout <release-tag>
+
 cp .env.example .env
 ```
 
-Edit `.env` before starting:
+编辑 `.env`，填写以下两个值：
 
 ```dotenv
-# Exactly six digits; used to claim the owner account at first boot.
+# 恰好六位数字；首次启动时用于创建 owner。
 CLOCK_INITIAL_OWNER_PIN=123456
 
-# Generate a unique value and keep it stable after deployment:
-# openssl rand -base64 32
+# 生成命令：openssl rand -base64 32
+# 这个值部署后必须保持不变，否则已保存的 AI Key 无法解密。
 AI_CONFIG_ENCRYPTION_KEY=paste-a-long-random-value-here
 ```
 
-Then start the app:
+启动并检查健康状态：
 
 ```sh
 docker compose up -d --build
 curl http://127.0.0.1:4517/api/v1/health
 ```
 
-Open <http://localhost:4517> and sign in with `CLOCK_INITIAL_OWNER_PIN`.
+打开 <http://localhost:4517>，用 `CLOCK_INITIAL_OWNER_PIN` 登录。
 
-Compose binds to `127.0.0.1` by default. Put it behind an HTTPS reverse proxy
-before exposing it publicly, then set `CLOCK_COOKIE_SECURE=true`. See the
-[Docker guide](docs/docker.md) for backups, upgrades, remote access, and restore
-guidance.
+Compose 默认只绑定本机 `127.0.0.1`。如需公网访问，请放在 HTTPS 反向代理之后，并将 `CLOCK_COOKIE_SECURE=true`。备份、升级、恢复和反向代理说明见 [Docker 部署文档](docs/zh-CN/docker.md)。
 
-## Documentation
+## 文档
 
-- [Docker deployment, backups, upgrades, and restore](docs/docker.md)
-- [Cloudflare Workers + D1 deployment](docs/cloudflare.md)
-- [Configuration reference](docs/configuration.md)
-- [Privacy and security model](docs/security-model.md)
-- [Architecture overview](docs/architecture.md)
-- [Changelog](CHANGELOG.md)
+- [文档首页](docs/README.md)
+- [Docker 部署、备份、升级与恢复](docs/zh-CN/docker.md)
+- [Cloudflare Workers + D1 部署](docs/zh-CN/cloudflare.md)
+- [配置参考](docs/zh-CN/configuration.md)
+- [隐私与安全模型](docs/zh-CN/security-model.md)
+- [架构说明](docs/zh-CN/architecture.md)
+- [更新日志](CHANGELOG.zh-CN.md)
 
-## AI assistant
+## AI 助手
 
-AI is optional; core timing works without it. In **Settings → AI assistant**, an
-owner can choose SiliconFlow (pre-filled with
-`https://api.siliconflow.cn/v1`) or another public HTTPS OpenAI-compatible
-endpoint, then provide a model and API key.
+AI 是可选功能，核心计时不依赖它。在 **设置 → AI 助手** 中，owner 可以选择硅基流动（已预填 `https://api.siliconflow.cn/v1`）或其他公开 HTTPS OpenAI 兼容接口，再填写模型和 API Key。
 
-Keys travel only over the same-origin owner session, are encrypted with
-`AI_CONFIG_ENCRYPTION_KEY` using AES-GCM, and are never returned by the API,
-included in exports, logged, or stored in browser storage. Read the
-[security model](docs/security-model.md) before enabling a provider.
+Key 仅经同源 owner 会话提交，使用 `AI_CONFIG_ENCRYPTION_KEY` 进行 AES-GCM 加密；不会从 API 返回、不会进入导出、不会写入日志，也不会储存在浏览器中。启用前请阅读 [隐私与安全模型](docs/zh-CN/security-model.md)。
 
-## Development
+## 开发
 
-Open Timer requires Node.js 22 or later.
+需要 Node.js 22 或更新版本。
 
 ```sh
 npm ci
@@ -100,15 +91,12 @@ npm run build
 npm run test:e2e
 ```
 
-## Contributing and security
+## 参与与安全
 
-Bug reports and feature requests are welcome. Please read
-[CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. For security
-issues, use the private reporting route described in [SECURITY.md](SECURITY.md);
-do not include credentials, cookies, exports, or personal timer data in a public
-issue.
+欢迎提交 Bug 和功能建议。提 PR 前请先读 [CONTRIBUTING.md](CONTRIBUTING.md)。安全问题请按 [SECURITY.md](SECURITY.md) 中的私密路径报告；不要在公开 Issue 中提交密钥、Cookie、导出文件或个人计时数据。
 
-## License
+如果 Open Timer 对你有帮助，欢迎点 Star 并分享给同样希望把时间记录留在自己手里的人。
 
-Open Timer is licensed under the [MIT License](LICENSE). Bundled font notices
-are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+## 许可
+
+Open Timer 使用 [MIT License](LICENSE)。字体等第三方声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
