@@ -159,23 +159,72 @@ export interface ConchAskResponseApi {
   skipped: ConchSkippedApi[];
 }
 
-export function conchAsk(window: ConchWindow) {
-  return apiPost<ConchAskResponseApi>('/api/v1/conch/ask', { window });
+export interface ApiResult<T> {
+  ok: boolean;
+  status: number;
+  data: T | null;
+}
+
+/** 海螺专用结果：只有浏览器 fetch 被拒绝时 networkError 才为 true。 */
+export interface ConchAskResult extends ApiResult<ConchAskResponseApi> {
+  networkError: boolean;
+  requestId: string;
+}
+
+/**
+ * 海螺不产生状态变更，不能继承会话写路径的 Idempotency-Key。
+ * Safari 旧版缺少 crypto.randomUUID() 时仍使用 Web Crypto 的随机字节生成诊断号。
+ */
+export async function conchAsk(window: ConchWindow): Promise<ConchAskResult> {
+  let requestId = 'conch-client-unavailable';
+  try {
+    requestId = `conch-${createClientUuid()}`;
+    const result = await apiPost<ConchAskResponseApi>('/api/v1/conch/ask', { window }, {
+      idempotency: false,
+      clientRequestId: requestId,
+    });
+    return { ...result, networkError: false, requestId };
+  } catch {
+    return { ok: false, status: 0, data: null, networkError: true, requestId };
+  }
 }
 
 /** 海螺缓存校验专用：仅取已完成时间线的 semantic revision。 */
 export function getConchRevision() {
-  return apiGet<{ conch_revision: number }>('/api/v1/conch/revision');
+  return apiGet<{ conch_revision: number; model: string | null }>('/api/v1/conch/revision');
+}
+
+/**
+ * 所有浏览器端随机关联键的唯一实现。Safari 未提供 randomUUID 时仍使用 Web Crypto，
+ * 不能让已成功的计时写操作在本地同步通知阶段抛异常。
+ */
+export function createClientUuid(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  // RFC 4122 v4：保持幂等键与诊断编号均使用 Web Crypto，不降级到 Math.random。
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function newIdempotencyKey(): string {
-  return crypto.randomUUID();
+  return createClientUuid();
 }
 
-async function request(method: string, path: string, body?: unknown): Promise<Response> {
+interface RequestOptions {
+  /** 会话写操作默认启用；读取、连接管理和海螺请求明确关闭。 */
+  idempotency?: boolean;
+  /** 仅海螺用于把 Safari 端请求与 Worker 安全日志关联。 */
+  clientRequestId?: string;
+}
+
+async function request(method: string, path: string, body?: unknown, options: RequestOptions = {}): Promise<Response> {
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['content-type'] = 'application/json';
-  if (method !== 'GET' && method !== 'HEAD') headers['idempotency-key'] = newIdempotencyKey();
+  const needsIdempotency = options.idempotency ?? (method !== 'GET' && method !== 'HEAD');
+  if (needsIdempotency) headers['idempotency-key'] = newIdempotencyKey();
+  if (options.clientRequestId) headers['x-client-request-id'] = options.clientRequestId;
   const res = await fetch(path, {
     method,
     headers,
@@ -191,8 +240,8 @@ export async function apiGet<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function apiPost<T>(path: string, body?: unknown): Promise<{ ok: boolean; status: number; data: T | null }> {
-  const res = await request('POST', path, body ?? {});
+export async function apiPost<T>(path: string, body?: unknown, options?: RequestOptions): Promise<ApiResult<T>> {
+  const res = await request('POST', path, body ?? {}, options);
   let data: T | null = null;
   try {
     data = (await res.json()) as T;
@@ -202,7 +251,7 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<{ ok: bo
   return { ok: res.ok, status: res.status, data };
 }
 
-export async function apiPatch<T>(path: string, body: unknown): Promise<{ ok: boolean; status: number; data: T | null }> {
+export async function apiPatch<T>(path: string, body: unknown): Promise<ApiResult<T>> {
   const res = await request('PATCH', path, body);
   let data: T | null = null;
   try {

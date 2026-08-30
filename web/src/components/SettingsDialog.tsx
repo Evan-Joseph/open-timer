@@ -3,7 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { Maximize, X } from 'lucide-react';
 import { setAnimationsEnabled, useAnimationsEnabled, useSettings, updateSettings } from '../lib/settings.js';
 import { AMBIENT_LABELS } from '../lib/ambient.js';
-import { detectDeviceRole, requestAppFullscreen } from '../lib/device.js';
+import { requestAppFullscreen } from '../lib/device.js';
 
 interface Props {
   open: boolean;
@@ -30,8 +30,6 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
       setFullscreenError('浏览器拒绝了全屏请求。请改用 F11 或浏览器菜单进入全屏，应用会自动切换布局。');
     }
   };
-  const deviceRole = detectDeviceRole();
-
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -146,7 +144,7 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
             </div>
             {fullscreenError && <p className="setting-hint setting-hint-error" role="status">{fullscreenError}</p>}
             <p className="setting-hint">
-              副屏会在首次触摸后尝试全屏。当前识别：<strong>{deviceRole === 'secondary' ? '副屏（Pad）' : '主控（电脑）'}</strong>。
+              全屏仅在你点击后请求；进入后会沿用当前页面布局并按视口重新排版。
             </p>
           </div>
 

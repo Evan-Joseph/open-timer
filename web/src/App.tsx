@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useClockStore } from './lib/store.js';
 import { useAnimationsEnabled, useSettings } from './lib/settings.js';
 import { PREFS_APPLIED_EVT, pullRemotePrefs, schedulePrefsPush } from './lib/prefs.js';
-import { detectDeviceRole, isAppFullscreen, requestAppFullscreen } from './lib/device.js';
 import { ambient } from './lib/ambient.js';
 import AuthGate from './components/AuthGate.js';
 import ClockFace from './components/ClockFace.js';
@@ -90,46 +89,6 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('animations-off', !animationsEnabled);
   }, [animationsEnabled]);
-
-  // 副屏（Pad）自动全屏：浏览器强制要求用户手势，故在首次触摸/按键时一次性进入。
-  // iPadOS Safari 已支持任意元素 requestFullscreen（Safari 26+）；不支持的环境静默跳过。
-  // 成功进入后用户手动退出 → 本页生命周期内不再打扰。
-  const deviceRole = useMemo(() => detectDeviceRole(), []);
-  useEffect(() => {
-    if (deviceRole !== 'secondary') return;
-    let settled = false;
-    const removeListeners = () => {
-      window.removeEventListener('pointerdown', enter);
-      window.removeEventListener('keydown', enter);
-      window.removeEventListener('touchend', enter);
-      window.removeEventListener('click', enter);
-    };
-    const enter = () => {
-      if (settled) return;
-      if (isAppFullscreen()) {
-        settled = true;
-        removeListeners();
-        return;
-      }
-      // 发起失败（无 API/被拒）不 settled，下一次手势继续重试
-      void requestAppFullscreen();
-    };
-    const onFullscreenChange = () => {
-      if (isAppFullscreen()) {
-        settled = true;
-        removeListeners();
-      }
-    };
-    window.addEventListener('pointerdown', enter);
-    window.addEventListener('keydown', enter);
-    window.addEventListener('touchend', enter);
-    window.addEventListener('click', enter);
-    document.addEventListener('fullscreenchange', onFullscreenChange);
-    return () => {
-      removeListeners();
-      document.removeEventListener('fullscreenchange', onFullscreenChange);
-    };
-  }, [deviceRole]);
 
   // 标签页标题反映运行状态
   useEffect(() => {

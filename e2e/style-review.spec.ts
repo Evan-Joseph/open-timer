@@ -112,7 +112,7 @@ test('视觉审计样式断言', async ({ page }) => {
   });
   console.log('dialog:', JSON.stringify(dialog));
   expect(dialog.radius).toBe('14px');
-  expect(dialog.background).toBe('rgba(255, 255, 255, 0.96)');
+  expect(dialog.background).toBe('rgb(255, 255, 255)');
 
   // 6b. 结束提示音已与全系统统一为分段控件（无独立 iOS Switch 异类）
   const segCount = await page.locator('.seg-control').count();
@@ -141,7 +141,7 @@ test('视觉审计样式断言', async ({ page }) => {
     };
   });
   expect(desktopPopover.width).toBe(440);
-  expect(desktopPopover.background).toBe('rgba(255, 255, 255, 0.96)');
+  expect(desktopPopover.background).toBe('rgb(255, 255, 255)');
   expect(desktopPopover.actionColumns.split(' ').length).toBe(3); // 3 动作：更新起点/继续这段/撤回（备注已自动保存）
   expect(desktopPopover.wrappedButtons).toBe(0);
 
@@ -174,7 +174,7 @@ test('视觉审计样式断言', async ({ page }) => {
  * - 文字 token 对比度：text-1/text-2 ≥4.5:1，text-3 ≥3:1（仅非关键信息），
  *   在 --bg / --bg-elevated / --surface-2 三个表面上逐一验证；
  * - 语义色（accent/danger/success）对底色 ≥3:1；
- * - 弹层材质固定 --popover-surface 深色值 rgba(36, 36, 38, 0.96)。
+ * - 阅读/编辑弹层使用实色 --popover-surface，防止底层时钟文字穿透。
  */
 test('深色模式对比度与材质 token', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -245,9 +245,9 @@ test('深色模式对比度与材质 token', async ({ page }) => {
     const min = pair.startsWith('text-3/') ? 3 : pair.includes('/bg') || pair.startsWith('white/') ? 3 : 4.5;
     expect(value, pair).toBeGreaterThanOrEqual(min);
   }
-  // 材质 token：深色弹层 rgba(36,36,38,0.96)；遮罩 rgba(0,0,0,0.44)（序列化格式不定，按分量比较）
+  // 材质 token：深色弹层 rgb(36,36,38)；遮罩 rgba(0,0,0,0.44)（序列化格式不定，按分量比较）
   expect(report.popoverSurface.slice(0, 3)).toEqual([36, 36, 38]);
-  expect(report.popoverSurface[3]).toBeCloseTo(0.96, 1);
+  expect(report.popoverSurface[3]).toBe(1);
   expect(report.overlayScrim.slice(0, 3)).toEqual([0, 0, 0]);
   expect(report.overlayScrim[3]).toBeCloseTo(0.44, 1);
 
@@ -255,7 +255,7 @@ test('深色模式对比度与材质 token', async ({ page }) => {
   await page.getByRole('button', { name: '设置' }).click();
   await page.waitForTimeout(500);
   const dialogBg = await page.locator('.dialog-content').evaluate((el) => getComputedStyle(el).backgroundColor);
-  expect(dialogBg).toBe('rgba(36, 36, 38, 0.96)');
+  expect(dialogBg).toBe('rgb(36, 36, 38)');
   await page.keyboard.press('Escape');
 });
 

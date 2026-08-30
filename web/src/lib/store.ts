@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SubjectApi, StateApi, SessionApi, SnapshotApi, StopSessionApi } from './api.js';
-import { apiGet, apiPost, apiPatch } from './api.js';
+import { apiGet, apiPost, apiPatch, createClientUuid } from './api.js';
 import type { SyncAnchor } from './clock.js';
 import { shanghaiTodayLocal } from './clock.js';
 
@@ -158,7 +158,7 @@ export function useClockStore(): ClockStore {
     if (bcRef.current) {
       bcRef.current.postMessage({ kind: 'sync' });
     } else {
-      localStorage.setItem(SYNC_PULSE_KEY, `${Date.now()}:${crypto.randomUUID()}`);
+      localStorage.setItem(SYNC_PULSE_KEY, `${Date.now()}:${createClientUuid()}`);
     }
   }, []);
 

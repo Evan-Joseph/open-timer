@@ -524,54 +524,98 @@ test.describe('近 7 天执行回顾', () => {
       const shifted = new Date(Date.UTC(year, month - 1, day + delta));
       return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}-${String(shifted.getUTCDate()).padStart(2, '0')}`;
     };
-    const currentDates = new Set(Array.from({ length: 7 }, (_, index) => shift(state.today_date, -index)));
     let todaySessionCount = 1;
     let todayHasUnfinished = false;
     let todayOpenStatus: 'running' | 'paused' = 'running';
-    await page.route('**/api/v1/daily-summary?**', async (route) => {
-      const date = new URL(route.request().url()).searchParams.get('date')!;
+    const from = shift(state.today_date, -6);
+    const dates = Array.from({ length: 7 }, (_, index) => shift(from, index));
+    // 今日第二段从 02:00Z 开始；汇总截至 03:00Z，精确包含 1 小时未结束段。
+    const generatedAt = `${state.today_date}T03:00:00.000Z`;
+    const rangeSummary = () => ({
+      from,
+      to: state.today_date,
+      timezone: 'Asia/Shanghai',
+      generated_at: generatedAt,
+      revision: 999,
+      total_active_seconds: 28_800,
+      by_subject: [
+        { subject_id: subjects[0].subject_id, display_name: subjects[0].display_name, active_seconds: 19_200 },
+        { subject_id: subjects[1].subject_id, display_name: subjects[1].display_name, active_seconds: 9_600 },
+      ],
+      aggregates: [],
+      active_dates: dates,
       // 面板只查近 7 天窗口；今日 7200、过去 6 日各 3600，用于区分日均口径：
-      // 新语义日均 = 6×3600/6 = 3600「1 小时 0 分」；旧语义 (7200+21600)/7 ≈ 4114「1 小时 8 分」
-      const total = date === state.today_date ? 7200 : 3600;
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
+      // 日均 = 6×3600/6 = 3600「1 小时 0 分」。
+      days: dates.map((date) => {
+        const total = date === state.today_date ? 7200 : 3600;
+        return {
           date,
           total_active_seconds: total,
           by_subject: [
-            { subject_id: subjects[0].subject_id, active_seconds: total * 2 / 3, session_count: 1 },
-            { subject_id: subjects[1].subject_id, active_seconds: total / 3, session_count: 1 },
+            { subject_id: subjects[0].subject_id, display_name: subjects[0].display_name, active_seconds: total * 2 / 3, session_count: 1 },
+            { subject_id: subjects[1].subject_id, display_name: subjects[1].display_name, active_seconds: total / 3, session_count: 1 },
           ],
-        }),
+          aggregates: [],
+          session_count: date === state.today_date ? todaySessionCount : 1,
+        };
+      }),
+    });
+    await page.route('**/api/v1/daily-summaries?**', async (route) => {
+      const url = new URL(route.request().url());
+      expect(url.searchParams.get('from')).toBe(from);
+      expect(url.searchParams.get('to')).toBe(state.today_date);
+      expect(url.searchParams.get('timezone')).toBe('Asia/Shanghai');
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(rangeSummary()),
       });
     });
 
     await page.route('**/api/v1/sessions?**', async (route) => {
-      const date = new URL(route.request().url()).searchParams.get('date')!;
-      const startedAt = `${date}T01:00:00.000Z`;
-      const endedAt = `${date}T02:00:00.000Z`;
-      const sessionCount = date === state.today_date ? todaySessionCount : 1;
+      const url = new URL(route.request().url());
+      expect(url.searchParams.get('from')).toBe(from);
+      expect(url.searchParams.get('to')).toBe(state.today_date);
+      const sessions = dates.flatMap((date) => {
+        const sessionCount = date === state.today_date ? todaySessionCount : 1;
+        const startedAt = `${date}T01:00:00.000Z`;
+        const endedAt = `${date}T02:00:00.000Z`;
+        return Array.from({ length: sessionCount }, (_, index) => {
+          const unfinished = date === state.today_date && index === 1 && todayHasUnfinished;
+          const segmentStartedAt = new Date(Date.parse(startedAt) + index * 3_600_000).toISOString();
+          const segmentEndedAt = unfinished ? null : new Date(Date.parse(endedAt) + index * 3_600_000).toISOString();
+          return {
+            session_id: `history-${date}-${index}`,
+            subject_id: subjects[0].subject_id,
+            started_at: segmentStartedAt,
+            ended_at: segmentEndedAt,
+            active_seconds: 3600,
+            window_active_seconds: 3600,
+            session_active_seconds: 3600,
+            longest_continuous_seconds: 3600,
+            last_continuous_seconds: 3600,
+            last_continuous_ended_at: segmentEndedAt,
+            status: unfinished ? todayOpenStatus : 'stopped',
+            end_reason: unfinished ? null : 'manual',
+            note: null,
+            intent_note: null,
+            end_note: null,
+            segments: [{ started_at: segmentStartedAt, ended_at: segmentEndedAt }],
+          };
+        });
+      });
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          sessions: Array.from({ length: sessionCount }, (_, index) => {
-            const unfinished = date === state.today_date && index === 1 && todayHasUnfinished;
-            const segmentStartedAt = new Date(Date.parse(startedAt) + index * 3_600_000).toISOString();
-            const segmentEndedAt = unfinished ? null : new Date(Date.parse(endedAt) + index * 3_600_000).toISOString();
-            return {
-              session_id: `history-${date}-${index}`,
-              subject_id: subjects[0].subject_id,
-              started_at: segmentStartedAt,
-              ended_at: segmentEndedAt,
-              active_seconds: 3600,
-              status: unfinished ? todayOpenStatus : 'stopped',
-              end_reason: unfinished ? null : 'manual',
-              note: null,
-              segments: [{ started_at: segmentStartedAt, ended_at: segmentEndedAt }],
-            };
-          }),
+          from,
+          to: state.today_date,
+          timezone: 'Asia/Shanghai',
+          generated_at: generatedAt,
+          revision: 999,
+          count: sessions.length,
+          sessions,
+          adjustments_or_revocations: [],
         }),
       });
     });
@@ -592,6 +636,7 @@ test.describe('近 7 天执行回顾', () => {
     await expect(report).not.toContainText('活跃天数');
     await expect(report.locator('.history-lane')).toHaveCount(7);
     await expect(report.locator('.history-lane-segment')).toHaveCount(7);
+    await expect(report.locator('.history-now-line')).toHaveCount(1);
     await expect(report.locator('.history-quiet-period')).toHaveCount(21);
     await expect(report.locator('.history-lane').first()).toContainText('午饭');
     await expect(report.locator('.history-lane').first()).toContainText('午睡');
@@ -618,6 +663,8 @@ test.describe('近 7 天执行回顾', () => {
     await page.getByTestId('history-toggle').click();
     await expect(report.locator('.history-lane').last().locator('.history-lane-segment')).toHaveCount(1);
     await expect(report.locator('.history-lane-segment')).toHaveCount(7);
+    // 未结束的最后一段不应让汇总比泳道多 1 小时：6×1h + 今天已结束的 1h = 7h。
+    await expect(report.locator('.history-metrics')).toContainText('7 小时');
 
     await page.keyboard.press('Escape');
     await expect(report).toHaveCount(0);
@@ -632,6 +679,45 @@ test.describe('近 7 天执行回顾', () => {
     await page.getByTestId('history-toggle').click();
     await expect(report.locator('.history-lane').last().locator('.history-lane-segment')).toHaveCount(2);
     await expect(report.locator('.history-lane-segment')).toHaveCount(8);
+    await expect(report.locator('.history-metrics')).toContainText('8 小时');
+  });
+
+  test('范围读取失败不把近 7 天伪造成零记录', async ({ page }) => {
+    await doSetup(page);
+    await page.route('**/api/v1/daily-summaries?**', (route) => route.abort('failed'));
+    await page.route('**/api/v1/sessions?**', (route) => route.abort('failed'));
+    await page.getByTestId('history-toggle').click();
+    const report = page.getByTestId('history-strip');
+    await expect(report).toContainText('暂时无法读取近 7 天数据');
+    await expect(report.locator('.history-metrics')).toHaveCount(0);
+  });
+
+  test('本地恢复已打开的回顾时自动读取范围数据', async ({ page }) => {
+    await doSetup(page);
+    let dailyRanges = 0;
+    let sessionRanges = 0;
+    await page.route('**/api/v1/daily-summaries?**', async (route) => {
+      dailyRanges += 1;
+      await route.continue();
+    });
+    await page.route('**/api/v1/sessions?**', async (route) => {
+      sessionRanges += 1;
+      await route.continue();
+    });
+    await page.evaluate(() => localStorage.setItem('clock-history-open', '1'));
+    await page.reload();
+    await expect(page.getByTestId('history-strip')).toBeVisible();
+    await expect.poll(() => dailyRanges).toBeGreaterThan(0);
+    await expect.poll(() => sessionRanges).toBeGreaterThan(0);
+    await page.waitForTimeout(300);
+    expect(dailyRanges).toBe(1);
+    expect(sessionRanges).toBe(1);
+    const zeroDataLayout = await page.getByTestId('history-strip').evaluate((panel) => {
+      const metrics = panel.querySelector('.history-metrics')!.getBoundingClientRect();
+      const lanes = panel.querySelector('.history-lanes')!.getBoundingClientRect();
+      return { metricsBottom: metrics.bottom, lanesTop: lanes.top };
+    });
+    expect(zeroDataLayout.lanesTop).toBeGreaterThanOrEqual(zeroDataLayout.metricsBottom);
   });
 });
 
@@ -893,7 +979,7 @@ test.describe('多端偏好同步', () => {
 
   test('神奇海螺缓存只随已完成时间线变化：开始/暂停/继续不重新问，完成后才重新问', async ({ page }) => {
     await doSetup(page);
-    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v3'));
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v4'));
     const initialState = await (await page.request.get('/api/v1/state')).json();
 
     let askCount = 0;
@@ -946,17 +1032,68 @@ test.describe('多端偏好同步', () => {
 
   test('神奇海螺遇到真实 fetch 失败时显示可重试的网络错误', async ({ page }) => {
     await doSetup(page);
-    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v3'));
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v4'));
     await page.route('**/api/v1/conch/ask', (route) => route.abort('failed'));
 
     await page.getByTestId('conch-toggle').click();
     await expect(page.getByText('海螺没听见（网络错误），再问一次？')).toBeVisible();
     await expect(page.getByRole('button', { name: '再问一次' })).toBeVisible();
+    await expect(page.getByText(/诊断编号：conch-/)).toBeVisible();
+  });
+
+  test('Safari 缺少 crypto.randomUUID 时海螺仍能发起无幂等推荐请求', async ({ page }) => {
+    await doSetup(page);
+    await page.evaluate(() => {
+      localStorage.removeItem('clock-conch-cache-v4');
+      Object.defineProperty(crypto, 'randomUUID', { configurable: true, value: undefined });
+    });
+    let receivedHeaders: Record<string, string> | null = null;
+    await page.route('**/api/v1/conch/ask', async (route) => {
+      receivedHeaders = route.request().headers();
+      const state = await (await page.request.get('/api/v1/state')).json();
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          window: 'all', generated_at: new Date().toISOString(), revision: state.revision,
+          conch_revision: state.conch_revision, model: 'e2e-stub', subjects: [], skipped: [],
+        }),
+      });
+    });
+    await page.getByTestId('conch-toggle').click();
+    await expect(page.locator('.conch-empty')).toBeVisible();
+    expect(receivedHeaders?.['x-client-request-id']).toMatch(/^conch-/);
+    expect(receivedHeaders?.['idempotency-key']).toBeUndefined();
+  });
+
+  test('Safari 缺少 BroadcastChannel 与 crypto.randomUUID 时，计时写入后仍能同步', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window, 'BroadcastChannel', { configurable: true, value: undefined });
+      Object.defineProperty(crypto, 'randomUUID', { configurable: true, value: undefined });
+    });
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数学二' }).click();
+    await page.getByTestId('start-btn').click();
+    await expect(page.getByRole('button', { name: '暂停计时' })).toBeVisible();
+    const state = await (await page.request.get('/api/v1/state')).json();
+    expect(state.active_session?.status).toBe('running');
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+  });
+
+  test('神奇海螺区分 Worker 500 与浏览器网络拒绝', async ({ page }) => {
+    await doSetup(page);
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v4'));
+    await page.route('**/api/v1/conch/ask', async (route) => {
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'INTERNAL' }) });
+    });
+    await page.getByTestId('conch-toggle').click();
+    await expect(page.getByText('海螺服务暂时无法处理这次请求，再问一次？')).toBeVisible();
+    await expect(page.getByText(/诊断编号：conch-/)).toBeVisible();
   });
 
   test('神奇海螺发现 owner 会话失效后回到只读态并引导解锁', async ({ page }) => {
     await doSetup(page);
-    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v3'));
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v4'));
     let askCount = 0;
     await page.route('**/api/v1/conch/ask', async (route) => {
       askCount += 1;
@@ -972,7 +1109,7 @@ test.describe('多端偏好同步', () => {
 
   test('回顾与海螺浮层约束 Tab 焦点并在关闭后归还入口焦点', async ({ page }) => {
     await doSetup(page);
-    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v3'));
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v4'));
     await page.route('**/api/v1/conch/ask', async (route) => {
       const state = await (await page.request.get('/api/v1/state')).json();
       await route.fulfill({

@@ -22,7 +22,7 @@ docs/     API、设计、审计、交接
 | 文字 | `--text-1` `--text-2` `--text-3` | 主/次/弱；`--text-3` 仅非关键信息（对比 ≥3:1） |
 | 语义色 | `--accent`(systemBlue) `--danger`(systemRed) `--success`(systemGreen) `--amber` `--on-accent`(accent 底上的白) | HIG 语义色，浅/深各一套 |
 | 边框/阴影 | `--border` `--shadow` `--shadow-sm` `--shadow-up` `--shadow-hover` `--shadow-knob` | 分层阴影，向上用 `--shadow-up`，悬停抬升用 `--shadow-hover`，分段控件滑块用 `--shadow-knob` |
-| 材质 | `--material`(顶栏/浮层 0.72) `--popover-surface`(弹层 0.96) `--overlay-scrim`(遮罩 0.44) | backdrop-filter 只用于顶栏与浮层 |
+| 材质 | `--material`(顶栏 0.72) `--popover-surface`(阅读/编辑弹层实色) `--overlay-scrim`(遮罩 0.44) | backdrop-filter 只用于顶栏与浮层；弹层不透出底下时钟文字 |
 | 圆角 | `--radius-xs`3（微图形：时间轴片段/信标旗） `--radius-sm`6 `--radius`10 `--radius-lg`12 `--radius-xl`14；胶囊 999px | 控件 ≤ 卡片 ≤ 浮层 |
 | 间距 | `--space-1..7` = 4/8/12/16/24/32/48 | 4pt 底、8pt 节奏；gap/padding/margin 一律取此组（分段控件内 2px 微间距除外） |
 | 字级 | `--fs-xs..3xl` = 11/12/13/14/15/17/22/28；`--fs-mini`10 | 大数字不用此表，用 dvh clamp；10px 是注记字号下限，禁止更小 |
@@ -58,7 +58,7 @@ docs/     API、设计、审计、交接
 
 ## 4. 弹层与遮罩
 
-- 设置对话框、时间轴片段详情：`--popover-surface`（0.96）+ backdrop blur；遮罩 `--overlay-scrim`（0.44）。
+- 设置对话框、时间轴片段详情：实色 `--popover-surface` + backdrop blur；遮罩 `--overlay-scrim`（0.44）。
 - 层级：遮罩 z40 → 对话框 z50 → toast z60 → 离开召回遮罩 z90。
 - 弹层互不套卡；各自内部滚动，不解锁文档级滚动。
 

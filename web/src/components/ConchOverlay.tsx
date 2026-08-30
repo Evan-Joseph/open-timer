@@ -29,12 +29,13 @@ const ERROR_TEXT: Record<string, string> = {
   upstream: '海螺的脑子暂时不在服务区，再问一次？',
   invalid: '海螺这次说话含糊，再问一次？',
   rate: '问得太勤啦，稍后再来。',
+  internal: '海螺服务暂时无法处理这次请求，再问一次？',
   network: '海螺没听见（网络错误），再问一次？',
 };
-const RETRYABLE = new Set(['timeout', 'upstream', 'invalid', 'network']);
+const RETRYABLE = new Set(['timeout', 'upstream', 'invalid', 'internal', 'network']);
 
-// v3 = `conch_revision` 语义缓存；旧 revision 缓存不复用，避免一次性迁移歧义。
-const CACHE_KEY = 'clock-conch-cache-v3';
+// v4 = 语义 revision + 模型标识。v3 不复用，确保模型升级后不会展示旧建议。
+const CACHE_KEY = 'clock-conch-cache-v4';
 /** state 不可用（极短启动窗口）时的唯一兜底 TTL；正常状态下不按时间过期。 */
 const CACHE_TTL_FALLBACK_MS = 30 * 60 * 1000;
 
@@ -59,12 +60,14 @@ function readCacheMap(): CacheMap {
  * 开始/暂停/继续/运行秒数不会推进它；完成、备注、修正、撤回、重开才会失效。
  * 三个窗口各自独立缓存，切换窗口互不覆盖。
  */
-function readCache(window: ConchWindow, currentConchRevision: number | null): ConchAskResponseApi | null {
+function readCache(window: ConchWindow, currentConchRevision: number | null, expectedModel: string | null): ConchAskResponseApi | null {
   const entry = readCacheMap()[window];
   if (!entry) return null;
   const age = Date.now() - entry.ts;
   if (currentConchRevision !== null) {
-    return entry.data.conch_revision === currentConchRevision ? entry.data : null;
+    return entry.data.conch_revision === currentConchRevision && (expectedModel === null || entry.data.model === expectedModel)
+      ? entry.data
+      : null;
   }
   return age < CACHE_TTL_FALLBACK_MS ? entry.data : null;
 }
@@ -171,6 +174,7 @@ export default function ConchOverlay({ onClose, store }: Props) {
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading');
   const [data, setData] = useState<ConchAskResponseApi | null>(null);
   const [errorKind, setErrorKind] = useState('network');
+  const [errorRequestId, setErrorRequestId] = useState<string | null>(null);
   const [fromCache, setFromCache] = useState(false);
   const [startingId, setStartingId] = useState<string | null>(null);
 
@@ -184,16 +188,20 @@ export default function ConchOverlay({ onClose, store }: Props) {
   const load = useCallback(async (w: ConchWindow, force = false) => {
     setPhase('loading');
     setFromCache(false);
+    setErrorRequestId(null);
     if (!force) {
       // 缓存命中前用单行 revision 做语义校验：不拉时间轴、不调模型。
       // 这让跨端完成/备注也能立刻使缓存失效，而普通开始/暂停/继续仍长期命中。
       let conchRevision = stateRef.current?.conch_revision ?? null;
+      let conchModel: string | null = null;
       try {
-        conchRevision = (await getConchRevision()).conch_revision;
+        const revision = await getConchRevision();
+        conchRevision = revision.conch_revision;
+        conchModel = revision.model;
       } catch {
         // 离线/瞬断时，仍按最近 state 的语义版本或短暂兜底缓存展示，不把网络波动变成强制重问。
       }
-      const cached = readCache(w, conchRevision);
+      const cached = readCache(w, conchRevision, conchModel);
       if (cached) {
         setData(cached);
         setPhase('ready');
@@ -201,11 +209,10 @@ export default function ConchOverlay({ onClose, store }: Props) {
         return;
       }
     }
-    let res: Awaited<ReturnType<typeof conchAsk>>;
-    try {
-      res = await conchAsk(w);
-    } catch {
+    const res = await conchAsk(w);
+    if (res.networkError) {
       setErrorKind('network');
+      setErrorRequestId(res.requestId);
       setPhase('error');
       return;
     }
@@ -226,8 +233,9 @@ export default function ConchOverlay({ onClose, store }: Props) {
       : res.status === 502 ? 'upstream'
       : res.status === 422 ? 'invalid'
       : res.status === 429 ? 'rate'
-      : 'network';
+      : 'internal';
     setErrorKind(kind);
+    setErrorRequestId(res.requestId);
     setPhase('error');
   }, []);
 
@@ -333,6 +341,7 @@ export default function ConchOverlay({ onClose, store }: Props) {
           {phase === 'error' && (
             <div className="conch-error" role="alert">
               <span>{ERROR_TEXT[errorKind]}</span>
+              {errorRequestId && <span className="conch-diagnostic">诊断编号：{errorRequestId}</span>}
               {RETRYABLE.has(errorKind) && (
                 <button className="ghost-btn" onClick={() => void load(windowSel, true)}>
                   再问一次

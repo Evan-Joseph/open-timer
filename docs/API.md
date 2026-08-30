@@ -84,7 +84,7 @@ Web 客户端内部刷新用的原子快照：一次请求返回同次的 `state
 
 ### 3b. `GET /api/v1/conch/revision`（owner）
 
-神奇海螺本地缓存校验专用：只返回 `{ "conch_revision": 12 }`，不拉时间线、不调用模型。它属于已登录页面内部机制，不是科目任务的常规消费接口。
+神奇海螺本地缓存校验专用：只返回 `{ "conch_revision": 12, "model": "..." }`，不拉时间线、不调用模型。客户端仅当完成时间线 revision 与当前模型都未变时复用建议；它属于已登录页面内部机制，不是科目任务的常规消费接口。
 
 ### 4. `GET /api/v1/daily-summary?date=YYYY-MM-DD&timezone=Asia%2FShanghai` ⭐ 每晚 22:30 复盘用
 
@@ -253,7 +253,7 @@ GET /api/v1/sessions?from=YYYY-MM-DD&to=YYYY-MM-DD
 | PATCH | `/api/v1/sessions/:id/note` | 更新备注，body `{ "note": "..." }`（≤200 字） |
 | POST | `/api/v1/sessions/:id/retime` | 修正时长：delta 落到末段结束时刻（而非仅改快照），汇总按段重算即反映；审计留痕。body `{ "delta_seconds": -300, "reason": "文字或 null" }`（±24h 内；reason 键必须存在，可为 null）；使末段时长为负时 400 `INVALID_RETIME` |
 | POST | `/api/v1/sessions/:id/adjust-start` | 起点补录：把已停止会话的开始时间向前调整（同步首段与净时长），body `{ "started_at": "ISO8601", "reason": "文字或 null" }`；必须早于首段结束时刻，否则 400 `INVALID_START` |
-| POST | `/api/v1/conch/ask` | 神奇海螺：下一步推荐。body `{ "window": "all"\|"30d"\|"7d" }`。服务端仅组装已完成且通过误触过滤的时间线 → 活动门槛过滤（近 7 个北京日无已完成有效会话的科目不送 LLM）→ 调 OpenAI 兼容端点（`CONCH_*` secrets）→ 结构化返回 `{ window, generated_at, conch_revision, revision, model, subjects[], skipped[] }`。`conch_revision` 只随完成/备注/修正/撤回/重开推进，客户端据此长期缓存。独立限流 20 次/小时；无活跃科目时不调 LLM 直接返回。未配置 → 503 `CONCH_NOT_CONFIGURED`；LLM 超时 504 `LLM_TIMEOUT`、上游错误 502 `LLM_UPSTREAM`、输出无法解析 422 `LLM_OUTPUT_INVALID`。不需要幂等键。设计见 `docs/神奇海螺-下一步推荐-设计-2026-08-23.md` |
+| POST | `/api/v1/conch/ask` | 神奇海螺：下一步推荐。body `{ "window": "all"\|"30d"\|"7d" }`。服务端仅组装已完成且通过误触过滤的时间线 → 活动门槛过滤（近 7 个北京日无已完成有效会话的科目不送 LLM）→ 调 OpenAI 兼容端点（`CONCH_*` secrets）→ 结构化返回 `{ window, generated_at, conch_revision, revision, model, subjects[], skipped[] }`。`conch_revision` 只随完成/备注/修正/撤回/重开推进，客户端据此长期缓存。独立限流 20 次/小时；无活跃科目时不调 LLM 直接返回。未配置 → 503 `CONCH_NOT_CONFIGURED`；LLM 超时 504 `LLM_TIMEOUT`、上游错误 502 `LLM_UPSTREAM`、输出无法解析 422 `LLM_OUTPUT_INVALID`、未预期内部错误 500 `INTERNAL`。不需要幂等键；浏览器可带受限 `X-Client-Request-Id: conch-…`，服务端只在格式合法时回显，用于安全日志关联，不记录问题正文、备注、Cookie 或模型响应。设计见 `docs/神奇海螺-下一步推荐-设计-2026-08-23.md` |
 | POST | `/api/v1/auth/logout` | 登出 |
 
 上表会话写操作都需携带 `Idempotency-Key` 头（示例：`curl -H "Idempotency-Key: $(uuidgen)"`）。auth 与 credentials 端点不要求该头。

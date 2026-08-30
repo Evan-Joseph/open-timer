@@ -15,8 +15,11 @@ export class ConchLlmError extends Error {
   constructor(
     public kind: ConchLlmErrorKind,
     message: string,
+    /** 仅用于服务端诊断日志；不向客户端透传上游响应体。 */
+    public upstreamStatus?: number,
   ) {
     super(message);
+    this.name = 'ConchLlmError';
   }
 }
 
@@ -58,7 +61,7 @@ export function createConchLlmClient(
         });
         if (!res.ok) {
           // 不透传上游细节（可能含密钥回显/栈信息）
-          throw new ConchLlmError('upstream', `llm upstream status ${res.status}`);
+          throw new ConchLlmError('upstream', `llm upstream status ${res.status}`, res.status);
         }
         const data = (await res.json()) as {
           choices?: Array<{ message?: { content?: string } }>;

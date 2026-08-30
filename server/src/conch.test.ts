@@ -132,6 +132,34 @@ describe('POST /api/v1/conch/ask', () => {
     rmSync(h2.tmp, { recursive: true, force: true });
   });
 
+  it('回显受限的客户端诊断编号，不记录请求正文', async () => {
+    const h = await setupHarness(CONCH_STUB, { content: JSON.stringify({ subjects: [] }) });
+    const res = await h.app.request('/api/v1/conch/ask', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: h.cookie, 'x-client-request-id': 'conch-e2e-trace-1234' },
+      body: JSON.stringify({ window: 'all' }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('x-client-request-id')).toBe('conch-e2e-trace-1234');
+
+    const invalid = await h.app.request('/api/v1/conch/ask', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: h.cookie, 'x-client-request-id': 'conch-../../cookie' },
+      body: JSON.stringify({ window: 'all' }),
+    });
+    expect(invalid.status).toBe(200);
+    expect(invalid.headers.get('x-client-request-id')).toBeNull();
+    rmSync(h.tmp, { recursive: true, force: true });
+  });
+
+  it('缓存版本同时暴露当前模型标识，模型切换不会复用旧建议', async () => {
+    const h = await setupHarness(CONCH_STUB, { content: JSON.stringify({ subjects: [] }) });
+    const res = await h.app.request('/api/v1/conch/revision', { headers: { cookie: h.cookie } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ conch_revision: 0, model: 'stub-model' });
+    rmSync(h.tmp, { recursive: true, force: true });
+  });
+
   it('无活跃科目：不调 LLM，返回全部 skipped', async () => {
     const h = await setupHarness(CONCH_STUB, { content: 'SHOULD_NOT_BE_USED' });
     const res = await ask(h, 'all');

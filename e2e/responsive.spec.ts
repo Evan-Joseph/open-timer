@@ -134,6 +134,9 @@ test('1024x640 中 7 天泳道不触发页面滚动', async ({ page }) => {
   await expect(page.getByTestId('history-strip')).toBeVisible();
   await expect(page.locator('.history-lane')).toHaveCount(7);
   await expect(page.locator('.history-subject-list > span')).toHaveCount(7);
+  await expect.poll(() => page.getByTestId('history-strip').evaluate((panel) => (
+    panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 1
+  ))).toBe(true);
   await expectDocumentFits(page);
   await expectWithinViewport(page, '.clockface');
   await expectWithinViewport(page, '.history-overlay-panel');

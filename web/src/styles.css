@@ -12,7 +12,7 @@
    - 文字层级：--text-1 / --text-2 / --text-3（≥3:1）
    - 边框/阴影：--border / --shadow / --shadow-sm / --shadow-up
    - 语义色：--accent / --accent-press / --danger / --success / --amber
-   - 材质：--material（顶栏/控制条）/ --popover-surface（弹层，0.96）
+   - 材质：--material（顶栏/控制条）/ --popover-surface（阅读/编辑弹层实色）
      / --overlay-scrim（遮罩，0.44）
    - 圆角：--radius-sm 6 / --radius 10 / --radius-lg 12 / --radius-xl 14
    - 动效：--ease-standard；--dur-press 0.1s / --dur-hover 0.15s
@@ -60,7 +60,8 @@
   --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.12);
   --shadow-knob: 0 2px 2px rgba(0, 0, 0, 0.2);
   --material: rgba(255, 255, 255, 0.72);
-  --popover-surface: rgba(255, 255, 255, 0.96);
+  /* 阅读/编辑弹层保持实色，避免底下的大时钟和时间轴文字穿透内容。 */
+  --popover-surface: #ffffff;
   --overlay-scrim: rgba(0, 0, 0, 0.44);
 
   /* 圆角档位：控件 ≤ 卡片 ≤ 浮层；微图形（时间轴片段/信标旗）用 --radius-xs */
@@ -146,7 +147,7 @@
   --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.5);
   --shadow-knob: 0 2px 2px rgba(0, 0, 0, 0.55);
   --material: rgba(28, 28, 30, 0.72);
-  --popover-surface: rgba(36, 36, 38, 0.96);
+  --popover-surface: #242426;
 
   --c-amber: #fbbf24;      --c-amber-bg: rgba(180, 83, 9, 0.28);
   --c-teal: #2dd4bf;       --c-teal-bg: rgba(15, 118, 110, 0.3);
@@ -764,6 +765,7 @@ body:has(.app .clockface[data-away-level='3']) .seg-popover {
 .history-lane-track { position: relative; height: 18px; overflow: hidden; border-radius: var(--radius-xs); background: repeating-linear-gradient(90deg, var(--surface-2) 0 calc(27.59% - 1px), var(--border) calc(27.59% - 1px) 27.59%); }
 .history-quiet-period { position: absolute; inset-block: 0; display: grid; place-items: center; overflow: hidden; border-inline: 1px solid color-mix(in srgb, var(--text-3) 18%, transparent); color: var(--text-3); background: color-mix(in srgb, var(--text-3) 7%, transparent); font-size: var(--fs-mini); line-height: 1; white-space: nowrap; }
 .history-lane-segment { position: absolute; z-index: 1; top: 5px; bottom: 5px; min-width: 2px; border-radius: var(--radius-xs); background: var(--sc); }
+.history-now-line { position: absolute; z-index: 2; top: -3px; bottom: -3px; width: 1px; background: var(--accent); box-shadow: 0 0 0 1px var(--popover-surface); pointer-events: none; }
 .history-subjects { display: grid; gap: var(--space-2); }
 .history-subject-bar { display: flex; height: 7px; overflow: hidden; border-radius: 999px; background: var(--surface-2); }
 .history-subject-bar > span { min-width: 2px; }
@@ -784,9 +786,9 @@ body:has(.app .clockface[data-away-level='3']) .seg-popover {
     row-gap: var(--space-4);
     align-items: start;
   }
-  .history-metrics { grid-area: metrics; min-height: 100%; }
-  .history-lanes { grid-area: lanes; }
-  .history-subjects {
+  .history-report:has(.history-subjects) .history-metrics { grid-area: metrics; min-height: 100%; }
+  .history-report:has(.history-subjects) .history-lanes { grid-area: lanes; }
+  .history-report:has(.history-subjects) .history-subjects {
     grid-area: subjects;
     min-height: 100%;
     padding-left: var(--space-4);
@@ -1320,6 +1322,9 @@ html.animations-off .app::before { animation: none !important; }
   display: flex; flex-direction: column; align-items: center; gap: var(--space-3);
   padding: var(--space-6) 0;
   color: var(--text-2); font-size: var(--fs-md); text-align: center;
+}
+.conch-diagnostic {
+  color: var(--text-3); font-family: var(--font-num); font-size: var(--fs-xs); font-variant-numeric: tabular-nums;
 }
 .conch-empty { padding: var(--space-6) 0; text-align: center; color: var(--text-3); font-size: var(--fs-md); }
 

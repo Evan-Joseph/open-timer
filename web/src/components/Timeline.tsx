@@ -15,12 +15,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Clock, LocateFixed, Undo2, X, List, GanttChart, CalendarDays, Play, Shell } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { ClockStore } from '../lib/store.js';
-import type { DailySummaryApi, SessionApi } from '../lib/api.js';
+import type { DailySummaryApi, RangeDailySummaryApi, RangeSessionsApi, SessionApi } from '../lib/api.js';
 import { apiGet } from '../lib/api.js';
 import { formatBeijingTime, formatDurationZh } from '../lib/clock.js';
 import { useAnimationsEnabled } from '../lib/settings.js';
 import { PREFS_APPLIED_EVT, schedulePrefsPush, setConchOpenLocal, setHistoryOpenLocal } from '../lib/prefs.js';
-import { detectDeviceRole } from '../lib/device.js';
 import ConchOverlay from './ConchOverlay.js';
 import { useModalFocus } from '../lib/modal-focus.js';
 import { LEARNING_DAY, QUIET_PERIODS, shanghaiDayRangeUtc, timelineRange, type TimelineScale } from '@clock/shared';
@@ -102,11 +101,10 @@ export default function Timeline({ store }: { store: ClockStore }) {
   // 浮层开合态为设备本地：刷新/重开标签页时从 localStorage 恢复（2026-08-24 起不再多端同步）
   const [historyOpen, setHistoryOpen] = useState(() => localStorage.getItem('clock-history-open') === '1');
   const [conchOpen, setConchOpen] = useState(() => localStorage.getItem('clock-conch-open') === '1');
-  /** 设备角色：Pad 副屏不显示会发请求的浮层入口（海螺/近 7 天），电脑主控全功能 */
-  const deviceRole = useMemo(() => detectDeviceRole(), []);
   const [historySummaries, setHistorySummaries] = useState<DailySummaryApi[]>([]);
   const [historyWeekSessions, setHistoryWeekSessions] = useState<Map<string, SessionApi[]>>(new Map());
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const prevTodayRef = useRef(store.todayDate);
   /** 定位以 viewDateRef 为准，避免 effect 声明顺序导致的竞态 */
@@ -114,52 +112,150 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const activeSessionId = store.state?.active_session?.session_id ?? null;
   const prevActiveIdRef = useRef<string | null>(null);
   const historyCacheRef = useRef<Map<string, SessionApi[]>>(new Map());
-  const syncedTodaySessionsRef = useRef(store.sessions);
   const hoverPreviewTimerRef = useRef<number | null>(null);
   const historyPanelRef = useRef<HTMLDivElement>(null);
-  useModalFocus(deviceRole === 'main' && historyOpen, historyPanelRef);
+  const historyRequestRef = useRef(0);
+  const historyHasDataRef = useRef(false);
+  const historyScrolledForRef = useRef<string | null>(null);
+  useModalFocus(historyOpen, historyPanelRef);
 
   const loadHistory = useCallback(async () => {
-    if (historyLoading) return;
+    const requestId = ++historyRequestRef.current;
     setHistoryLoading(true);
-    const dates = Array.from({ length: 7 }, (_, index) => shiftDate(store.todayDate, -index));
-    const rows = await Promise.all(
-      dates.map((date) => apiGet<DailySummaryApi>(`/api/v1/daily-summary?date=${date}&timezone=Asia%2FShanghai`).catch(() => ({
-        date,
-        total_active_seconds: 0,
-        by_subject: [],
-      }))),
-    );
-    const sessions = await Promise.all(
-      dates.map(async (date) => {
-        // 当天会话会继续变化，不可复用历史缓存。
-        if (date === store.todayDate) {
-          const result = await apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${date}`).catch(() => ({ sessions: [] }));
-          return [date, result.sessions] as const;
-        }
-        const cached = historyCacheRef.current.get(date);
-        if (cached) return [date, cached] as const;
-        const result = await apiGet<{ sessions: SessionApi[] }>(`/api/v1/sessions?date=${date}`).catch(() => ({ sessions: [] }));
-        historyCacheRef.current.set(date, result.sessions);
-        return [date, result.sessions] as const;
-      }),
-    );
-    setHistorySummaries(rows);
-    setHistoryWeekSessions(new Map(sessions));
-    setHistoryLoading(false);
-  }, [historyLoading, store.todayDate]);
+    setHistoryError(null);
+    const to = store.todayDate;
+    const from = shiftDate(to, -6);
+    try {
+      const [summaryRange, sessionRange] = await Promise.all([
+        apiGet<RangeDailySummaryApi>(`/api/v1/daily-summaries?from=${from}&to=${to}&timezone=Asia%2FShanghai`),
+        apiGet<RangeSessionsApi>(`/api/v1/sessions?from=${from}&to=${to}`),
+      ]);
+      if (requestId !== historyRequestRef.current) return;
+      if (
+        summaryRange.from !== from || summaryRange.to !== to ||
+        sessionRange.from !== from || sessionRange.to !== to ||
+        summaryRange.revision !== sessionRange.revision
+      ) {
+        throw new Error('HISTORY_RANGE_MISMATCH');
+      }
 
-  // 回顾展开期间结束、撤回或调整会话时，立即同步当天泳道。
+      const dates = Array.from({ length: 7 }, (_, index) => shiftDate(from, index));
+      const sessionsByDate = new Map<string, SessionApi[]>(dates.map((date) => [date, []]));
+      for (const session of sessionRange.sessions) {
+        for (const date of dates) {
+          const { startMs: dayStart, endMs: dayEnd } = shanghaiDayRangeUtc(date);
+          const overlapsCompletedSegment = session.segments.some((segment) => {
+            if (!segment.ended_at) return false;
+            return Date.parse(segment.started_at) < dayEnd && Date.parse(segment.ended_at) > dayStart;
+          });
+          if (overlapsCompletedSegment) sessionsByDate.get(date)!.push(session);
+        }
+      }
+
+      // 日报会暂算 running 开放段；7 天回顾只呈现已经结束的片段，因此从同批范围
+      // 响应中扣除开放段截至日报生成时刻的贡献，避免指标增长而泳道没有对应片段。
+      const summaryGeneratedAt = Date.parse(summaryRange.generated_at);
+      const completedDays = summaryRange.days.map((day) => {
+        const { startMs: dayStart, endMs: dayEnd } = shanghaiDayRangeUtc(day.date);
+        const openSecondsBySubject = new Map<string, number>();
+        const openOnlySessionsBySubject = new Map<string, number>();
+        for (const session of sessionRange.sessions) {
+          const openSeconds = session.segments.reduce((seconds, segment) => {
+            if (segment.ended_at) return seconds;
+            const start = Math.max(dayStart, Date.parse(segment.started_at));
+            const end = Math.min(dayEnd, summaryGeneratedAt);
+            return seconds + Math.max(0, Math.floor((end - start) / 1000));
+          }, 0);
+          if (openSeconds === 0) continue;
+          openSecondsBySubject.set(
+            session.subject_id,
+            (openSecondsBySubject.get(session.subject_id) ?? 0) + openSeconds,
+          );
+          const hasCompletedSegment = session.segments.some((segment) => {
+            if (!segment.ended_at) return false;
+            return Date.parse(segment.started_at) < dayEnd && Date.parse(segment.ended_at) > dayStart;
+          });
+          if (!hasCompletedSegment) {
+            openOnlySessionsBySubject.set(
+              session.subject_id,
+              (openOnlySessionsBySubject.get(session.subject_id) ?? 0) + 1,
+            );
+          }
+        }
+        const openSeconds = [...openSecondsBySubject.values()].reduce((sum, seconds) => sum + seconds, 0);
+        const openOnlySessions = [...openOnlySessionsBySubject.values()].reduce((sum, count) => sum + count, 0);
+        return {
+          ...day,
+          total_active_seconds: Math.max(0, day.total_active_seconds - openSeconds),
+          session_count: Math.max(0, day.session_count - openOnlySessions),
+          by_subject: day.by_subject.map((subject) => ({
+            ...subject,
+            active_seconds: Math.max(0, subject.active_seconds - (openSecondsBySubject.get(subject.subject_id) ?? 0)),
+            session_count: Math.max(0, subject.session_count - (openOnlySessionsBySubject.get(subject.subject_id) ?? 0)),
+          })),
+        };
+      });
+
+      // 两个范围响应通过同范围、同 revision 校验后，再在同一批 React 更新中替换统计与泳道。
+      setHistorySummaries(completedDays);
+      setHistoryWeekSessions(sessionsByDate);
+      historyHasDataRef.current = true;
+      setHistoryError(null);
+    } catch {
+      if (requestId !== historyRequestRef.current) return;
+      setHistoryError(historyHasDataRef.current
+        ? '暂时无法读取最新数据，已保留上次结果。稍后重试。'
+        : '暂时无法读取近 7 天数据，请稍后重试。');
+    } finally {
+      if (requestId === historyRequestRef.current) setHistoryLoading(false);
+    }
+  }, [store.todayDate]);
+
+  /**
+   * 只在今日会话的结构或服务端 revision 变化时刷新范围模型。
+   * 忽略轮询造成的数组换引用和运行秒数增长，避免把现有轮询放大成额外范围轮询。
+   */
+  const historyRefreshKey = useMemo(() => {
+    const sessionShape = store.sessions.map((session) => [
+      session.session_id,
+      session.status,
+      session.started_at,
+      session.ended_at ?? '',
+      ...session.segments.flatMap((segment) => [segment.started_at, segment.ended_at ?? '']),
+    ].join('|')).join(';');
+    return `${store.state?.revision ?? 0}:${sessionShape}`;
+  }, [store.sessions, store.state?.revision]);
+  const historyStateReady = store.state !== null;
+
+  // 首次由 localStorage 恢复为展开态、手动展开，以及打开期间完成/撤回/修正后均刷新完整范围。
   useEffect(() => {
-    if (syncedTodaySessionsRef.current === store.sessions) return;
-    syncedTodaySessionsRef.current = store.sessions;
-    if (!historyOpen) return;
-    setHistoryWeekSessions((previous) => {
-      const next = new Map(previous);
-      next.set(store.todayDate, store.sessions);
-      return next;
+    // 初始快照尚未到位时不抢跑：等待 state/sessions 同次提交，避免恢复浮层首屏多发一组范围请求。
+    if (!historyOpen || !historyStateReady) return;
+    void loadHistory();
+    return () => {
+      historyRequestRef.current += 1;
+    };
+  }, [historyOpen, historyRefreshKey, historyStateReady, loadHistory]);
+
+  // 历史泳道在加载后可能把面板撑出首屏；按用户要求落到完整报告末端，
+  // 同一份数据不反复抢滚动，减弱动态效果时立即到位。
+  const historyScrollKey = historySummaries.map((day) => `${day.date}:${day.total_active_seconds}`).join('|');
+  useEffect(() => {
+    if (!historyOpen || historyLoading || historyScrollKey.length === 0) return;
+    if (historyScrolledForRef.current === historyScrollKey) return;
+    historyScrolledForRef.current = historyScrollKey;
+    const frame = window.requestAnimationFrame(() => {
+      historyPanelRef.current?.scrollTo({
+        top: historyPanelRef.current.scrollHeight,
+        behavior: animationsEnabled ? 'smooth' : 'auto',
+      });
     });
-  }, [historyOpen, store.sessions, store.todayDate]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [animationsEnabled, historyLoading, historyOpen, historyScrollKey]);
+
+  useEffect(() => {
+    if (!historyOpen) historyScrolledForRef.current = null;
+  }, [historyOpen]);
 
   const readServerNowMs = useCallback(() => {
     if (store.anchor) {
@@ -595,6 +691,14 @@ export default function Timeline({ store }: { store: ClockStore }) {
     return { ...day, segments };
   }), [historyModel.current, historyWeekSessions, store.subjects]);
 
+  const historyRangeLabel = historyModel.current.length > 0
+    ? `${historyModel.current[0]!.date.slice(5)} – ${historyModel.current.at(-1)!.date.slice(5)}`
+    : '正在读取';
+  const historyNowMinute = (nowMs - shanghaiDayRangeUtc(store.todayDate).startMs) / 60_000;
+  const historyNowPercent = historyNowMinute >= LEARNING_DAY.startMinute && historyNowMinute <= LEARNING_DAY.endMinute
+    ? ((historyNowMinute - LEARNING_DAY.startMinute) / (LEARNING_DAY.endMinute - LEARNING_DAY.startMinute)) * 100
+    : null;
+
   const visibleQuietPeriods = useMemo(() => QUIET_PERIODS.flatMap((period) => {
     const startMinute = Math.max(period.startMinute, visibleRange.startMinute);
     const endMinute = Math.min(period.endMinute, visibleRange.endMinute);
@@ -674,8 +778,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
               </button>
             </div>
           )}
-          {deviceRole === 'main' && (
-            <div className="timeline-nav-group timeline-nav-insights" role="group" aria-label="回顾与建议">
+          <div className="timeline-nav-group timeline-nav-insights" role="group" aria-label="回顾与建议">
               <button
                 className={`icon-btn ${historyOpen ? 'selected' : ''}`}
                 aria-label="近 7 天回顾"
@@ -684,7 +787,6 @@ export default function Timeline({ store }: { store: ClockStore }) {
                   const next = !historyOpen;
                   setHistoryOpen(next);
                   setHistoryOpenLocal(next);
-                  if (next) void loadHistory();
                 }}
                 data-testid="history-toggle"
               >
@@ -705,8 +807,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
                   <Shell size={16} />
                 </button>
               )}
-            </div>
-          )}
+          </div>
         </div>
       </div>
 
@@ -962,7 +1063,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
 
     {/* 近 7 天执行回顾：居中浮层（drill-down 模态），时钟保持全尺寸不被挤压 */}
     <AnimatePresence initial={false}>
-      {deviceRole === 'main' && historyOpen && (
+      {historyOpen && (
         <motion.div
           key="history-overlay"
           className="history-overlay-backdrop"
@@ -989,13 +1090,25 @@ export default function Timeline({ store }: { store: ClockStore }) {
             <div className="history-overlay-head">
               <div className="history-overlay-title">
                 <strong>近 7 天执行回顾</strong>
-                <span>{historyModel.current[0]?.date.slice(5)} – {historyModel.current.at(-1)?.date.slice(5)}</span>
+                <span>{historyRangeLabel}</span>
               </div>
               <button className="icon-btn" aria-label="关闭" title="关闭" onClick={closeHistory}>
                 <X size={16} />
               </button>
             </div>
-            {historyLoading ? <div className="history-empty">正在读取…</div> : (
+            {historyLoading && historySummaries.length === 0 ? <div className="history-empty">正在读取…</div> :
+              historyError && historySummaries.length === 0 ? (
+                <div className="history-empty" role="status">
+                  {historyError} <button className="text-btn" onClick={() => void loadHistory()}>重试</button>
+                </div>
+              ) : (
+              <>
+              {(historyLoading || historyError) && (
+                <div className="history-empty" role="status">
+                  {historyLoading ? '正在更新近 7 天数据…' : historyError}
+                  {!historyLoading && <button className="text-btn" onClick={() => void loadHistory()}>重试</button>}
+                </div>
+              )}
               <div className="history-report">
                 <div className="history-metrics" aria-label="近 7 天汇总">
                   <div><span>总计</span><strong>{formatDurationZh(historyModel.total)}</strong></div>
@@ -1034,6 +1147,9 @@ export default function Timeline({ store }: { store: ClockStore }) {
                         {day.segments.map((segment) => (
                           <span key={segment.key} className="history-lane-segment" data-color={segment.colorId} style={{ left: `${segment.left}%`, width: `${segment.width}%` }} />
                         ))}
+                        {day.date === store.todayDate && historyNowPercent !== null && (
+                          <span className="history-now-line" style={{ left: `${historyNowPercent}%` }} aria-label="当前时间" />
+                        )}
                       </div>
                     </div>
                   ))}
@@ -1057,6 +1173,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
                   </div>
                 )}
               </div>
+              </>
             )}
           </motion.div>
         </motion.div>
@@ -1065,7 +1182,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
 
     {/* 神奇海螺：下一步做什么（居中浮层，同 7 天回顾范式） */}
     <AnimatePresence initial={false}>
-      {deviceRole === 'main' && !readOnly && conchOpen && <ConchOverlay store={store} onClose={closeConch} />}
+      {!readOnly && conchOpen && <ConchOverlay store={store} onClose={closeConch} />}
     </AnimatePresence>
     </>
   );

@@ -1045,76 +1045,116 @@ export function createApp(deps: AppDeps): Hono {
   /* ---------- 神奇海螺：下一步推荐（owner-only，独立限流；日志不落备注/LLM 体） ---------- */
 
   const ConchAskSchema = z.object({ window: z.enum(['all', '30d', '7d']) });
+  const ConchRequestIdSchema = z.string().min(14).max(72).regex(/^conch-[a-z0-9]+(?:-[a-z0-9]+)*$/);
   const conchLimiter = new RateLimiter(3_600_000, 20);
+
+  function conchRequestId(c: Context): string | null {
+    const parsed = ConchRequestIdSchema.safeParse(c.req.header('x-client-request-id'));
+    return parsed.success ? parsed.data : null;
+  }
+
+  function logConch(
+    stage: 'entered' | 'upstream_ok' | 'upstream_error' | 'internal_error',
+    requestId: string | null,
+    startedAtMs: number,
+    upstreamStatus?: number,
+  ): void {
+    const entry: {
+      event: 'conch_ask';
+      stage: 'entered' | 'upstream_ok' | 'upstream_error' | 'internal_error';
+      request_id: string | null;
+      elapsed_ms: number;
+      upstream_status?: number;
+    } = {
+      event: 'conch_ask',
+      stage,
+      request_id: requestId,
+      elapsed_ms: Math.max(0, now() - startedAtMs),
+    };
+    if (Number.isInteger(upstreamStatus)) entry.upstream_status = upstreamStatus;
+    console.info(JSON.stringify(entry));
+  }
 
   /** 缓存校验专用：仅读一行 semantic revision，不拉时间轴、不调用 LLM。 */
   app.get('/api/v1/conch/revision', requireOwner(storage), async (c) =>
-    c.json({ conch_revision: await storage.getConchRevision() }),
+    c.json({ conch_revision: await storage.getConchRevision(), model: config.conch?.model ?? null }),
   );
 
   app.post('/api/v1/conch/ask', requireOwner(storage), async (c) => {
-    if (!config.conch || deps.conchLlm === null) return c.json({ error: 'CONCH_NOT_CONFIGURED' }, 503);
-    const llm = deps.conchLlm ?? createConchLlmClient(config.conch);
-    const raw = await c.req.json().catch(() => null);
-    const body = ConchAskSchema.safeParse(raw);
-    if (!body.success) return c.json({ error: 'INVALID_WINDOW' }, 400);
-    const ip = clientIp((name) => c.req.header(name));
-    if (!conchLimiter.allow(`conch:${ip}`, now())) return c.json({ error: 'RATE_LIMITED' }, 429);
-
-    const nowMs = now();
-    // 全量一次取（ended_at 索引 range + 活动部分索引），窗口过滤在 builder 内，
-    // 保证活动门槛（全量/近7天）数据完整。
-    const sessions = await storage.sessionsOverlapping(0, nowMs + 1);
-    const segMap = await storage.segmentsForSessions(sessions.map((s) => s.id));
-    const ctx = buildConchContext({
-      nowMs,
-      window: body.data.window,
-      sessions,
-      segmentsBySession: segMap,
-      minSegmentMs: config.minSegmentMs,
-    });
-    const [revision, conchRevision] = await Promise.all([storage.maxEventId(), storage.getConchRevision()]);
-    const baseResp = {
-      window: body.data.window,
-      generated_at: toIso(nowMs),
-      conch_revision: conchRevision,
-      revision,
-      model: config.conch.model,
-    };
-
-    // 无活跃科目：不调 LLM，直接返回门槛结果（省 token）
-    if (ctx.active.length === 0) {
-      return c.json({ ...baseResp, subjects: [], skipped: ctx.skipped });
-    }
-
-    let content: string;
+    const requestId = conchRequestId(c);
+    if (requestId) c.header('X-Client-Request-Id', requestId);
+    const startedAtMs = now();
+    logConch('entered', requestId, startedAtMs);
     try {
-      const result = await llm.ask({ system: CONCH_SYSTEM_PROMPT, user: ctx.userPrompt });
-      content = result.content;
-    } catch (err) {
-      if (err instanceof ConchLlmError && err.kind === 'timeout') {
-        return c.json({ error: 'LLM_TIMEOUT' }, 504);
-      }
-      return c.json({ error: 'LLM_UPSTREAM' }, 502);
-    }
+      if (!config.conch || deps.conchLlm === null) return c.json({ error: 'CONCH_NOT_CONFIGURED' }, 503);
+      const llm = deps.conchLlm ?? createConchLlmClient(config.conch);
+      const raw = await c.req.json().catch(() => null);
+      const body = ConchAskSchema.safeParse(raw);
+      if (!body.success) return c.json({ error: 'INVALID_WINDOW' }, 400);
+      const ip = clientIp((name) => c.req.header(name));
+      if (!conchLimiter.allow(`conch:${ip}`, now())) return c.json({ error: 'RATE_LIMITED' }, 429);
 
-    const recs = parseConchLlmOutput(content, ctx.active);
-    if (!recs) return c.json({ error: 'LLM_OUTPUT_INVALID' }, 422);
-
-    const subjects = recs.map((rec) => {
-      const def = subjectById(rec.subject_id)!;
-      const subSessions = sessions.filter((s) => s.subjectId === rec.subject_id && s.status !== 'voided');
-      let lastActiveMs = 0;
-      for (const s of subSessions) lastActiveMs = Math.max(lastActiveMs, s.endedAtMs ?? s.startedAtMs);
-      return {
-        ...rec,
-        display_name: def.displayName,
-        running_now: subSessions.some((s) => s.status === 'running'),
-        last_active_date: utcMsToShanghaiDate(lastActiveMs > 0 ? lastActiveMs : nowMs),
+      const nowMs = now();
+      // 全量一次取（ended_at 索引 range + 活动部分索引），窗口过滤在 builder 内，
+      // 保证活动门槛（全量/近7天）数据完整。
+      const sessions = await storage.sessionsOverlapping(0, nowMs + 1);
+      const segMap = await storage.segmentsForSessions(sessions.map((s) => s.id));
+      const ctx = buildConchContext({
+        nowMs,
+        window: body.data.window,
+        sessions,
+        segmentsBySession: segMap,
+        minSegmentMs: config.minSegmentMs,
+      });
+      const [revision, conchRevision] = await Promise.all([storage.maxEventId(), storage.getConchRevision()]);
+      const baseResp = {
+        window: body.data.window,
+        generated_at: toIso(nowMs),
+        conch_revision: conchRevision,
+        revision,
+        model: config.conch.model,
       };
-    });
 
-    return c.json({ ...baseResp, subjects, skipped: ctx.skipped });
+      // 无活跃科目：不调 LLM，直接返回门槛结果（省 token）
+      if (ctx.active.length === 0) {
+        return c.json({ ...baseResp, subjects: [], skipped: ctx.skipped });
+      }
+
+      let content: string;
+      try {
+        const result = await llm.ask({ system: CONCH_SYSTEM_PROMPT, user: ctx.userPrompt });
+        content = result.content;
+      } catch (err) {
+        const upstreamStatus = err instanceof ConchLlmError ? err.upstreamStatus : undefined;
+        logConch('upstream_error', requestId, startedAtMs, upstreamStatus);
+        if (err instanceof ConchLlmError && err.kind === 'timeout') {
+          return c.json({ error: 'LLM_TIMEOUT' }, 504);
+        }
+        return c.json({ error: 'LLM_UPSTREAM' }, 502);
+      }
+
+      const recs = parseConchLlmOutput(content, ctx.active);
+      logConch('upstream_ok', requestId, startedAtMs);
+      if (!recs) return c.json({ error: 'LLM_OUTPUT_INVALID' }, 422);
+
+      const subjects = recs.map((rec) => {
+        const def = subjectById(rec.subject_id)!;
+        const subSessions = sessions.filter((s) => s.subjectId === rec.subject_id && s.status !== 'voided');
+        let lastActiveMs = 0;
+        for (const s of subSessions) lastActiveMs = Math.max(lastActiveMs, s.endedAtMs ?? s.startedAtMs);
+        return {
+          ...rec,
+          display_name: def.displayName,
+          running_now: subSessions.some((s) => s.status === 'running'),
+          last_active_date: utcMsToShanghaiDate(lastActiveMs > 0 ? lastActiveMs : nowMs),
+        };
+      });
+
+      return c.json({ ...baseResp, subjects, skipped: ctx.skipped });
+    } catch {
+      logConch('internal_error', requestId, startedAtMs);
+      return c.json({ error: 'INTERNAL' }, 500);
+    }
   });
 
   /* ---------- 统一 404：未匹配路径一律 JSON 错误体（含 /api/* 未知端点） ---------- */
