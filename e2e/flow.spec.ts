@@ -970,6 +970,50 @@ test.describe('多端偏好同步', () => {
     await expect(page.getByTestId('conch-panel')).toHaveCount(0);
   });
 
+  test('回顾与海螺浮层约束 Tab 焦点并在关闭后归还入口焦点', async ({ page }) => {
+    await doSetup(page);
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v3'));
+    await page.route('**/api/v1/conch/ask', async (route) => {
+      const state = await (await page.request.get('/api/v1/state')).json();
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          window: 'all',
+          generated_at: new Date().toISOString(),
+          revision: state.revision,
+          conch_revision: state.conch_revision,
+          model: 'e2e-stub',
+          subjects: [],
+          skipped: [],
+        }),
+      });
+    });
+
+    const historyTrigger = page.getByTestId('history-toggle');
+    await historyTrigger.click();
+    const history = page.getByTestId('history-strip');
+    await expect(history).toBeVisible();
+    await expect(history.getByRole('button', { name: '关闭' })).toBeFocused();
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press('Tab');
+      expect(await history.evaluate((panel) => panel.contains(document.activeElement))).toBe(true);
+    }
+    await page.keyboard.press('Escape');
+    await expect(historyTrigger).toBeFocused();
+
+    const conchTrigger = page.getByTestId('conch-toggle');
+    await conchTrigger.click();
+    const conch = page.getByTestId('conch-panel');
+    await expect(conch).toBeVisible();
+    await expect(conch.getByRole('button', { name: '关闭' })).toBeFocused();
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press('Tab');
+      expect(await conch.evaluate((panel) => panel.contains(document.activeElement))).toBe(true);
+    }
+    await page.keyboard.press('Escape');
+    await expect(conchTrigger).toBeFocused();
+  });
+
   test('计时对表：一端开始计时，另一端同步进入运行且秒数对齐（±2s）', async ({ page, context }) => {
     await doSetup(page);
     await page.getByRole('radio', { name: '数学二' }).click();

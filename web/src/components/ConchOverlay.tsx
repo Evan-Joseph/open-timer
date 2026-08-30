@@ -9,6 +9,7 @@ import { Shell, X, RefreshCw, Play, Shuffle } from 'lucide-react';
 import { conchAsk, getConchRevision, type ConchAskResponseApi, type ConchSubjectApi, type ConchWindow } from '../lib/api.js';
 import { saveConchStartMark } from '../lib/conch-mark.js';
 import type { ClockStore } from '../lib/store.js';
+import { useModalFocus } from '../lib/modal-focus.js';
 
 const WINDOW_LABELS: Record<ConchWindow, string> = { all: '从始至今', '30d': '近 30 天', '7d': '近 7 天' };
 const WINDOWS: readonly ConchWindow[] = ['all', '30d', '7d'];
@@ -176,7 +177,9 @@ export default function ConchOverlay({ onClose, store }: Props) {
   const activeSession = store.state?.active_session ?? null;
   /** 用 ref 读 semantic revision：避免 load 身份随 state 轮询变化触发重复请求 */
   const stateRef = useRef(store.state);
+  const panelRef = useRef<HTMLDivElement>(null);
   stateRef.current = store.state;
+  useModalFocus(true, panelRef);
 
   const load = useCallback(async (w: ConchWindow, force = false) => {
     setPhase('loading');
@@ -267,7 +270,8 @@ export default function ConchOverlay({ onClose, store }: Props) {
     >
       <motion.div
         key="conch-panel"
-        className="history-overlay-panel conch-panel"
+          className="history-overlay-panel conch-panel"
+          ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="神奇海螺 · 下一步做什么"

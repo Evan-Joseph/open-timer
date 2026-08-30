@@ -22,6 +22,7 @@ import { useAnimationsEnabled } from '../lib/settings.js';
 import { PREFS_APPLIED_EVT, schedulePrefsPush, setConchOpenLocal, setHistoryOpenLocal } from '../lib/prefs.js';
 import { detectDeviceRole } from '../lib/device.js';
 import ConchOverlay from './ConchOverlay.js';
+import { useModalFocus } from '../lib/modal-focus.js';
 import { LEARNING_DAY, QUIET_PERIODS, shanghaiDayRangeUtc, timelineRange, type TimelineScale } from '@clock/shared';
 
 const NOW_TICK_MS = 30_000;
@@ -115,6 +116,8 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const historyCacheRef = useRef<Map<string, SessionApi[]>>(new Map());
   const syncedTodaySessionsRef = useRef(store.sessions);
   const hoverPreviewTimerRef = useRef<number | null>(null);
+  const historyPanelRef = useRef<HTMLDivElement>(null);
+  useModalFocus(deviceRole === 'main' && historyOpen, historyPanelRef);
 
   const loadHistory = useCallback(async () => {
     if (historyLoading) return;
@@ -972,6 +975,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
           <motion.div
             key="history-panel"
             className="history-overlay-panel"
+            ref={historyPanelRef}
             data-testid="history-strip"
             role="dialog"
             aria-modal="true"
