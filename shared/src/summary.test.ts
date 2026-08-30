@@ -177,7 +177,7 @@ describe('buildDailySummary', () => {
     expect(a).toBe(b);
   });
 
-  it('adjustments 只收录会话开始于当日的条目', () => {
+  it('adjustments 收录与查询日相交会话的条目', () => {
     const s = session({ id: 'A' });
     const adj: ManualAdjustmentRow[] = [
       { sessionId: 'A', kind: 'void', beforeJson: '{}', afterJson: '{}', reason: '误触', createdAtMs: START + 8_000_000 },
@@ -194,5 +194,27 @@ describe('buildDailySummary', () => {
     });
     expect(out.adjustments_or_revocations).toHaveLength(1);
     expect(out.adjustments_or_revocations[0].reason).toBe('误触');
+  });
+
+  it('跨午夜会话的次日汇总仍保留其修正审计', () => {
+    const startMs = END - 3_600_000; // 北京 23:00
+    const endMs = END + 3_600_000; // 次日北京 01:00
+    const s = session({ id: 'X2', startedAtMs: startMs, endedAtMs: endMs });
+    const out = buildDailySummary({
+      date: '2026-08-10',
+      sessions: [s],
+      segmentsBySession: new Map([['X2', [seg('X2', startMs, endMs)]]]),
+      adjustments: [
+        { sessionId: 'X2', kind: 'retime', beforeJson: '{}', afterJson: '{}', reason: '跨日补记', createdAtMs: END + 5_000_000 },
+      ],
+      revision: 2,
+      generatedAtMs: END + 5_000_000,
+      activeSession: null,
+      activeSegments: [],
+    });
+    expect(out.total_active_seconds).toBe(3600);
+    expect(out.adjustments_or_revocations).toEqual([
+      expect.objectContaining({ session_id: 'X2', kind: 'retime', reason: '跨日补记' }),
+    ]);
   });
 });

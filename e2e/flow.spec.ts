@@ -166,10 +166,22 @@ test.describe('核心流程', () => {
 
     await seg.hover();
     await expect(page.getByTestId('seg-preview')).toBeVisible();
+    const previewAlignment = await page.evaluate(() => {
+      const segRect = document.querySelector('.seg-hit')!.getBoundingClientRect();
+      const previewRect = document.querySelector('.seg-preview')!.getBoundingClientRect();
+      return Math.abs(segRect.left + segRect.width / 2 - (previewRect.left + previewRect.width / 2));
+    });
+    expect(previewAlignment).toBeLessThanOrEqual(16);
     await expect(page.getByRole('dialog', { name: '会话详情' })).toHaveCount(0);
     await seg.hover();
     await seg.click();
     await expect(page.getByRole('dialog', { name: '会话详情' })).toBeVisible();
+    const popoverAlignment = await page.evaluate(() => {
+      const segRect = document.querySelector('.seg-hit')!.getBoundingClientRect();
+      const popoverRect = document.querySelector('.seg-popover')!.getBoundingClientRect();
+      return Math.abs(segRect.left + segRect.width / 2 - (popoverRect.left + popoverRect.width / 2));
+    });
+    expect(popoverAlignment).toBeLessThanOrEqual(16);
     await expect(page.getByText('净时长')).toBeVisible();
     await page.getByRole('button', { name: '关闭' }).click();
   });
@@ -932,6 +944,32 @@ test.describe('多端偏好同步', () => {
     expect(askCount).toBe(2);
   });
 
+  test('神奇海螺遇到真实 fetch 失败时显示可重试的网络错误', async ({ page }) => {
+    await doSetup(page);
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v3'));
+    await page.route('**/api/v1/conch/ask', (route) => route.abort('failed'));
+
+    await page.getByTestId('conch-toggle').click();
+    await expect(page.getByText('海螺没听见（网络错误），再问一次？')).toBeVisible();
+    await expect(page.getByRole('button', { name: '再问一次' })).toBeVisible();
+  });
+
+  test('神奇海螺发现 owner 会话失效后回到只读态并引导解锁', async ({ page }) => {
+    await doSetup(page);
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v3'));
+    let askCount = 0;
+    await page.route('**/api/v1/conch/ask', async (route) => {
+      askCount += 1;
+      await route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: 'UNAUTHORIZED' }) });
+    });
+
+    await page.getByTestId('conch-toggle').click();
+    await expect.poll(() => askCount).toBe(1);
+    await expect(page.getByTestId('unlock-btn')).toBeVisible();
+    await expect(page.getByText('登录状态已过期，请点击右上角锁图标重新解锁')).toBeVisible();
+    await expect(page.getByTestId('conch-panel')).toHaveCount(0);
+  });
+
   test('计时对表：一端开始计时，另一端同步进入运行且秒数对齐（±2s）', async ({ page, context }) => {
     await doSetup(page);
     await page.getByRole('radio', { name: '数学二' }).click();
@@ -1123,6 +1161,22 @@ test.describe('全屏沉浸模式', () => {
       await expect(page.getByText('浏览器拒绝了全屏请求')).toBeVisible();
       await page.keyboard.press('Escape');
     }
+  });
+
+  test('全屏请求异步被拒绝时保留设置并显示原因', async ({ page }) => {
+    await doSetup(page);
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'fullscreenEnabled', { configurable: true, value: true });
+      Object.defineProperty(document.documentElement, 'requestFullscreen', {
+        configurable: true,
+        value: () => Promise.reject(new DOMException('denied', 'NotAllowedError')),
+      });
+    });
+
+    await page.getByRole('button', { name: '设置' }).click();
+    await page.getByTestId('settings-fullscreen-btn').click();
+    await expect(page.getByTestId('settings-fullscreen-btn')).toBeVisible();
+    await expect(page.getByText('浏览器拒绝了全屏请求')).toBeVisible();
   });
 });
 

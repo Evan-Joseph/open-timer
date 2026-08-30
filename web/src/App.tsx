@@ -112,7 +112,7 @@ export default function App() {
         return;
       }
       // 发起失败（无 API/被拒）不 settled，下一次手势继续重试
-      requestAppFullscreen();
+      void requestAppFullscreen();
     };
     const onFullscreenChange = () => {
       if (isAppFullscreen()) {

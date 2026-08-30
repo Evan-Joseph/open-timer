@@ -726,6 +726,21 @@ button:focus-visible, input:focus-visible {
   box-shadow: var(--shadow);
   display: flex; flex-direction: column; gap: var(--space-3);
 }
+/* 逾期语境不能在浮层边界被截断：设置由 Portal 挂到 body，故从 body:has() 统一取状态。 */
+body:has(.app .clockface[data-away-level='2']) .history-overlay-panel,
+body:has(.app .clockface[data-away-level='2']) .dialog-content,
+body:has(.app .clockface[data-away-level='2']) .seg-preview,
+body:has(.app .clockface[data-away-level='2']) .seg-popover {
+  background: color-mix(in srgb, var(--amber) 9%, var(--popover-surface));
+  border-color: color-mix(in srgb, var(--amber) 42%, var(--border));
+}
+body:has(.app .clockface[data-away-level='3']) .history-overlay-panel,
+body:has(.app .clockface[data-away-level='3']) .dialog-content,
+body:has(.app .clockface[data-away-level='3']) .seg-preview,
+body:has(.app .clockface[data-away-level='3']) .seg-popover {
+  background: color-mix(in srgb, var(--danger) 11%, var(--popover-surface));
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
+}
 .history-overlay-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .history-overlay-title { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
 .history-overlay-title strong { font-size: var(--fs-xl); font-weight: 600; color: var(--text-1); }
@@ -906,13 +921,13 @@ button:focus-visible, input:focus-visible {
   border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--popover-surface); box-shadow: var(--shadow-sm);
   backdrop-filter: blur(18px) saturate(1.2); -webkit-backdrop-filter: blur(18px) saturate(1.2);
-  pointer-events: none; animation: preview-in var(--dur-hover) var(--ease-standard) both;
+  pointer-events: none; transform: translateX(-50%); animation: preview-in var(--dur-hover) var(--ease-standard) both;
 }
 .seg-preview-title { display: flex; align-items: center; gap: var(--space-2); color: var(--text-1); font-size: var(--fs-md); }
 .seg-preview-title .pill-dot { background: var(--sc); }
 .seg-preview-meta { margin-top: 3px; color: var(--text-2); font-family: var(--font-num); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 .seg-preview-hint { display: block; margin-top: 5px; color: var(--text-3); font-size: var(--fs-xs); }
-@keyframes preview-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes preview-in { from { opacity: 0; transform: translate(-50%, 4px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
 /* 会话 popover（固定宽 + 头部 X 关闭 + 双按钮动作区） */
 .seg-popover {
@@ -920,6 +935,7 @@ button:focus-visible, input:focus-visible {
   width: 440px; max-width: calc(100vw - 24px);
   padding: var(--space-4); border-radius: var(--radius-xl);
   background: var(--popover-surface);
+  transform: translateX(-50%);
   backdrop-filter: blur(28px) saturate(1.35);
   -webkit-backdrop-filter: blur(28px) saturate(1.35);
   border: 1px solid var(--border); box-shadow: var(--shadow);
@@ -1201,7 +1217,10 @@ button:active:not(:disabled) { transform: scale(0.98); }
     right: var(--space-3);
     width: auto;
     max-width: none;
+    transform: none;
   }
+  .seg-preview { animation-name: preview-in-narrow; }
+  @keyframes preview-in-narrow { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
   .history-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .history-chart { gap: 2px; }
   .history-day { padding-inline: 2px; }

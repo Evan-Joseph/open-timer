@@ -122,7 +122,7 @@ export interface RangeDailySummaryApi {
 export interface DailySummaryApi {
   date: string;
   total_active_seconds: number;
-  by_subject: Array<{ subject_id: string; active_seconds: number; session_count: number }>;
+  by_subject: Array<{ subject_id: string; display_name: string; active_seconds: number; session_count: number }>;
 }
 
 /* ---------- 神奇海螺 ---------- */

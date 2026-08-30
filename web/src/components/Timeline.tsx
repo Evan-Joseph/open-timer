@@ -834,7 +834,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
           className="seg-preview"
           role="status"
           data-testid="seg-preview"
-          style={{ left: `clamp(8px, ${hoverPreview.containerX}px, calc(100% - min(304px, calc(100vw - 24px))))` }}
+          style={{ left: `clamp(148px, ${hoverPreview.containerX}px, calc(100% - 148px))` }}
         >
           <div className="seg-preview-title">
             <span className="pill-dot" data-color={hoverPreview.row.colorId} aria-hidden />
@@ -853,7 +853,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
           role="dialog"
           aria-label="会话详情"
           data-testid="seg-popover"
-          style={{ left: `clamp(8px, ${popover.containerX}px, calc(100% - min(464px, calc(100vw - 24px))))` }}
+          style={{ left: `clamp(228px, ${popover.containerX}px, calc(100% - 228px))` }}
         >
           <div className="popover-head">
             <span className="popover-subject" data-color={popover.row.colorId}>
@@ -1061,7 +1061,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
 
     {/* 神奇海螺：下一步做什么（居中浮层，同 7 天回顾范式） */}
     <AnimatePresence initial={false}>
-      {deviceRole === 'main' && conchOpen && <ConchOverlay onClose={closeConch} />}
+      {deviceRole === 'main' && !readOnly && conchOpen && <ConchOverlay store={store} onClose={closeConch} />}
     </AnimatePresence>
     </>
   );

@@ -8,7 +8,7 @@ import { motion } from 'motion/react';
 import { Shell, X, RefreshCw, Play, Shuffle } from 'lucide-react';
 import { conchAsk, getConchRevision, type ConchAskResponseApi, type ConchSubjectApi, type ConchWindow } from '../lib/api.js';
 import { saveConchStartMark } from '../lib/conch-mark.js';
-import { useClockStore } from '../lib/store.js';
+import type { ClockStore } from '../lib/store.js';
 
 const WINDOW_LABELS: Record<ConchWindow, string> = { all: '从始至今', '30d': '近 30 天', '7d': '近 7 天' };
 const WINDOWS: readonly ConchWindow[] = ['all', '30d', '7d'];
@@ -80,6 +80,7 @@ function writeCache(window: ConchWindow, data: ConchAskResponseApi): void {
 
 interface Props {
   onClose: () => void;
+  store: ClockStore;
 }
 
 /** 单科目推荐卡：备选方案支持点击开工与「换一换」轮换（本地轮换，不重新请求）。 */
@@ -164,8 +165,7 @@ function ConchCard({
   );
 }
 
-export default function ConchOverlay({ onClose }: Props) {
-  const store = useClockStore();
+export default function ConchOverlay({ onClose, store }: Props) {
   const [windowSel, setWindowSel] = useState<ConchWindow>('all');
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading');
   const [data, setData] = useState<ConchAskResponseApi | null>(null);
@@ -198,11 +198,23 @@ export default function ConchOverlay({ onClose }: Props) {
         return;
       }
     }
-    const res = await conchAsk(w);
+    let res: Awaited<ReturnType<typeof conchAsk>>;
+    try {
+      res = await conchAsk(w);
+    } catch {
+      setErrorKind('network');
+      setPhase('error');
+      return;
+    }
     if (res.ok && res.data) {
       setData(res.data);
       setPhase('ready');
       writeCache(w, res.data);
+      return;
+    }
+    if (res.status === 401) {
+      store.expireOwnerSession();
+      onClose();
       return;
     }
     const kind =

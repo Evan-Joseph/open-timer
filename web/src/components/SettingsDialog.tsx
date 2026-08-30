@@ -22,9 +22,9 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
   /** 进入全屏被浏览器拒绝时的可理解反馈（权限、iframe 沙箱或不支持） */
   const [fullscreenError, setFullscreenError] = useState<string | null>(null);
 
-  const enterFullscreen = () => {
+  const enterFullscreen = async () => {
     setFullscreenError(null);
-    if (requestAppFullscreen()) {
+    if (await requestAppFullscreen()) {
       onOpenChange(false);
     } else {
       setFullscreenError('浏览器拒绝了全屏请求。请改用 F11 或浏览器菜单进入全屏，应用会自动切换布局。');

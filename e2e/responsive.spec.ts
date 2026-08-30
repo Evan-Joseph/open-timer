@@ -191,3 +191,54 @@ test('全屏与窗口模式共用同一布局，逾期告警状态一致', async
   await page.evaluate(() => document.exitFullscreen().catch(() => {}));
   await page.waitForTimeout(400);
 });
+
+test('L3 逾期告警延续到设置、回顾与海螺浮层', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await enterReadyState(page);
+  await page.route('**/api/v1/conch/ask', async (route) => {
+    const state = await (await page.request.get('/api/v1/state')).json();
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        window: 'all',
+        generated_at: new Date().toISOString(),
+        revision: state.revision,
+        conch_revision: state.conch_revision,
+        model: 'e2e-stub',
+        subjects: [],
+        skipped: [],
+      }),
+    });
+  });
+
+  const surface = async (selector: string) => page.locator(selector).evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { background: style.backgroundColor, border: style.borderColor };
+  });
+
+  await page.getByTestId('history-toggle').click();
+  const historyBase = await surface('.history-overlay-panel');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: '设置' }).click();
+  const settingsBase = await surface('.dialog-content');
+  await page.keyboard.press('Escape');
+  await page.getByTestId('conch-toggle').click();
+  await expect(page.locator('.conch-empty')).toBeVisible();
+  const conchBase = await surface('.conch-panel');
+  await page.keyboard.press('Escape');
+
+  await page.locator('.clockface').evaluate((element) => element.setAttribute('data-away-level', '3'));
+  await page.getByTestId('history-toggle').click();
+  const historyAlert = await surface('.history-overlay-panel');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: '设置' }).click();
+  const settingsAlert = await surface('.dialog-content');
+  await page.keyboard.press('Escape');
+  await page.getByTestId('conch-toggle').click();
+  await expect(page.locator('.conch-empty')).toBeVisible();
+  const conchAlert = await surface('.conch-panel');
+
+  expect(historyAlert).not.toEqual(historyBase);
+  expect(settingsAlert).not.toEqual(settingsBase);
+  expect(conchAlert).not.toEqual(conchBase);
+});

@@ -69,8 +69,8 @@ export function isAppFullscreen(): boolean {
   return !!(d.fullscreenElement ?? d.webkitFullscreenElement ?? d.mozFullScreenElement ?? d.msFullscreenElement);
 }
 
-/** 发起全屏（含厂商前缀回退）。返回是否成功发起请求；失败静默，由调用方决定是否重试。 */
-export function requestAppFullscreen(): boolean {
+/** 发起全屏（含厂商前缀回退）。仅在浏览器确认成功后返回 true。 */
+export async function requestAppFullscreen(): Promise<boolean> {
   const d = document as FsDoc;
   const enabled = d.fullscreenEnabled ?? d.webkitFullscreenEnabled ?? d.mozFullScreenEnabled ?? d.msFullscreenEnabled;
   if (enabled === false) return false;
@@ -79,8 +79,7 @@ export function requestAppFullscreen(): boolean {
   const req = el.requestFullscreen ?? el.webkitRequestFullscreen ?? el.mozRequestFullScreen ?? el.msRequestFullscreen;
   if (typeof req !== 'function') return false;
   try {
-    const p = req.call(el);
-    if (p && typeof (p as Promise<void>).catch === 'function') (p as Promise<void>).catch(() => {});
+    await req.call(el);
     return true;
   } catch {
     return false;

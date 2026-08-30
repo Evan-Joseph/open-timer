@@ -26,6 +26,8 @@ export interface ClockStore {
   /** 一次性轻提示（成功/撤销等），自动消失 */
   toast: string | null;
   refresh: () => Promise<void>;
+  /** owner-only 请求返回 401 时，立刻退出过期的可写态并显示解锁入口。 */
+  expireOwnerSession: () => void;
   setupPassword: (p: string) => Promise<boolean>;
   login: (p: string) => Promise<boolean>;
   logout: () => Promise<void>;
@@ -88,6 +90,8 @@ export function useClockStore(): ClockStore {
   const awayAnchorRef = useRef<SyncAnchor | null>(null);
   /** 最新已应用的 state（用于丢弃滞后轮询响应） */
   const stateRef = useRef<StateApi | null>(null);
+  /** 鉴权探测版本：StrictMode 或慢网络下的旧 /auth/me 不得覆盖后续登录/过期状态。 */
+  const authEpochRef = useRef(0);
   /** 写操作前后递增；旧 epoch 的在途轮询永远不能覆盖新状态。 */
   const syncEpochRef = useRef(0);
   const refreshSeqRef = useRef(0);
@@ -214,17 +218,24 @@ export function useClockStore(): ClockStore {
 
   // 初始鉴权探测：未登录默认进入只读监督态（公开端点可看，写操作需解锁）
   useEffect(() => {
+    const epoch = ++authEpochRef.current;
+    let cancelled = false;
     (async () => {
       try {
         const me = await apiGet<{ authenticated: boolean; setup_done: boolean }>('/api/v1/auth/me');
+        if (cancelled || epoch !== authEpochRef.current) return;
         if (!me.setup_done) setPhase('setup');
         else if (!me.authenticated) setPhase('readonly');
         else setPhase('ready');
         // subjects 由 phase 变化后的专用 effect 拉一次，避免首屏重复 Worker 请求。
       } catch {
+        if (cancelled || epoch !== authEpochRef.current) return;
         setPhase('readonly');
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // ready/readonly 后启动轮询；运行中加快频率（只读态轮询的是公开端点）
@@ -275,6 +286,7 @@ export function useClockStore(): ClockStore {
     async (p: string) => {
       const res = await apiPost('/api/v1/auth/setup', { password: p });
       if (res.ok) {
+        authEpochRef.current += 1;
         setPhase('ready');
         return true;
       }
@@ -288,6 +300,7 @@ export function useClockStore(): ClockStore {
     async (p: string) => {
       const res = await apiPost('/api/v1/auth/login', { password: p });
       if (res.ok) {
+        authEpochRef.current += 1;
         setPhase('ready');
         return true;
       }
@@ -300,8 +313,16 @@ export function useClockStore(): ClockStore {
   const logout = useCallback(async () => {
     await apiPost('/api/v1/auth/logout');
     // 回到只读监督态（而非阻断式登录页）：监督者仍可查看
+    authEpochRef.current += 1;
     setPhase('readonly');
   }, []);
+
+  const expireOwnerSession = useCallback(() => {
+    authEpochRef.current += 1;
+    setPhase('readonly');
+    // 进入只读态会立即刷新公开快照；普通 error 会被该成功刷新清掉，故用 toast 保留一次引导。
+    flashToast('登录状态已过期，请点击右上角锁图标重新解锁');
+  }, [flashToast]);
 
   const activeId = state?.active_session?.session_id ?? null;
 
@@ -652,6 +673,7 @@ export function useClockStore(): ClockStore {
     error,
     toast,
     refresh,
+    expireOwnerSession,
     setupPassword,
     login,
     logout,

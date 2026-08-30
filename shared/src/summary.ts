@@ -167,9 +167,9 @@ export function buildDailySummary(input: SummaryInput): DailySummary {
 
   const adjustments_or_revocations: AdjustmentEntry[] = input.adjustments
     .filter((a) => {
-      const session = validSessions.find((s) => s.id === a.sessionId) ?? input.sessions.find((s) => s.id === a.sessionId);
-      if (!session) return false;
-      return session.startedAtMs >= startMs && session.startedAtMs < endMs;
+      // input.sessions 已由调用方限定为与查询日窗口相交的会话；跨午夜会话
+      // 的次日汇总也应保留其后续修正，而不能只按会话起始日归属。
+      return input.sessions.some((session) => session.id === a.sessionId);
     })
     .map((a) => ({
       session_id: a.sessionId,
