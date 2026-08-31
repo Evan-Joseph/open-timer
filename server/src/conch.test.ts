@@ -292,13 +292,19 @@ describe('POST /api/v1/conch/ask', () => {
     rmSync(h.tmp, { recursive: true, force: true });
   });
 
-  it('LLM 输出无法解析 → 422；超时 504；失效凭据 503；额度不足 402；其他上游错误 502', async () => {
+  it('LLM 输出无法解析或为空 → 422；超时 504；失效凭据 503；额度不足 402；其他上游错误 502', async () => {
     const nowMs = Date.now();
     const garbage = await setupHarness(CONCH_STUB, { content: '这不是 JSON' });
     await startAndStop(garbage, 'math', '看课', nowMs - DAY);
     garbage.setClock(nowMs);
     expect((await ask(garbage, 'all')).status).toBe(422);
     rmSync(garbage.tmp, { recursive: true, force: true });
+
+    const empty = await setupHarness(CONCH_STUB, { content: '', error: new ConchLlmError('invalid', 'empty') });
+    await startAndStop(empty, 'math', '看课', nowMs - DAY);
+    empty.setClock(nowMs);
+    expect((await ask(empty, 'all')).status).toBe(422);
+    rmSync(empty.tmp, { recursive: true, force: true });
 
     const timeout = await setupHarness(CONCH_STUB, { content: '', error: new ConchLlmError('timeout', 'x') });
     await startAndStop(timeout, 'math', '看课', nowMs - DAY);

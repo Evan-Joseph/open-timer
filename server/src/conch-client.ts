@@ -9,7 +9,7 @@ export interface ConchLlmResult {
   content: string;
 }
 
-export type ConchLlmErrorKind = 'timeout' | 'auth' | 'quota' | 'upstream';
+export type ConchLlmErrorKind = 'timeout' | 'auth' | 'quota' | 'invalid' | 'upstream';
 
 export class ConchLlmError extends Error {
   constructor(
@@ -33,6 +33,15 @@ export function createConchLlmClient(
 ): ConchLlmClient {
   const timeoutMs = opts?.timeoutMs ?? 90_000;
   const fetchImpl = opts?.fetchImpl ?? fetch;
+  // DeepSeek 官方端点与 SiliconFlow 等兼容网关的 reasoning 参数不同。
+  // 仅按精确官方 hostname 走官方协议；其余端点保留原有兼容请求形状。
+  const isOfficialDeepSeek = (() => {
+    try {
+      return new URL(cfg.apiBase).hostname.toLowerCase() === 'api.deepseek.com';
+    } catch {
+      return false;
+    }
+  })();
 
   return {
     async ask({ system, user }) {
@@ -42,13 +51,19 @@ export function createConchLlmClient(
           { role: 'system', content: system },
           { role: 'user', content: user },
         ],
-        temperature: 0.4,
         max_tokens: 2048,
-        // SiliconFlow JSON Mode：让结构化解析获得稳定 JSON，而非依赖模型偶然遵守 prompt。
+        // OpenAI 兼容 JSON Output：让结构化解析获得稳定 JSON，而非依赖模型偶然遵守 prompt。
         response_format: { type: 'json_object' },
       };
-      // SiliconFlow 的推理预算是顶层 thinking_budget，不是嵌套 thinking 对象。
-      if (cfg.thinkingBudget > 0) body.thinking_budget = cfg.thinkingBudget;
+      if (isOfficialDeepSeek) {
+        // DeepSeek 官方文档：思考模式下 temperature 不生效；使用其官方开关和强度字段。
+        body.thinking = { type: 'enabled' };
+        body.reasoning_effort = 'high';
+      } else {
+        body.temperature = 0.4;
+        // 兼容既有 SiliconFlow 等端点的顶层预算字段。
+        if (cfg.thinkingBudget > 0) body.thinking_budget = cfg.thinkingBudget;
+      }
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -72,7 +87,9 @@ export function createConchLlmClient(
         };
         const content = data.choices?.[0]?.message?.content;
         if (typeof content !== 'string' || content.length === 0) {
-          throw new ConchLlmError('upstream', 'llm empty content');
+          // DeepSeek JSON Output 已知偶发空 content；这是可重试的结构化输出失败，
+          // 不把 HTTP 200 的模型输出问题伪装成上游网络故障。
+          throw new ConchLlmError('invalid', 'llm empty content');
         }
         return { content };
       } catch (err) {

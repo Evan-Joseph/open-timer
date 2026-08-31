@@ -1145,6 +1145,9 @@ export function createApp(deps: AppDeps): Hono {
         if (err instanceof ConchLlmError && err.kind === 'quota') {
           return c.json({ error: 'CONCH_QUOTA_EXHAUSTED' }, 402);
         }
+        if (err instanceof ConchLlmError && err.kind === 'invalid') {
+          return c.json({ error: 'LLM_OUTPUT_INVALID' }, 422);
+        }
         return c.json({ error: 'LLM_UPSTREAM' }, 502);
       }
 
