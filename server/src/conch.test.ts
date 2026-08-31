@@ -292,64 +292,6 @@ describe('POST /api/v1/conch/ask', () => {
     rmSync(h.tmp, { recursive: true, force: true });
   });
 
-  it('模型反驳明确完成记录时，响应退回到原始事实而不展示错误完成判断', async () => {
-    const h = await setupHarness(CONCH_STUB, {
-      content: JSON.stringify({
-        subjects: [{
-          subject_id: 'data-structures',
-          next_action: '做第6章题目',
-          action_kind: 'problems',
-          rationale: '收尾题未最终订正，下一步应完成该环节',
-          confidence: 'high',
-        }],
-      }),
-    });
-    const nowMs = Date.now();
-    await startAndStop(h, 'data-structures', '完成数据结构第6章题目', nowMs - 2 * DAY);
-    await startAndStop(h, 'data-structures', '订正并理解完第6章收尾题', nowMs - DAY);
-    h.setClock(nowMs);
-
-    const res = await ask(h, 'all');
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.subjects).toEqual([expect.objectContaining({
-      subject_id: 'data-structures',
-      next_action: '按最近记录继续下一项已确定范围',
-      rationale: '最近记录：订正并理解完第6章收尾题',
-      confidence: 'low',
-    })]);
-    rmSync(h.tmp, { recursive: true, force: true });
-  });
-
-  it('模型重推已完成同章视频时，响应退回到原始事实', async () => {
-    const h = await setupHarness(CONCH_STUB, {
-      content: JSON.stringify({
-        subjects: [{
-          subject_id: 'data-structures',
-          next_action: '继续学习BOK第6章剩余视频',
-          action_kind: 'lecture',
-          rationale: '第6章视频未全部看完。',
-          confidence: 'high',
-        }],
-      }),
-    });
-    const nowMs = Date.now();
-    await startAndStop(h, 'data-structures', '开始第6章的BOK视频学习，看完6-1、2、3，剩6-4-1、6-4-2', nowMs - 2 * DAY);
-    await startAndStop(h, 'data-structures', '看完第6章的6-4-1、6-4-2视频', nowMs - DAY);
-    h.setClock(nowMs);
-
-    const res = await ask(h, 'all');
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.subjects).toEqual([expect.objectContaining({
-      subject_id: 'data-structures',
-      next_action: '按最近记录继续下一项已确定范围',
-      rationale: '最近记录：看完第6章的6-4-1、6-4-2视频',
-      confidence: 'low',
-    })]);
-    rmSync(h.tmp, { recursive: true, force: true });
-  });
-
   it('LLM 输出无法解析 → 422；超时 504；失效凭据 503；其他上游错误 502', async () => {
     const nowMs = Date.now();
     const garbage = await setupHarness(CONCH_STUB, { content: '这不是 JSON' });

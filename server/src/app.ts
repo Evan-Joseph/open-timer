@@ -37,7 +37,6 @@ import {
   computeActiveSeconds,
   isCountedSegment,
   buildConchContext,
-  enforceConchFacts,
   parseConchLlmOutput,
   CONCH_SYSTEM_PROMPT,
   subjectById,
@@ -1147,10 +1146,9 @@ export function createApp(deps: AppDeps): Hono {
       }
 
       internalStage = 'parse_output';
-      const parsedRecs = parseConchLlmOutput(content, ctx.active);
+      const recs = parseConchLlmOutput(content, ctx.active);
       logConch('upstream_ok', requestId, startedAtMs);
-      if (!parsedRecs) return c.json({ error: 'LLM_OUTPUT_INVALID' }, 422);
-      const recs = enforceConchFacts(parsedRecs, ctx.subjectFacts);
+      if (!recs) return c.json({ error: 'LLM_OUTPUT_INVALID' }, 422);
 
       internalStage = 'shape_response';
       const subjects = recs.map((rec) => {

@@ -31,9 +31,7 @@ export function createConchLlmClient(
   cfg: ConchConfig,
   opts?: { timeoutMs?: number; fetchImpl?: typeof fetch },
 ): ConchLlmClient {
-  // Ling Flash 对完整生产输入重复实测约 9 秒；30 秒为短时供应商波动留余量，
-  // 也避免低频入口在无反馈状态下悬挂过久。
-  const timeoutMs = opts?.timeoutMs ?? 30_000;
+  const timeoutMs = opts?.timeoutMs ?? 90_000;
   const fetchImpl = opts?.fetchImpl ?? fetch;
 
   return {
@@ -45,8 +43,7 @@ export function createConchLlmClient(
           { role: 'user', content: user },
         ],
         temperature: 0.4,
-        // 海螺最多返回少量科目、每项有硬长度上限；1024 足够且缩短生成尾部等待。
-        max_tokens: 1024,
+        max_tokens: 2048,
         // SiliconFlow JSON Mode：让结构化解析获得稳定 JSON，而非依赖模型偶然遵守 prompt。
         response_format: { type: 'json_object' },
       };

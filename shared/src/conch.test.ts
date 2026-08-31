@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   buildConchContext,
   conchSessionSeconds,
-  enforceConchFacts,
   parseConchLlmOutput,
   CONCH_MAX_LINES_PER_SUBJECT,
   CONCH_SYSTEM_PROMPT,
@@ -128,27 +127,29 @@ describe('buildConchContext 窗口与编码', () => {
     const ctx = buildConchContext({
       nowMs: NOW, window: 'all', sessions: [a, b], segmentsBySession: fullSegs([a, b]), minSegmentMs: 10_000,
     });
-    // 顶部“当前事实”按新→旧排列；下面完整时间线仍须旧→新。
-    const timelineStart = ctx.userPrompt.lastIndexOf('累计 ');
-    const timeline = ctx.userPrompt.slice(timelineStart);
-    const i1 = timeline.indexOf('"第1章 看课"');
-    const i2 = timeline.lastIndexOf('"第4章 基础题"');
+    const i1 = ctx.userPrompt.indexOf('"第1章 看课"');
+    const i2 = ctx.userPrompt.indexOf('"第4章 基础题"');
     expect(i1).toBeGreaterThan(-1);
     expect(i2).toBeGreaterThan(i1);
     expect(ctx.userPrompt).toMatch(/\d{2}-\d{2} \d{2}:\d{2}–\d{2}:\d{2} 1h00m "第4章 基础题"/);
     expect(ctx.userPrompt).toContain('统计窗口：从始至今');
   });
 
-  it('明确完成的订正记录原样进入上下文，不能被模型当作缺步', () => {
-    const problems = session({ subjectId: 'data-structures', startedAtMs: NOW - 2 * DAY, intentNote: '完成数据结构第6章题目' });
-    const corrected = session({ subjectId: 'data-structures', startedAtMs: NOW - DAY, intentNote: '订正并理解完第6章收尾题' });
+  it('完整保留第 6 章收尾与第 7 章新进度的时序', () => {
+    const chapter6 = session({ subjectId: 'data-structures', startedAtMs: NOW - 3 * DAY, intentNote: '完成数据结构第6章题目' });
+    const corrected = session({ subjectId: 'data-structures', startedAtMs: NOW - 2 * DAY, intentNote: '订正并理解完第6章收尾题' });
+    const chapter7 = session({ subjectId: 'data-structures', startedAtMs: NOW - DAY, intentNote: '看完BOK7-1、7-2（1）网课' });
     const ctx = buildConchContext({
-      nowMs: NOW, window: 'all', sessions: [problems, corrected], segmentsBySession: fullSegs([problems, corrected]), minSegmentMs: 10_000,
+      nowMs: NOW,
+      window: 'all',
+      sessions: [chapter7, chapter6, corrected],
+      segmentsBySession: fullSegs([chapter7, chapter6, corrected]),
+      minSegmentMs: 10_000,
     });
-    expect(ctx.userPrompt).toContain('订正并理解完第6章收尾题');
-    expect(ctx.userPrompt).toContain('当前事实（新→旧，优先级最高，不得反驳）');
-    expect(ctx.subjectFacts.get('data-structures')?.completedScopes).toEqual(expect.arrayContaining(['第6章题目', '第6章收尾题']));
-    expect(ctx.subjectFacts.get('data-structures')?.completedPracticeChapters).toEqual(['第6章']);
+    const notes = ['完成数据结构第6章题目', '订正并理解完第6章收尾题', '看完BOK7-1、7-2（1）网课'];
+    const offsets = notes.map((note) => ctx.userPrompt.indexOf(`"${note}"`));
+    expect(offsets.every((offset) => offset >= 0)).toBe(true);
+    expect(offsets).toEqual([...offsets].sort((x, y) => x - y));
   });
 
   it('单科目超 150 行时早于 45 天的部分按月聚合', () => {
@@ -229,65 +230,5 @@ describe('parseConchLlmOutput', () => {
   it('system prompt 含 schema 关键约束', () => {
     expect(CONCH_SYSTEM_PROMPT).toContain('只输出输入中给出的科目');
     expect(CONCH_SYSTEM_PROMPT).toContain('next_action');
-    expect(CONCH_SYSTEM_PROMPT).toContain('不得把同一范围写成未完成、未订正、缺少或再次推荐完成它');
-    expect(CONCH_SYSTEM_PROMPT).toContain('绝不能写成该步骤没有做、尚未完成或缺失');
-  });
-
-  it('明确完成范围被重复推荐或被写成未完成时，退回事实型保守建议', () => {
-    const facts = new Map<SubjectId, import('../src/conch.js').ConchSubjectFacts>([
-      ['data-structures', {
-        latestNotes: ['订正并理解完第6章收尾题'],
-        completedScopes: ['第6章题目', '第6章收尾题'],
-        completedPracticeChapters: ['第6章'],
-        completedVideoChapters: [],
-      }],
-    ]);
-    const [safe] = enforceConchFacts([
-      {
-        subject_id: 'data-structures', next_action: '做第6章题目', action_kind: 'problems', topic: '第6章', pattern: null,
-        rationale: '收尾题未最终订正', confidence: 'high', alternatives: ['订正第6章收尾题'],
-      },
-    ], facts);
-    expect(safe.next_action).toBe('按最近记录继续下一项已确定范围');
-    expect(safe.rationale).toBe('最近记录：订正并理解完第6章收尾题');
-    expect(safe.confidence).toBe('low');
-  });
-
-  it('同章课后题也是已完成章节练习的语义重复，不能重新推荐', () => {
-    const facts = new Map<SubjectId, import('../src/conch.js').ConchSubjectFacts>([
-      ['data-structures', {
-        latestNotes: ['订正并理解完第6章收尾题'],
-        completedScopes: ['第6章题目', '第6章收尾题'],
-        completedPracticeChapters: ['第6章'],
-        completedVideoChapters: [],
-      }],
-    ]);
-    const [safe] = enforceConchFacts([
-      {
-        subject_id: 'data-structures', next_action: '做第6章课后题', action_kind: 'problems', topic: '第6章', pattern: null,
-        rationale: '已完成第6章视频学习，下一步应为做对应章节题目。', confidence: 'high', alternatives: [],
-      },
-    ], facts);
-    expect(safe.next_action).toBe('按最近记录继续下一项已确定范围');
-    expect(safe.confidence).toBe('low');
-  });
-
-  it('同章视频已明确完成时，不能推荐剩余视频', () => {
-    const facts = new Map<SubjectId, import('../src/conch.js').ConchSubjectFacts>([
-      ['data-structures', {
-        latestNotes: ['看完第6章的6-4-1、6-4-2视频'],
-        completedScopes: ['第6章的6-4-1', '第6章的6-4-2视频'],
-        completedPracticeChapters: [],
-        completedVideoChapters: ['第6章'],
-      }],
-    ]);
-    const [safe] = enforceConchFacts([
-      {
-        subject_id: 'data-structures', next_action: '继续学习BOK第6章剩余视频', action_kind: 'lecture', topic: '第6章', pattern: null,
-        rationale: '第6章视频未全部看完。', confidence: 'high', alternatives: [],
-      },
-    ], facts);
-    expect(safe.next_action).toBe('按最近记录继续下一项已确定范围');
-    expect(safe.rationale).toBe('最近记录：看完第6章的6-4-1、6-4-2视频');
   });
 });

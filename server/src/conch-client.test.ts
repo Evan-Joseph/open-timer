@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { createConchLlmClient } from './conch-client.js';
 
 const CONFIG = {
-  apiBase: 'https://api.siliconflow.com/v1',
+  apiBase: 'https://api.siliconflow.cn/v1',
   apiKey: 'test-key',
-  model: 'deepseek-ai/DeepSeek-V4-Pro-0813',
+  model: 'deepseek-ai/DeepSeek-V4-Pro',
   thinkingBudget: 768,
 };
 
@@ -19,9 +19,9 @@ describe('SiliconFlow Conch client', () => {
 
     await expect(client.ask({ system: 'system', user: 'user' })).resolves.toEqual({ content: '{"subjects":[]}' });
     expect(sentBody).toMatchObject({
-      model: 'deepseek-ai/DeepSeek-V4-Pro-0813',
+      model: 'deepseek-ai/DeepSeek-V4-Pro',
       temperature: 0.4,
-      max_tokens: 1024,
+      max_tokens: 2048,
       response_format: { type: 'json_object' },
       thinking_budget: 768,
     });

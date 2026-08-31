@@ -35,7 +35,7 @@ const ERROR_TEXT: Record<string, string> = {
 };
 const RETRYABLE = new Set(['timeout', 'upstream', 'invalid', 'internal', 'network']);
 
-// v5 = 语义 revision + 模型标识 + 原始事实校验。v4 不复用，避免继续展示规则收紧前的建议。
+// v5 = 语义 revision + 模型标识。模型变更后不复用旧建议。
 const CACHE_KEY = 'clock-conch-cache-v5';
 /** state 不可用（极短启动窗口）时的唯一兜底 TTL；正常状态下不按时间过期。 */
 const CACHE_TTL_FALLBACK_MS = 30 * 60 * 1000;
@@ -337,7 +337,7 @@ export default function ConchOverlay({ onClose, store }: Props) {
                 <Shell size={20} aria-hidden className="conch-breathe" />
                 <span>神奇海螺正在看已完成的记录…</span>
               </div>
-              <span className="conch-loading-sub">通常约 10 秒；超过 30 秒会自动结束并允许重试</span>
+              <span className="conch-loading-sub">推理约需一分钟；完成时间线不变就不会重新问</span>
             </div>
           )}
 
