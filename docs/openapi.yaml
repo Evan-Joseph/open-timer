@@ -537,7 +537,7 @@ paths:
         '429': { description: 请求过频 }
         '500': { description: 未预期内部错误（INTERNAL；不含上游响应或栈信息） }
         '502': { description: LLM 上游错误 }
-        '503': { description: 未配置模型 }
+        '503': { description: 未配置模型，或上游 API 凭据失效（CONCH_CREDENTIAL_INVALID） }
         '504': { description: LLM 超时 }
 
   /sessions/{id}/pause:

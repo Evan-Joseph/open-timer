@@ -1139,6 +1139,9 @@ export function createApp(deps: AppDeps): Hono {
         if (err instanceof ConchLlmError && err.kind === 'timeout') {
           return c.json({ error: 'LLM_TIMEOUT' }, 504);
         }
+        if (err instanceof ConchLlmError && err.kind === 'auth') {
+          return c.json({ error: 'CONCH_CREDENTIAL_INVALID' }, 503);
+        }
         return c.json({ error: 'LLM_UPSTREAM' }, 502);
       }
 

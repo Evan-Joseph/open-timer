@@ -9,7 +9,7 @@ export interface ConchLlmResult {
   content: string;
 }
 
-export type ConchLlmErrorKind = 'timeout' | 'upstream';
+export type ConchLlmErrorKind = 'timeout' | 'auth' | 'upstream';
 
 export class ConchLlmError extends Error {
   constructor(
@@ -44,8 +44,11 @@ export function createConchLlmClient(
         ],
         temperature: 0.4,
         max_tokens: 2048,
+        // SiliconFlow JSON Mode：让结构化解析获得稳定 JSON，而非依赖模型偶然遵守 prompt。
+        response_format: { type: 'json_object' },
       };
-      if (cfg.thinkingBudget > 0) body.thinking = { budget_tokens: cfg.thinkingBudget };
+      // SiliconFlow 的推理预算是顶层 thinking_budget，不是嵌套 thinking 对象。
+      if (cfg.thinkingBudget > 0) body.thinking_budget = cfg.thinkingBudget;
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -61,7 +64,7 @@ export function createConchLlmClient(
         });
         if (!res.ok) {
           // 不透传上游细节（可能含密钥回显/栈信息）
-          throw new ConchLlmError('upstream', `llm upstream status ${res.status}`, res.status);
+          throw new ConchLlmError(res.status === 401 ? 'auth' : 'upstream', `llm upstream status ${res.status}`, res.status);
         }
         const data = (await res.json()) as {
           choices?: Array<{ message?: { content?: string } }>;

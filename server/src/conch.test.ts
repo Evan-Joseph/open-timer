@@ -292,7 +292,7 @@ describe('POST /api/v1/conch/ask', () => {
     rmSync(h.tmp, { recursive: true, force: true });
   });
 
-  it('LLM 输出无法解析 → 422；超时 504；上游错误 502', async () => {
+  it('LLM 输出无法解析 → 422；超时 504；失效凭据 503；其他上游错误 502', async () => {
     const nowMs = Date.now();
     const garbage = await setupHarness(CONCH_STUB, { content: '这不是 JSON' });
     await startAndStop(garbage, 'math', '看课', nowMs - DAY);
@@ -305,6 +305,14 @@ describe('POST /api/v1/conch/ask', () => {
     timeout.setClock(nowMs);
     expect((await ask(timeout, 'all')).status).toBe(504);
     rmSync(timeout.tmp, { recursive: true, force: true });
+
+    const credential = await setupHarness(CONCH_STUB, { content: '', error: new ConchLlmError('auth', 'x', 401) });
+    await startAndStop(credential, 'math', '看课', nowMs - DAY);
+    credential.setClock(nowMs);
+    const credentialRes = await ask(credential, 'all');
+    expect(credentialRes.status).toBe(503);
+    expect((await credentialRes.json()).error).toBe('CONCH_CREDENTIAL_INVALID');
+    rmSync(credential.tmp, { recursive: true, force: true });
 
     const upstream = await setupHarness(CONCH_STUB, { content: '', error: new ConchLlmError('upstream', 'x') });
     await startAndStop(upstream, 'math', '看课', nowMs - DAY);

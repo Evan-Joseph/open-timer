@@ -1091,6 +1091,17 @@ test.describe('多端偏好同步', () => {
     await expect(page.getByText(/诊断编号：conch-/)).toBeVisible();
   });
 
+  test('神奇海螺明确显示上游 API 凭据失效', async ({ page }) => {
+    await doSetup(page);
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v4'));
+    await page.route('**/api/v1/conch/ask', async (route) => {
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'CONCH_CREDENTIAL_INVALID' }) });
+    });
+    await page.getByTestId('conch-toggle').click();
+    await expect(page.getByText('海螺服务的 API 凭据已失效，更新后才能继续。')).toBeVisible();
+    await expect(page.getByRole('button', { name: '再问一次' })).toHaveCount(0);
+  });
+
   test('神奇海螺发现 owner 会话失效后回到只读态并引导解锁', async ({ page }) => {
     await doSetup(page);
     await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v4'));

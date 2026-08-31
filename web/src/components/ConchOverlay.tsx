@@ -25,6 +25,7 @@ const CONF_LABELS: Record<string, string> = { high: '把握高', medium: '较有
 
 const ERROR_TEXT: Record<string, string> = {
   not_configured: '海螺还没接上大脑：服务端未配置 CONCH_*（wrangler secret）。',
+  credential: '海螺服务的 API 凭据已失效，更新后才能继续。',
   timeout: '海螺沉思太久没回过神来，再问一次？',
   upstream: '海螺的脑子暂时不在服务区，再问一次？',
   invalid: '海螺这次说话含糊，再问一次？',
@@ -227,8 +228,10 @@ export default function ConchOverlay({ onClose, store }: Props) {
       onClose();
       return;
     }
+    const errorCode = (res.data as unknown as { error?: string } | null)?.error;
     const kind =
-      res.status === 503 ? 'not_configured'
+      errorCode === 'CONCH_CREDENTIAL_INVALID' ? 'credential'
+      : res.status === 503 ? 'not_configured'
       : res.status === 504 ? 'timeout'
       : res.status === 502 ? 'upstream'
       : res.status === 422 ? 'invalid'

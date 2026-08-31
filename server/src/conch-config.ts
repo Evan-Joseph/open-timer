@@ -12,9 +12,10 @@ export interface ConchConfig {
 }
 
 export function loadConchConfig(env: Record<string, string | undefined>): ConchConfig | null {
-  const apiBase = env.CONCH_API_BASE;
-  const apiKey = env.CONCH_API_KEY;
-  const model = env.CONCH_MODEL;
+  const apiBase = env.CONCH_API_BASE?.trim();
+  // 控制台误把完整 Authorization 值粘进 secret 时，去掉协议前缀；服务端始终只负责拼一次 Bearer。
+  const apiKey = env.CONCH_API_KEY?.trim().replace(/^Bearer\s+/i, '');
+  const model = env.CONCH_MODEL?.trim();
   if (!apiBase || !apiKey || !model) return null;
   const budget = Number(env.CONCH_THINKING_BUDGET ?? 0);
   return {
