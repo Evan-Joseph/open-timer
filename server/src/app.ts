@@ -1056,12 +1056,22 @@ export function createApp(deps: AppDeps): Hono {
     force: z.boolean().optional(),
   });
   const ConchRequestIdSchema = z.string().min(14).max(72).regex(/^conch-[a-z0-9]+(?:-[a-z0-9]+)*$/);
-  // LLM 客户端的所有内部重试共用 90 秒总预算；再留 15 秒完成 D1 读写和响应收尾。
+  // LLM 客户端只发一次 POST，45 秒总预算后再留 15 秒完成 D1 读写和响应收尾。
   const CONCH_LEASE_MS = CONCH_LLM_TIMEOUT_MS + 15_000;
   const CONCH_RETRY_AFTER_MS = 3_000;
   const CONCH_CONTEXT_RETRY_AFTER_MS = 250;
   const conchMaxPerHour = deps.conchMaxPerHour ?? 20;
   type ConchInternalStage = 'prepare' | 'read_cache' | 'acquire_lease' | 'read_sessions' | 'read_segments' | 'build_context' | 'read_revisions' | 'parse_output' | 'shape_response';
+  type ConchLogStage = 'entered' | 'upstream_ok' | 'upstream_error' | 'internal_error';
+  type ConchLogMeta = {
+    model?: string | null;
+    window?: ConchWindow | null;
+    conchRevision?: number | null;
+    errorClass?: ConchLlmError['kind'] | 'internal' | 'unknown' | null;
+    attempt?: number | null;
+    upstreamStatus?: number;
+    internalStage?: ConchInternalStage;
+  };
   type CachedConchSubject = ConchSubjectRec & { last_active_date: string };
   type CachedConchPayload = {
     subjects: CachedConchSubject[];
@@ -1173,17 +1183,21 @@ export function createApp(deps: AppDeps): Hono {
   }
 
   function logConch(
-    stage: 'entered' | 'upstream_ok' | 'upstream_error' | 'internal_error',
+    stage: ConchLogStage,
     requestId: string | null,
     startedAtMs: number,
-    upstreamStatus?: number,
-    internalStage?: ConchInternalStage,
+    meta: ConchLogMeta = {},
   ): void {
     const entry: {
       event: 'conch_ask';
-      stage: 'entered' | 'upstream_ok' | 'upstream_error' | 'internal_error';
+      stage: ConchLogStage;
       request_id: string | null;
       elapsed_ms: number;
+      model: string | null;
+      window: ConchWindow | null;
+      conch_revision: number | null;
+      error_class: ConchLogMeta['errorClass'];
+      attempt: number | null;
       upstream_status?: number;
       internal_stage?: ConchInternalStage;
     } = {
@@ -1191,9 +1205,14 @@ export function createApp(deps: AppDeps): Hono {
       stage,
       request_id: requestId,
       elapsed_ms: Math.max(0, now() - startedAtMs),
+      model: meta.model ?? null,
+      window: meta.window ?? null,
+      conch_revision: meta.conchRevision ?? null,
+      error_class: meta.errorClass ?? null,
+      attempt: meta.attempt ?? null,
     };
-    if (Number.isInteger(upstreamStatus)) entry.upstream_status = upstreamStatus;
-    if (internalStage) entry.internal_stage = internalStage;
+    if (Number.isInteger(meta.upstreamStatus)) entry.upstream_status = meta.upstreamStatus;
+    if (meta.internalStage) entry.internal_stage = meta.internalStage;
     console.info(JSON.stringify(entry));
   }
 
@@ -1206,8 +1225,16 @@ export function createApp(deps: AppDeps): Hono {
     const requestId = conchRequestId(c);
     if (requestId) c.header('X-Client-Request-Id', requestId);
     const startedAtMs = now();
-    logConch('entered', requestId, startedAtMs);
     let internalStage: ConchInternalStage = 'prepare';
+    let conchWindow: ConchWindow | null = null;
+    let logConchRevision: number | null = null;
+    const conchModel = config.conch?.model ?? null;
+    const logContext = (): Pick<ConchLogMeta, 'model' | 'window' | 'conchRevision'> => ({
+      model: conchModel,
+      window: conchWindow,
+      conchRevision: logConchRevision,
+    });
+    logConch('entered', requestId, startedAtMs, { ...logContext(), internalStage });
     try {
       const conchConfig = config.conch;
       if (!conchConfig || deps.conchLlm === null) return c.json({ error: 'CONCH_NOT_CONFIGURED' }, 503);
@@ -1217,8 +1244,10 @@ export function createApp(deps: AppDeps): Hono {
 
       const nowMs = now();
       const window = body.data.window as ConchWindow;
+      conchWindow = window;
       internalStage = 'read_revisions';
       const conchRevision = await storage.getConchRevision();
+      logConchRevision = conchRevision;
 
       const contextStale = () =>
         c.json({ error: 'CONCH_CONTEXT_STALE', retry_after_ms: CONCH_CONTEXT_RETRY_AFTER_MS }, 409);
@@ -1371,7 +1400,13 @@ export function createApp(deps: AppDeps): Hono {
           content = result.content;
         } catch (err) {
           const upstreamStatus = err instanceof ConchLlmError ? err.upstreamStatus : undefined;
-          logConch('upstream_error', requestId, startedAtMs, upstreamStatus);
+          logConch('upstream_error', requestId, startedAtMs, {
+            ...logContext(),
+            upstreamStatus,
+            internalStage,
+            errorClass: err instanceof ConchLlmError ? err.kind : 'unknown',
+            attempt: err instanceof ConchLlmError ? err.attempt : null,
+          });
           if (err instanceof ConchLlmError && err.kind === 'timeout') {
             return c.json({ error: 'LLM_TIMEOUT' }, 504);
           }
@@ -1389,7 +1424,7 @@ export function createApp(deps: AppDeps): Hono {
 
         internalStage = 'parse_output';
         const recs = parseConchLlmOutput(content, ctx.active);
-        logConch('upstream_ok', requestId, startedAtMs);
+        logConch('upstream_ok', requestId, startedAtMs, { ...logContext(), internalStage, attempt: 1 });
         if (!recs) return c.json({ error: 'LLM_OUTPUT_INVALID' }, 422);
         // 显式“重新问一次”同样覆写同一语义缓存行；条件写确保只会覆写仍对应当前时间线的结果。
         return saveAndRespond(toCachedPayload(recs, now()));
@@ -1398,7 +1433,11 @@ export function createApp(deps: AppDeps): Hono {
         await storage.releaseConchGenerationLease(conchRevision, conchConfig.model, window, leaseToken).catch(() => {});
       }
     } catch {
-      logConch('internal_error', requestId, startedAtMs, undefined, internalStage);
+      logConch('internal_error', requestId, startedAtMs, {
+        ...logContext(),
+        internalStage,
+        errorClass: 'internal',
+      });
       return c.json({ error: 'INTERNAL' }, 500);
     }
   });

@@ -491,6 +491,47 @@ describe('POST /api/v1/conch/ask', () => {
     rmSync(h.tmp, { recursive: true, force: true });
   });
 
+  it('上游失败日志包含可关联的结构化诊断字段，不写入时间线备注', async () => {
+    const nowMs = Date.now();
+    const h = await setupHarness(CONCH_STUB, {
+      content: '',
+      error: new ConchLlmError('timeout', 'hidden upstream detail'),
+    });
+    const privateNote = '这段备注绝不能进入日志';
+    await startAndStop(h, 'math', privateNote, nowMs - DAY);
+    h.setClock(nowMs);
+    const logSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      const res = await h.app.request('/api/v1/conch/ask', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: h.cookie,
+          'x-client-request-id': 'conch-structured-log-1234',
+        },
+        body: JSON.stringify({ window: 'all' }),
+      });
+      expect(res.status).toBe(504);
+      const entries = logSpy.mock.calls
+        .map(([line]) => JSON.parse(String(line)) as Record<string, unknown>)
+        .filter((entry) => entry.event === 'conch_ask');
+      const upstream = entries.find((entry) => entry.stage === 'upstream_error');
+      expect(upstream).toMatchObject({
+        request_id: 'conch-structured-log-1234',
+        model: CONCH_STUB.model,
+        window: 'all',
+        conch_revision: expect.any(Number),
+        error_class: 'timeout',
+        attempt: 1,
+        internal_stage: 'build_context',
+      });
+      expect(JSON.stringify(entries)).not.toContain(privateNote);
+    } finally {
+      logSpy.mockRestore();
+      rmSync(h.tmp, { recursive: true, force: true });
+    }
+  });
+
   it('LLM 输出无法解析或为空 → 422；超时 504；失效凭据 503；额度不足 402；其他上游错误 502', async () => {
     const nowMs = Date.now();
     const garbage = await setupHarness(CONCH_STUB, { content: '这不是 JSON' });

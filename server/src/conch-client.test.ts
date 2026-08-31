@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createConchLlmClient } from './conch-client.js';
 
 const DEEPSEEK_CONFIG = {
@@ -65,48 +65,41 @@ describe('Conch LLM client', () => {
     expect(sentBody).not.toHaveProperty('reasoning_effort');
   });
 
-  it('DeepSeek JSON Output 首次为空时用同一请求重试一次', async () => {
+  it('DeepSeek JSON Output 为空时只发一次 POST，并归类为结构化输出失败', async () => {
     let calls = 0;
     const fetchImpl = (async () => {
       calls += 1;
-      const content = calls === 1 ? ' \n\t ' : '{"subjects":[]}';
-      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: ' \n\t ' } }] }), { status: 200 });
     }) as typeof fetch;
     const client = createConchLlmClient(DEEPSEEK_CONFIG, { fetchImpl });
 
-    await expect(client.ask({ system: 'system', user: 'user' })).resolves.toEqual({ content: '{"subjects":[]}' });
-    expect(calls).toBe(2);
+    await expect(client.ask({ system: 'system', user: 'user' })).rejects.toMatchObject({ kind: 'invalid', attempt: 1 });
+    expect(calls).toBe(1);
   });
 
-  it('DeepSeek 连续空白 content 时归类为结构化输出失败', async () => {
+  it('网络异常不自动重发不确定的 POST', async () => {
     let calls = 0;
     const fetchImpl = (async () => {
       calls += 1;
-      return new Response(JSON.stringify({ choices: [{ message: { content: ' \n' } }] }), { status: 200 });
+      throw new TypeError('network down');
     }) as typeof fetch;
     const client = createConchLlmClient(DEEPSEEK_CONFIG, { fetchImpl });
 
-    await expect(client.ask({ system: 'system', user: 'user' })).rejects.toMatchObject({ kind: 'invalid' });
-    expect(calls).toBe(2);
+    await expect(client.ask({ system: 'system', user: 'user' })).rejects.toMatchObject({ kind: 'upstream', attempt: 1 });
+    expect(calls).toBe(1);
   });
 
-  it('DeepSeek 空内容重试共享同一总超时预算，不会再额外等待一整个 timeout', async () => {
-    let fakeNow = 1_000;
-    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => fakeNow);
+  it('总 deadline 到期只 abort 一次上游 POST', async () => {
     let calls = 0;
-    const fetchImpl = (async () => {
+    const fetchImpl = ((_input: RequestInfo | URL, init?: RequestInit) => {
       calls += 1;
-      // 第一轮恰好耗尽总预算但返回空内容；第二轮必须在发请求前超时。
-      fakeNow += 90;
-      return new Response(JSON.stringify({ choices: [{ message: { content: '' } }] }), { status: 200 });
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true });
+      });
     }) as typeof fetch;
-    const client = createConchLlmClient(DEEPSEEK_CONFIG, { fetchImpl, timeoutMs: 90 });
+    const client = createConchLlmClient(DEEPSEEK_CONFIG, { fetchImpl, timeoutMs: 20 });
 
-    try {
-      await expect(client.ask({ system: 'system', user: 'user' })).rejects.toMatchObject({ kind: 'timeout' });
-      expect(calls).toBe(1);
-    } finally {
-      nowSpy.mockRestore();
-    }
+    await expect(client.ask({ system: 'system', user: 'user' })).rejects.toMatchObject({ kind: 'timeout', attempt: 1 });
+    expect(calls).toBe(1);
   });
 });

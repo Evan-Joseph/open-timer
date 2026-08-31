@@ -125,6 +125,9 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     focusEndedAtMs: number;
   } | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
+  /** 海螺开工时的计划只作结束页提示，绝不自动写成已完成备注。 */
+  const [conchStartPlan, setConchStartPlan] = useState<string | null>(null);
+  const [finishSaving, setFinishSaving] = useState(false);
 
   // 最近一次结束会话是空闲页休息状态的可恢复来源，刷新或关闭结束卡后仍保留提示。
   const recentStopped = useMemo(() => {
@@ -282,6 +285,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       focusSeconds: cand.last_continuous_seconds,
       focusEndedAtMs: endedMs,
     });
+    setConchStartPlan(null);
     setAwayAnchorOverride({
       confirmedSeconds: Math.max(0, (nowMs - endedMs) / 1000),
       running: true,
@@ -299,6 +303,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     remoteStopSeenRef.current.add(lastStopped.sessionId);
     setLastStopped(null);
     setNoteDraft('');
+    setConchStartPlan(null);
     setAwayAnchorOverride(null);
   }, [lastStopped, store.sessions]);
 
@@ -331,6 +336,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     setLastStopped(null);
     setAwayAnchorOverride(null);
     setNoteDraft('');
+    setConchStartPlan(null);
   };
 
   // 空闲态北京时间与"距上次专注"间隔（5s 步进，共用一个 interval）
@@ -400,8 +406,10 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     if (snapshot) {
       if (settings.finishSound) playFinishChime();
       setLastStopped(snapshot); // 立即呈现结束反馈（store.stop 内部乐观清空活动会话）
-      // 海螺推荐开工的会话：结束备注预填推荐语（一次性标记）；其余清空草稿
-      setNoteDraft(consumeConchStartMark(snapshot.sessionId) ?? '');
+      // 海螺推荐开工的会话：仅展示开始时计划，不预填/伪造结束后的事实备注。
+      const conchMark = consumeConchStartMark(snapshot.sessionId);
+      setConchStartPlan(conchMark?.intentNote ?? null);
+      setNoteDraft('');
       // 从运行态结束时休息从 0 开始；从暂停态结束时沿用已经发生的休息。
       // 锚点用服务端校准时钟（与暂停态口径一致），不用本机 Date.now()——
       // 设备时钟偏移不得导致两种空闲态的休息计时快慢不同。
@@ -429,6 +437,23 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     }
   };
 
+  /** 结束卡的唯一保存出口。写入失败时保留卡片与草稿，避免 UI 假装已保存。 */
+  const commitFinish = useCallback(async (dismiss = true): Promise<boolean> => {
+    if (!lastStopped || finishSaving) return false;
+    setFinishSaving(true);
+    try {
+      const note = noteDraft.trim();
+      if (note && !(await store.setNote(lastStopped.sessionId, note))) return false;
+      if (dismiss) markFinishDismissed(lastStopped.sessionId, lastStopped.focusEndedAtMs);
+      setLastStopped(null);
+      setNoteDraft('');
+      setConchStartPlan(null);
+      return true;
+    } finally {
+      setFinishSaving(false);
+    }
+  }, [finishSaving, lastStopped, noteDraft, store]);
+
   /* ---------- 空格键主控（FocusTide/Pomotroid 共识：沉浸应用第一快捷键） ----------
      Space = 开始（空闲）/ 暂停（运行）/ 继续（暂停）；结束反馈卡上 = 确认关闭。
      输入框、弹层打开、修饰键组合时让位。 */
@@ -442,10 +467,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       e.preventDefault();
       if (lastStopped && !active) {
         // 结束反馈卡：确认关闭（等同「好，继续」）
-        if (noteDraft.trim()) void store.setNote(lastStopped.sessionId, noteDraft.trim());
-        markFinishDismissed(lastStopped.sessionId, lastStopped.focusEndedAtMs);
-        setLastStopped(null);
-        setNoteDraft('');
+        void commitFinish();
         return;
       }
       if (active?.status === 'running') void store.pause();
@@ -454,7 +476,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active, lastStopped, noteDraft, selectedSubject, intentDraft, store, readOnly]);
+  }, [active, lastStopped, selectedSubject, intentDraft, store, readOnly, commitFinish]);
 
   /* ---------- 结束反馈态 ---------- */
   if (lastStopped && !active) {
@@ -510,17 +532,25 @@ export default function ClockFace({ store }: { store: ClockStore }) {
           </div>
           <input
             className="finish-note"
-            placeholder="补一句备注（可选）"
+            placeholder="本段实际做了什么？（可选，Enter 保存）"
             value={noteDraft}
             maxLength={200}
             onChange={(e) => setNoteDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void commitFinish();
+              }
+            }}
             aria-label="结束备注"
+            disabled={finishSaving}
           />
+          {conchStartPlan && <p className="finish-context">开始时计划：{conchStartPlan}</p>}
           <div className="finish-actions action-row">
             <button
               className="ghost-btn"
               data-testid="finish-withdraw-btn"
-              disabled={store.busy}
+              disabled={store.busy || finishSaving}
               onClick={() => void handleWithdrawLastStopped()}
             >
               <Undo2 size={14} aria-hidden /> 撤回这条
@@ -529,25 +559,18 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             <button
               className={isMisfire ? 'primary-btn contextual-action' : 'ghost-btn'}
               data-testid="finish-resume-btn"
-              disabled={store.busy}
-              onClick={() => {
-                if (noteDraft.trim()) void store.setNote(lastStopped.sessionId, noteDraft.trim());
+              disabled={store.busy || finishSaving}
+              onClick={() => void (async () => {
                 const sid = lastStopped.sessionId;
-                setLastStopped(null);
-                setNoteDraft('');
-                void store.resumeSession(sid);
-              }}
+                if (await commitFinish(false)) void store.resumeSession(sid);
+              })()}
             >
               <Play size={isMisfire ? 18 : 14} aria-hidden /> 继续这段
             </button>
             <button
               className={isMisfire ? 'ghost-btn' : 'primary-btn contextual-action'}
-              onClick={() => {
-                if (noteDraft.trim()) void store.setNote(lastStopped.sessionId, noteDraft.trim());
-                markFinishDismissed(lastStopped.sessionId, lastStopped.focusEndedAtMs);
-                setLastStopped(null);
-                setNoteDraft('');
-              }}
+              disabled={store.busy || finishSaving}
+              onClick={() => void commitFinish()}
             >
               好，继续
             </button>

@@ -222,6 +222,36 @@ test('全屏与窗口模式共用同一布局，逾期告警状态一致', async
   await page.waitForTimeout(400);
 });
 
+test('休息逾期会联动中性控件，但不篡改主要动作语义色', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await enterReadyState(page);
+
+  const readControls = async () => page.evaluate(() => {
+    const read = (selector: string) => {
+      const style = getComputedStyle(document.querySelector(selector)!);
+      return { background: style.backgroundColor, border: style.borderColor, color: style.color };
+    };
+    return {
+      toolbarIcon: read('.topbar .icon-btn'),
+      timelineScale: read('.timeline-scale'),
+      intent: read('.intent-input'),
+      start: read('.start-btn'),
+    };
+  });
+
+  const base = await readControls();
+  await page.locator('.clockface').evaluate((element) => element.setAttribute('data-away-level', '3'));
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: 'e2e/screens/overdue-controls-light.png', fullPage: true });
+  const overdue = await readControls();
+
+  expect(overdue.toolbarIcon).not.toEqual(base.toolbarIcon);
+  expect(overdue.timelineScale).not.toEqual(base.timelineScale);
+  expect(overdue.intent).not.toEqual(base.intent);
+  // 开始仍保持当前科目 action 色；告警通过表面/描边而非误导动作语义。
+  expect(overdue.start.background).toBe(base.start.background);
+});
+
 test('L3 逾期告警延续到设置、回顾与海螺浮层', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await enterReadyState(page);

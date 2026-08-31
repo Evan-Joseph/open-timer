@@ -606,8 +606,9 @@ export default function Timeline({ store }: { store: ClockStore }) {
     const draft = noteDraft.trim();
     if (draft === (popover.row.note ?? '')) return; // 无变化不写
     setNoteSaving(true);
-    await store.setNote(popover.row.sessionId, draft);
+    const saved = await store.setNote(popover.row.sessionId, draft);
     setNoteSaving(false);
+    if (!saved) return;
     historyCacheRef.current.delete(viewDateRef.current);
     if (!keepOpen) setPopover(null);
   }, [popover, noteSaving, noteDraft, store]);
@@ -1016,7 +1017,10 @@ export default function Timeline({ store }: { store: ClockStore }) {
                   maxLength={200}
                   onChange={(e) => setNoteDraft(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') void handleSaveNote();
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void handleSaveNote();
+                    }
                   }}
                   onBlur={() => void handleSaveNote(true)}
                   aria-label="编辑备注"

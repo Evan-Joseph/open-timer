@@ -17,6 +17,8 @@ export class ConchLlmError extends Error {
     message: string,
     /** 仅用于服务端诊断日志；不向客户端透传上游响应体。 */
     public upstreamStatus?: number,
+    /** 上游 POST 已发出的次数。当前契约始终至多一次，保留字段供安全日志关联。 */
+    public attempt = 1,
   ) {
     super(message);
     this.name = 'ConchLlmError';
@@ -27,8 +29,8 @@ export interface ConchLlmClient {
   ask(params: { system: string; user: string }): Promise<ConchLlmResult>;
 }
 
-/** 单次海螺请求的总上游等待上限。DeepSeek 的空内容重试共享这一个预算。 */
-export const CONCH_LLM_TIMEOUT_MS = 90_000;
+/** 单次海螺请求的总上游等待上限。交互页在超时后应尽快恢复可重试状态。 */
+export const CONCH_LLM_TIMEOUT_MS = 45_000;
 
 export function createConchLlmClient(
   cfg: ConchConfig,
@@ -69,50 +71,42 @@ export function createConchLlmClient(
         if (cfg.thinkingBudget > 0) body.thinking_budget = cfg.thinkingBudget;
       }
 
-      // DeepSeek JSON Output 官方说明偶发空 content；保留同一高质量模型与输入重试一次。
-      // 其他兼容端点维持单次调用，避免改变其既有配额与失败语义。
-      const attempts = isOfficialDeepSeek ? 2 : 1;
-      // 两次尝试共享同一请求预算。此前每次各等 90 秒，第二次重试会把总等待拉到
-      // 180 秒，并让 Worker 生成租约可能在原请求仍运行时过期。
+      // 请求没有可供上游去重的幂等键。HTTP 200 空内容、网络中断与本地 abort 都无法
+      // 证明上游没有开始推理，因此统一只发一次 POST，由用户显式「再问一次」重试。
       const deadlineMs = Date.now() + timeoutMs;
-      for (let attempt = 0; attempt < attempts; attempt += 1) {
-        const remainingMs = deadlineMs - Date.now();
-        if (remainingMs <= 0) throw new ConchLlmError('timeout', 'llm timeout');
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), remainingMs);
-        try {
-          const res = await fetchImpl(`${cfg.apiBase}/chat/completions`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${cfg.apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(body),
-            signal: controller.signal,
-          });
-          if (!res.ok) {
-            // 不透传上游细节（可能含密钥回显/栈信息）
-            const kind = res.status === 401 ? 'auth' : res.status === 402 ? 'quota' : 'upstream';
-            throw new ConchLlmError(kind, `llm upstream status ${res.status}`, res.status);
-          }
-          const data = (await res.json()) as {
-            choices?: Array<{ message?: { content?: string } }>;
-          };
-          const content = data.choices?.[0]?.message?.content;
-          if (typeof content === 'string' && content.trim().length > 0) return { content };
-          if (attempt + 1 === attempts) {
-            // HTTP 200 的模型输出问题明确归为 422，不伪装成上游网络故障。
-            throw new ConchLlmError('invalid', 'llm empty content');
-          }
-        } catch (err) {
-          if (err instanceof ConchLlmError) throw err;
-          if ((err as Error)?.name === 'AbortError') throw new ConchLlmError('timeout', 'llm timeout');
-          throw new ConchLlmError('upstream', 'llm network error');
-        } finally {
-          clearTimeout(timer);
+      const remainingMs = deadlineMs - Date.now();
+      if (remainingMs <= 0) throw new ConchLlmError('timeout', 'llm timeout');
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), remainingMs);
+      try {
+        const res = await fetchImpl(`${cfg.apiBase}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${cfg.apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          // 不透传上游细节（可能含密钥回显/栈信息）
+          const kind = res.status === 401 ? 'auth' : res.status === 402 ? 'quota' : 'upstream';
+          throw new ConchLlmError(kind, `llm upstream status ${res.status}`, res.status);
         }
+        const data = (await res.json()) as {
+          choices?: Array<{ message?: { content?: string } }>;
+        };
+        const content = data.choices?.[0]?.message?.content;
+        if (typeof content === 'string' && content.trim().length > 0) return { content };
+        // HTTP 200 的模型输出问题明确归为 422，不伪装成上游网络故障。
+        throw new ConchLlmError('invalid', 'llm empty content');
+      } catch (err) {
+        if (err instanceof ConchLlmError) throw err;
+        if ((err as Error)?.name === 'AbortError') throw new ConchLlmError('timeout', 'llm timeout');
+        throw new ConchLlmError('upstream', 'llm network error');
+      } finally {
+        clearTimeout(timer);
       }
-      throw new ConchLlmError('invalid', 'llm empty content');
     },
   };
 }

@@ -41,7 +41,7 @@ export interface ClockStore {
   withdraw: (sessionId: string, reason?: string | null) => Promise<boolean>;
   /** 误触继续：重开一个已停止的会话（保留原段与秒数，新段从当前起算） */
   resumeSession: (sessionId: string) => Promise<boolean>;
-  setNote: (sessionId: string, note: string) => Promise<void>;
+  setNote: (sessionId: string, note: string) => Promise<boolean>;
   adjustStart: (sessionId: string, startedAt: string) => Promise<boolean>;
 }
 
@@ -553,11 +553,16 @@ export function useClockStore(): ClockStore {
   const setNote = useCallback(
     async (sessionId: string, note: string) => {
       const res = await apiPatch(`/api/v1/sessions/${sessionId}/note`, { note }).catch(() => null);
-      if (res?.ok) notifyPeers();
+      if (!res?.ok) {
+        flashError('备注保存失败，请重试');
+        return false;
+      }
+      notifyPeers();
       // 已完成备注是海螺输入，等待 conch_revision 快照落地再返回。
       await refresh();
+      return true;
     },
-    [refresh, notifyPeers],
+    [refresh, notifyPeers, flashError],
   );
 
   const adjustStart = useCallback(async (sessionId: string, startedAt: string) => {

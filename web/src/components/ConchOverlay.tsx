@@ -39,7 +39,8 @@ const ERROR_TEXT: Record<string, string> = {
   network: '海螺没听见（网络错误），再问一次？',
 };
 const RETRYABLE = new Set(['timeout', 'upstream', 'invalid', 'internal', 'network', 'generating']);
-const GENERATION_WAIT_MAX_MS = 110_000;
+// 服务端单次上游 deadline 为 45s，租约另留 15s 收尾；等待同一租约不能比这更久。
+const GENERATION_WAIT_MAX_MS = 55_000;
 const GENERATION_RETRY_FALLBACK_MS = 3_000;
 
 function wait(ms: number): Promise<void> {
@@ -243,7 +244,7 @@ export default function ConchOverlay({ onClose, store }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  /** 一键开始：以推荐语作为 intent_note 直接开工；结束时预填同句为结束备注 */
+  /** 一键开始：推荐语只作为本次开始时的 intent_note，不冒充结束后的事实备注。 */
   const startSubject = async (subjectId: string, nextAction: string) => {
     if (activeSession) return;
     setStartingId(subjectId);
@@ -251,7 +252,7 @@ export default function ConchOverlay({ onClose, store }: Props) {
     const sessionId = await store.start(subjectId, note);
     setStartingId(null);
     if (sessionId) {
-      saveConchStartMark({ sessionId, note });
+      saveConchStartMark({ sessionId, intentNote: note });
       onClose();
     }
   };

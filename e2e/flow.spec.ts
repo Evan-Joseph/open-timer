@@ -148,6 +148,23 @@ test.describe('核心流程', () => {
     expect(total).toBeGreaterThan(0);
   });
 
+  test('结束备注保存失败时 Enter 保留结束卡与草稿', async ({ page }) => {
+    await doSetup(page);
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1_100);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByLabel('结束备注').fill('不能丢失的草稿');
+    await page.route('**/api/v1/sessions/*/note', async (route) => {
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'INTERNAL' }) });
+    });
+    await page.getByLabel('结束备注').press('Enter');
+    await expect(page.getByTestId('finish-duration')).toBeVisible();
+    await expect(page.getByLabel('结束备注')).toHaveValue('不能丢失的草稿');
+    await expect(page.getByText('备注保存失败，请重试')).toBeVisible();
+    await page.unroute('**/api/v1/sessions/*/note');
+    await page.getByRole('button', { name: '好，继续' }).click();
+  });
+
   test('时间轴片段悬停预览，点击后固定打开详情且热区足够大', async ({ page }) => {
     await doSetup(page);
     // 快速产生一个已停止会话
@@ -991,6 +1008,38 @@ test.describe('多端偏好同步', () => {
     await pageB.locator('.finish-note').fill('跨端指标确认');
     await pageB.getByRole('button', { name: '好，继续' }).click();
     await ctxB.close();
+  });
+
+  test('海螺计划只写入开始意图；结束卡 Enter 仅保存用户填写的实际记录', async ({ page }) => {
+    await doSetup(page);
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v5'));
+    const state = await (await page.request.get('/api/v1/state')).json();
+    const plan = '做第 5 章定积分的冲刺题';
+    await page.route('**/api/v1/conch/ask', async (route) => {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          window: 'all', generated_at: new Date().toISOString(), cache_valid_until: new Date(Date.now() + 86_400_000).toISOString(),
+          revision: state.revision, conch_revision: state.conch_revision, model: 'e2e-stub', skipped: [],
+          subjects: [{ subject_id: 'math', display_name: '数学二', color_id: 'copper', last_active_date: state.today_date, running_now: false, action_kind: 'problems', next_action: plan, rationale: null, pattern: null, alternatives: [], confidence: 'high' }],
+        }),
+      });
+    });
+
+    await page.getByTestId('conch-toggle').click();
+    await page.getByRole('button', { name: '开始这个科目' }).click();
+    await expect(page.getByTestId('timer-seconds')).toBeVisible();
+    const active = await (await page.request.get('/api/v1/state')).json();
+    expect(active.active_session.intent_note).toBe(plan);
+
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await expect(page.getByLabel('结束备注')).toHaveValue('');
+    await expect(page.getByText(`开始时计划：${plan}`)).toBeVisible();
+    await page.getByLabel('结束备注').fill('实际做了两道题，第三题待订正');
+    await page.getByLabel('结束备注').press('Enter');
+    await expect(page.getByTestId('idle-clock')).toBeVisible();
+    const sessions = await (await page.request.get(`/api/v1/sessions?date=${state.today_date}`)).json();
+    expect(sessions.sessions.some((s: { intent_note: string | null; end_note: string | null }) => s.intent_note === plan && s.end_note === '实际做了两道题，第三题待订正')).toBe(true);
   });
 
   test('神奇海螺缓存只随已完成时间线变化：开始/暂停/继续不重新问，完成后才重新问', async ({ page }) => {
