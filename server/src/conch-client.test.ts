@@ -20,7 +20,7 @@ describe('Conch LLM client', () => {
     await expect(client.ask({ system: 'system', user: 'user' })).resolves.toEqual({ content: '{"subjects":[]}' });
     expect(sentBody).toMatchObject({
       model: 'deepseek-v4-pro',
-      max_tokens: 2048,
+      max_tokens: 4096,
       response_format: { type: 'json_object' },
       thinking: { type: 'enabled' },
       reasoning_effort: 'high',
@@ -65,10 +65,28 @@ describe('Conch LLM client', () => {
     expect(sentBody).not.toHaveProperty('reasoning_effort');
   });
 
-  it('HTTP 200 但 content 为空时归类为结构化输出失败', async () => {
-    const fetchImpl = (async () => new Response(JSON.stringify({ choices: [{ message: { content: '' } }] }), { status: 200 })) as typeof fetch;
+  it('DeepSeek JSON Output 首次为空时用同一请求重试一次', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      const content = calls === 1 ? '' : '{"subjects":[]}';
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
+    }) as typeof fetch;
+    const client = createConchLlmClient(DEEPSEEK_CONFIG, { fetchImpl });
+
+    await expect(client.ask({ system: 'system', user: 'user' })).resolves.toEqual({ content: '{"subjects":[]}' });
+    expect(calls).toBe(2);
+  });
+
+  it('DeepSeek 连续空 content 时归类为结构化输出失败', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return new Response(JSON.stringify({ choices: [{ message: { content: '' } }] }), { status: 200 });
+    }) as typeof fetch;
     const client = createConchLlmClient(DEEPSEEK_CONFIG, { fetchImpl });
 
     await expect(client.ask({ system: 'system', user: 'user' })).rejects.toMatchObject({ kind: 'invalid' });
+    expect(calls).toBe(2);
   });
 });

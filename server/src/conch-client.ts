@@ -42,6 +42,7 @@ export function createConchLlmClient(
       return false;
     }
   })();
+  const maxTokens = isOfficialDeepSeek ? 4096 : 2048;
 
   return {
     async ask({ system, user }) {
@@ -51,7 +52,7 @@ export function createConchLlmClient(
           { role: 'system', content: system },
           { role: 'user', content: user },
         ],
-        max_tokens: 2048,
+        max_tokens: maxTokens,
         // OpenAI 兼容 JSON Output：让结构化解析获得稳定 JSON，而非依赖模型偶然遵守 prompt。
         response_format: { type: 'json_object' },
       };
@@ -65,40 +66,45 @@ export function createConchLlmClient(
         if (cfg.thinkingBudget > 0) body.thinking_budget = cfg.thinkingBudget;
       }
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        const res = await fetchImpl(`${cfg.apiBase}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${cfg.apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-        if (!res.ok) {
-          // 不透传上游细节（可能含密钥回显/栈信息）
-          const kind = res.status === 401 ? 'auth' : res.status === 402 ? 'quota' : 'upstream';
-          throw new ConchLlmError(kind, `llm upstream status ${res.status}`, res.status);
+      // DeepSeek JSON Output 官方说明偶发空 content；保留同一高质量模型与输入重试一次。
+      // 其他兼容端点维持单次调用，避免改变其既有配额与失败语义。
+      const attempts = isOfficialDeepSeek ? 2 : 1;
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const res = await fetchImpl(`${cfg.apiBase}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${cfg.apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+          });
+          if (!res.ok) {
+            // 不透传上游细节（可能含密钥回显/栈信息）
+            const kind = res.status === 401 ? 'auth' : res.status === 402 ? 'quota' : 'upstream';
+            throw new ConchLlmError(kind, `llm upstream status ${res.status}`, res.status);
+          }
+          const data = (await res.json()) as {
+            choices?: Array<{ message?: { content?: string } }>;
+          };
+          const content = data.choices?.[0]?.message?.content;
+          if (typeof content === 'string' && content.length > 0) return { content };
+          if (attempt + 1 === attempts) {
+            // HTTP 200 的模型输出问题明确归为 422，不伪装成上游网络故障。
+            throw new ConchLlmError('invalid', 'llm empty content');
+          }
+        } catch (err) {
+          if (err instanceof ConchLlmError) throw err;
+          if ((err as Error)?.name === 'AbortError') throw new ConchLlmError('timeout', 'llm timeout');
+          throw new ConchLlmError('upstream', 'llm network error');
+        } finally {
+          clearTimeout(timer);
         }
-        const data = (await res.json()) as {
-          choices?: Array<{ message?: { content?: string } }>;
-        };
-        const content = data.choices?.[0]?.message?.content;
-        if (typeof content !== 'string' || content.length === 0) {
-          // DeepSeek JSON Output 已知偶发空 content；这是可重试的结构化输出失败，
-          // 不把 HTTP 200 的模型输出问题伪装成上游网络故障。
-          throw new ConchLlmError('invalid', 'llm empty content');
-        }
-        return { content };
-      } catch (err) {
-        if (err instanceof ConchLlmError) throw err;
-        if ((err as Error)?.name === 'AbortError') throw new ConchLlmError('timeout', 'llm timeout');
-        throw new ConchLlmError('upstream', 'llm network error');
-      } finally {
-        clearTimeout(timer);
       }
+      throw new ConchLlmError('invalid', 'llm empty content');
     },
   };
 }
