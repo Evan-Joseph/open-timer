@@ -29,6 +29,24 @@ describe('Conch LLM client', () => {
     expect(sentBody).not.toHaveProperty('thinking_budget');
   });
 
+  it('DeepSeek V4 Flash 使用低推理强度与较小输出预算', async () => {
+    let sentBody: Record<string, unknown> | null = null;
+    const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      sentBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"subjects":[]}' } }] }), { status: 200 });
+    }) as typeof fetch;
+    const client = createConchLlmClient({ ...DEEPSEEK_CONFIG, model: 'deepseek-v4-flash' }, { fetchImpl });
+
+    await expect(client.ask({ system: 'system', user: 'user' })).resolves.toEqual({ content: '{"subjects":[]}' });
+    expect(sentBody).toMatchObject({
+      model: 'deepseek-v4-flash',
+      max_tokens: 2048,
+      response_format: { type: 'json_object' },
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'low',
+    });
+  });
+
   it('把上游 401 保留为不泄漏正文的认证错误', async () => {
     const fetchImpl = (async () => new Response(JSON.stringify({ message: 'hidden' }), { status: 401 })) as typeof fetch;
     const client = createConchLlmClient({ ...DEEPSEEK_CONFIG, thinkingBudget: 0 }, { fetchImpl });

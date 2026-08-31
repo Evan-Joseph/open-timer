@@ -47,7 +47,10 @@ export function createConchLlmClient(
       return false;
     }
   })();
-  const maxTokens = isOfficialDeepSeek ? 4096 : 2048;
+  // 官方 V4-Flash 与 V4-Pro 共用 JSON/思考协议；Flash 用 low effort 降低交互延迟，
+  // Pro 保留 high 作为高质量基线。输出字段均有长度上限，2048 已足够容纳 7 科结果。
+  const isDeepSeekFlash = isOfficialDeepSeek && cfg.model.trim().toLowerCase() === 'deepseek-v4-flash';
+  const maxTokens = isOfficialDeepSeek ? (isDeepSeekFlash ? 2048 : 4096) : 2048;
 
   return {
     async ask({ system, user }) {
@@ -64,7 +67,7 @@ export function createConchLlmClient(
       if (isOfficialDeepSeek) {
         // DeepSeek 官方文档：思考模式下 temperature 不生效；使用其官方开关和强度字段。
         body.thinking = { type: 'enabled' };
-        body.reasoning_effort = 'high';
+        body.reasoning_effort = isDeepSeekFlash ? 'low' : 'high';
       } else {
         body.temperature = 0.4;
         // 兼容既有 SiliconFlow 等端点的顶层预算字段。
