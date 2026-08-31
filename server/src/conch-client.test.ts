@@ -21,7 +21,7 @@ describe('SiliconFlow Conch client', () => {
     expect(sentBody).toMatchObject({
       model: 'deepseek-ai/DeepSeek-V4-Pro-0813',
       temperature: 0.4,
-      max_tokens: 2048,
+      max_tokens: 1024,
       response_format: { type: 'json_object' },
       thinking_budget: 768,
     });
