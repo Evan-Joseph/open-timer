@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useClockStore } from './lib/store.js';
 import { useAnimationsEnabled, useSettings } from './lib/settings.js';
 import { PREFS_APPLIED_EVT, pullRemotePrefs, schedulePrefsPush } from './lib/prefs.js';
@@ -7,12 +7,14 @@ import AuthGate from './components/AuthGate.js';
 import ClockFace from './components/ClockFace.js';
 import Timeline from './components/Timeline.js';
 import SettingsDialog from './components/SettingsDialog.js';
+import { detectDeviceRole } from './lib/device.js';
 import { Settings, Lock } from 'lucide-react';
 
 export default function App() {
   const store = useClockStore();
   const settings = useSettings();
   const animationsEnabled = useAnimationsEnabled();
+  const deviceRole = useMemo(() => detectDeviceRole(), []);
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** 只读监督态的解锁弹层（输入 PIN 转 owner） */
   const [loginOpen, setLoginOpen] = useState(false);
@@ -148,7 +150,7 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className="app" data-device-role={deviceRole}>
       <header className="topbar material">
         {/* 品牌名已按 2026-08-20 决策隐藏：顶栏只保留状态点与日期；
             标签页标题（document.title）与 index.html <title> 仍承担识别职责 */}
@@ -210,6 +212,7 @@ export default function App() {
         onThemeChange={changeTheme}
         onLogout={store.logout}
         isOwner={store.isOwner}
+        deviceRole={deviceRole}
       />
     </div>
   );

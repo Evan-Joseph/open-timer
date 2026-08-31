@@ -9,7 +9,7 @@ export interface ConchLlmResult {
   content: string;
 }
 
-export type ConchLlmErrorKind = 'timeout' | 'auth' | 'upstream';
+export type ConchLlmErrorKind = 'timeout' | 'auth' | 'quota' | 'upstream';
 
 export class ConchLlmError extends Error {
   constructor(
@@ -64,7 +64,8 @@ export function createConchLlmClient(
         });
         if (!res.ok) {
           // 不透传上游细节（可能含密钥回显/栈信息）
-          throw new ConchLlmError(res.status === 401 ? 'auth' : 'upstream', `llm upstream status ${res.status}`, res.status);
+          const kind = res.status === 401 ? 'auth' : res.status === 402 ? 'quota' : 'upstream';
+          throw new ConchLlmError(kind, `llm upstream status ${res.status}`, res.status);
         }
         const data = (await res.json()) as {
           choices?: Array<{ message?: { content?: string } }>;

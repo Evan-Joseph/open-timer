@@ -3,7 +3,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { Maximize, X } from 'lucide-react';
 import { setAnimationsEnabled, useAnimationsEnabled, useSettings, updateSettings } from '../lib/settings.js';
 import { AMBIENT_LABELS } from '../lib/ambient.js';
-import { requestAppFullscreen } from '../lib/device.js';
+import { requestAppFullscreen, type DeviceRole } from '../lib/device.js';
 
 interface Props {
   open: boolean;
@@ -13,9 +13,10 @@ interface Props {
   onLogout: () => Promise<void>;
   /** 只读监督态隐藏退出登录（本就没有登录会话） */
   isOwner: boolean;
+  deviceRole: DeviceRole;
 }
 
-export default function SettingsDialog({ open, onOpenChange, theme, onThemeChange, onLogout, isOwner }: Props) {
+export default function SettingsDialog({ open, onOpenChange, theme, onThemeChange, onLogout, isOwner, deviceRole }: Props) {
   const settings = useSettings();
   const animationsOn = useAnimationsEnabled();
   const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -144,7 +145,7 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
             </div>
             {fullscreenError && <p className="setting-hint setting-hint-error" role="status">{fullscreenError}</p>}
             <p className="setting-hint">
-              全屏仅在你点击后请求；进入后会沿用当前页面布局并按视口重新排版。
+              当前识别：<output data-testid="device-role">{deviceRole === 'pad' ? 'Pad（副屏）' : 'Desktop（主控）'}</output>。Pad 与 Desktop 共用完整界面；全屏仅在你点击后请求。
             </p>
           </div>
 

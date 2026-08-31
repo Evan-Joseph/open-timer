@@ -37,4 +37,14 @@ describe('SiliconFlow Conch client', () => {
       upstreamStatus: 401,
     });
   });
+
+  it('把上游 402 区分为推理额度不足', async () => {
+    const fetchImpl = (async () => new Response(JSON.stringify({ message: 'hidden' }), { status: 402 })) as typeof fetch;
+    const client = createConchLlmClient({ ...CONFIG, thinkingBudget: 0 }, { fetchImpl });
+
+    await expect(client.ask({ system: 'system', user: 'user' })).rejects.toMatchObject({
+      kind: 'quota',
+      upstreamStatus: 402,
+    });
+  });
 });

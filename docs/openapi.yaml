@@ -533,6 +533,7 @@ paths:
                   skipped: { type: array, items: { type: object } }
         '400': { description: window 非法 }
         '401': { description: 未登录 }
+        '402': { description: 上游推理额度不足（CONCH_QUOTA_EXHAUSTED） }
         '422': { description: LLM 输出不符合契约 }
         '429': { description: 请求过频 }
         '500': { description: 未预期内部错误（INTERNAL；不含上游响应或栈信息） }

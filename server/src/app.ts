@@ -1142,6 +1142,9 @@ export function createApp(deps: AppDeps): Hono {
         if (err instanceof ConchLlmError && err.kind === 'auth') {
           return c.json({ error: 'CONCH_CREDENTIAL_INVALID' }, 503);
         }
+        if (err instanceof ConchLlmError && err.kind === 'quota') {
+          return c.json({ error: 'CONCH_QUOTA_EXHAUSTED' }, 402);
+        }
         return c.json({ error: 'LLM_UPSTREAM' }, 502);
       }
 

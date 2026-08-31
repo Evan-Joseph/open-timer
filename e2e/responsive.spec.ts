@@ -124,6 +124,33 @@ test('横屏标准视口一屏容纳主时钟与时间轴', async ({ page }) => 
   }
 });
 
+test('Pad/Desktop 被动识别可见，且不切换为第二套界面或自动全屏', async ({ page, browser }) => {
+  await enterReadyState(page);
+  await page.goto('/?device=desktop');
+  await expect(page.locator('.app')).toHaveAttribute('data-device-role', 'desktop');
+  await page.getByRole('button', { name: '设置' }).click();
+  await expect(page.getByTestId('device-role')).toHaveText('Desktop（主控）');
+  await page.keyboard.press('Escape');
+
+  const padContext = await browser.newContext({
+    viewport: { width: 1024, height: 768 },
+    userAgent: 'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1',
+    hasTouch: true,
+    isMobile: true,
+  });
+  try {
+    const padPage = await padContext.newPage();
+    await padPage.goto('/');
+    await expect(padPage.locator('.app')).toHaveAttribute('data-device-role', 'pad');
+    await expect(padPage.evaluate(() => document.fullscreenElement)).resolves.toBeNull();
+    await padPage.getByRole('button', { name: '设置' }).click();
+    await expect(padPage.getByTestId('device-role')).toHaveText('Pad（副屏）');
+    await expect(padPage.locator('.timeline')).toBeVisible();
+  } finally {
+    await padContext.close();
+  }
+});
+
 test('1024x640 中 7 天泳道不触发页面滚动', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 640 });
   await enterReadyState(page);
