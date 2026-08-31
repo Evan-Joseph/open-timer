@@ -91,7 +91,7 @@ export function createConchLlmClient(
             choices?: Array<{ message?: { content?: string } }>;
           };
           const content = data.choices?.[0]?.message?.content;
-          if (typeof content === 'string' && content.length > 0) return { content };
+          if (typeof content === 'string' && content.trim().length > 0) return { content };
           if (attempt + 1 === attempts) {
             // HTTP 200 的模型输出问题明确归为 422，不伪装成上游网络故障。
             throw new ConchLlmError('invalid', 'llm empty content');

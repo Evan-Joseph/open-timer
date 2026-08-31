@@ -69,7 +69,7 @@ describe('Conch LLM client', () => {
     let calls = 0;
     const fetchImpl = (async () => {
       calls += 1;
-      const content = calls === 1 ? '' : '{"subjects":[]}';
+      const content = calls === 1 ? ' \n\t ' : '{"subjects":[]}';
       return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
     }) as typeof fetch;
     const client = createConchLlmClient(DEEPSEEK_CONFIG, { fetchImpl });
@@ -78,11 +78,11 @@ describe('Conch LLM client', () => {
     expect(calls).toBe(2);
   });
 
-  it('DeepSeek 连续空 content 时归类为结构化输出失败', async () => {
+  it('DeepSeek 连续空白 content 时归类为结构化输出失败', async () => {
     let calls = 0;
     const fetchImpl = (async () => {
       calls += 1;
-      return new Response(JSON.stringify({ choices: [{ message: { content: '' } }] }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: ' \n' } }] }), { status: 200 });
     }) as typeof fetch;
     const client = createConchLlmClient(DEEPSEEK_CONFIG, { fetchImpl });
 
