@@ -979,7 +979,7 @@ test.describe('多端偏好同步', () => {
 
   test('神奇海螺缓存只随已完成时间线变化：开始/暂停/继续不重新问，完成后才重新问', async ({ page }) => {
     await doSetup(page);
-    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v4'));
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v5'));
     const initialState = await (await page.request.get('/api/v1/state')).json();
 
     let askCount = 0;
@@ -1032,7 +1032,7 @@ test.describe('多端偏好同步', () => {
 
   test('神奇海螺遇到真实 fetch 失败时显示可重试的网络错误', async ({ page }) => {
     await doSetup(page);
-    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v4'));
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v5'));
     await page.route('**/api/v1/conch/ask', (route) => route.abort('failed'));
 
     await page.getByTestId('conch-toggle').click();
@@ -1044,7 +1044,7 @@ test.describe('多端偏好同步', () => {
   test('Safari 缺少 crypto.randomUUID 时海螺仍能发起无幂等推荐请求', async ({ page }) => {
     await doSetup(page);
     await page.evaluate(() => {
-      localStorage.removeItem('clock-conch-cache-v4');
+      localStorage.removeItem('clock-conch-cache-v5');
       Object.defineProperty(crypto, 'randomUUID', { configurable: true, value: undefined });
     });
     let receivedHeaders: Record<string, string> | null = null;
@@ -1082,7 +1082,7 @@ test.describe('多端偏好同步', () => {
 
   test('神奇海螺区分 Worker 500 与浏览器网络拒绝', async ({ page }) => {
     await doSetup(page);
-    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v4'));
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v5'));
     await page.route('**/api/v1/conch/ask', async (route) => {
       await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'INTERNAL' }) });
     });
@@ -1093,7 +1093,7 @@ test.describe('多端偏好同步', () => {
 
   test('神奇海螺明确显示上游 API 凭据失效', async ({ page }) => {
     await doSetup(page);
-    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v4'));
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v5'));
     await page.route('**/api/v1/conch/ask', async (route) => {
       await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'CONCH_CREDENTIAL_INVALID' }) });
     });
@@ -1104,7 +1104,7 @@ test.describe('多端偏好同步', () => {
 
   test('神奇海螺发现 owner 会话失效后回到只读态并引导解锁', async ({ page }) => {
     await doSetup(page);
-    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v4'));
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v5'));
     let askCount = 0;
     await page.route('**/api/v1/conch/ask', async (route) => {
       askCount += 1;
@@ -1120,7 +1120,7 @@ test.describe('多端偏好同步', () => {
 
   test('回顾与海螺浮层约束 Tab 焦点并在关闭后归还入口焦点', async ({ page }) => {
     await doSetup(page);
-    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v4'));
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v5'));
     await page.route('**/api/v1/conch/ask', async (route) => {
       const state = await (await page.request.get('/api/v1/state')).json();
       await route.fulfill({

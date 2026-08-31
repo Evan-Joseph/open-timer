@@ -35,8 +35,8 @@ const ERROR_TEXT: Record<string, string> = {
 };
 const RETRYABLE = new Set(['timeout', 'upstream', 'invalid', 'internal', 'network']);
 
-// v4 = 语义 revision + 模型标识。v3 不复用，确保模型升级后不会展示旧建议。
-const CACHE_KEY = 'clock-conch-cache-v4';
+// v5 = 语义 revision + 模型标识 + 原始事实校验。v4 不复用，避免继续展示规则收紧前的建议。
+const CACHE_KEY = 'clock-conch-cache-v5';
 /** state 不可用（极短启动窗口）时的唯一兜底 TTL；正常状态下不按时间过期。 */
 const CACHE_TTL_FALLBACK_MS = 30 * 60 * 1000;
 
