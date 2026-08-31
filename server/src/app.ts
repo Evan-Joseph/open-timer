@@ -1047,6 +1047,7 @@ export function createApp(deps: AppDeps): Hono {
   const ConchAskSchema = z.object({ window: z.enum(['all', '30d', '7d']) });
   const ConchRequestIdSchema = z.string().min(14).max(72).regex(/^conch-[a-z0-9]+(?:-[a-z0-9]+)*$/);
   const conchLimiter = new RateLimiter(3_600_000, 20);
+  type ConchInternalStage = 'prepare' | 'read_sessions' | 'read_segments' | 'build_context' | 'read_revisions' | 'parse_output' | 'shape_response';
 
   function conchRequestId(c: Context): string | null {
     const parsed = ConchRequestIdSchema.safeParse(c.req.header('x-client-request-id'));
@@ -1058,6 +1059,7 @@ export function createApp(deps: AppDeps): Hono {
     requestId: string | null,
     startedAtMs: number,
     upstreamStatus?: number,
+    internalStage?: ConchInternalStage,
   ): void {
     const entry: {
       event: 'conch_ask';
@@ -1065,6 +1067,7 @@ export function createApp(deps: AppDeps): Hono {
       request_id: string | null;
       elapsed_ms: number;
       upstream_status?: number;
+      internal_stage?: ConchInternalStage;
     } = {
       event: 'conch_ask',
       stage,
@@ -1072,6 +1075,7 @@ export function createApp(deps: AppDeps): Hono {
       elapsed_ms: Math.max(0, now() - startedAtMs),
     };
     if (Number.isInteger(upstreamStatus)) entry.upstream_status = upstreamStatus;
+    if (internalStage) entry.internal_stage = internalStage;
     console.info(JSON.stringify(entry));
   }
 
@@ -1085,6 +1089,7 @@ export function createApp(deps: AppDeps): Hono {
     if (requestId) c.header('X-Client-Request-Id', requestId);
     const startedAtMs = now();
     logConch('entered', requestId, startedAtMs);
+    let internalStage: ConchInternalStage = 'prepare';
     try {
       if (!config.conch || deps.conchLlm === null) return c.json({ error: 'CONCH_NOT_CONFIGURED' }, 503);
       const llm = deps.conchLlm ?? createConchLlmClient(config.conch);
@@ -1097,8 +1102,11 @@ export function createApp(deps: AppDeps): Hono {
       const nowMs = now();
       // 全量一次取（ended_at 索引 range + 活动部分索引），窗口过滤在 builder 内，
       // 保证活动门槛（全量/近7天）数据完整。
+      internalStage = 'read_sessions';
       const sessions = await storage.sessionsOverlapping(0, nowMs + 1);
+      internalStage = 'read_segments';
       const segMap = await storage.segmentsForSessions(sessions.map((s) => s.id));
+      internalStage = 'build_context';
       const ctx = buildConchContext({
         nowMs,
         window: body.data.window,
@@ -1106,6 +1114,7 @@ export function createApp(deps: AppDeps): Hono {
         segmentsBySession: segMap,
         minSegmentMs: config.minSegmentMs,
       });
+      internalStage = 'read_revisions';
       const [revision, conchRevision] = await Promise.all([storage.maxEventId(), storage.getConchRevision()]);
       const baseResp = {
         window: body.data.window,
@@ -1133,10 +1142,12 @@ export function createApp(deps: AppDeps): Hono {
         return c.json({ error: 'LLM_UPSTREAM' }, 502);
       }
 
+      internalStage = 'parse_output';
       const recs = parseConchLlmOutput(content, ctx.active);
       logConch('upstream_ok', requestId, startedAtMs);
       if (!recs) return c.json({ error: 'LLM_OUTPUT_INVALID' }, 422);
 
+      internalStage = 'shape_response';
       const subjects = recs.map((rec) => {
         const def = subjectById(rec.subject_id)!;
         const subSessions = sessions.filter((s) => s.subjectId === rec.subject_id && s.status !== 'voided');
@@ -1152,7 +1163,7 @@ export function createApp(deps: AppDeps): Hono {
 
       return c.json({ ...baseResp, subjects, skipped: ctx.skipped });
     } catch {
-      logConch('internal_error', requestId, startedAtMs);
+      logConch('internal_error', requestId, startedAtMs, undefined, internalStage);
       return c.json({ error: 'INTERNAL' }, 500);
     }
   });

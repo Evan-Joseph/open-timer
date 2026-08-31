@@ -49,13 +49,24 @@ describe('splitMigrationSql', () => {
 
 /** 用 better-sqlite3 模拟 D1 的 prepare/bind/all/batch，验证两 adapter 的查询形状一致。 */
 class SqliteBackedD1 implements D1Database {
-  constructor(private readonly db: Database.Database) {}
+  readonly bindCounts: number[] = [];
+
+  constructor(
+    private readonly db: Database.Database,
+    private readonly maxBoundParameters = Number.POSITIVE_INFINITY,
+  ) {}
 
   prepare(query: string): D1Statement {
     const db = this.db;
+    const maxBoundParameters = this.maxBoundParameters;
+    const bindCounts = this.bindCounts;
     let values: unknown[] = [];
     return {
       bind(...next: unknown[]) {
+        if (next.length > maxBoundParameters) throw new Error('D1_MAX_BOUND_PARAMETERS');
+        // Cloudflare D1 每条语句最多 100 个绑定参数；记录每次 bind 以防回归成单条超限 IN 查询。
+        // `this` 在 D1Statement 运行时不是 SqliteBackedD1，借闭包保存记录。
+        bindCounts.push(next.length);
         values = next;
         return this;
       },
@@ -134,5 +145,35 @@ describe('SQLite / D1 范围查询一致性', () => {
     sqlite.close();
     d1Db.close();
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('segmentsForSessions 在超过 D1 100 个绑定参数时分批读取并合并', async () => {
+    const d1Db = new Database(':memory:');
+    const migrationSql = ['0001_init.sql', '0002_user_pref.sql', '0003_index_session_ended.sql', '0004_conch_revision.sql']
+      .map((file) => readFileSync(join(MIGRATIONS_DIR, file), 'utf8'))
+      .join('\n');
+    const backing = new SqliteBackedD1(d1Db, 100);
+    const d1 = new D1Storage(backing, migrationSql);
+    await d1.migrate();
+
+    const ids = Array.from({ length: 116 }, (_, index) => `session-${String(index).padStart(3, '0')}`);
+    const insertSession = d1Db.prepare(
+      "INSERT INTO session (id, user_id, subject_id, status, intent_note, end_note, end_reason, started_at_ms, ended_at_ms, active_seconds, created_at_ms) VALUES (?, 'owner', 'math', 'stopped', NULL, NULL, 'manual', ?, ?, 60, ?)",
+    );
+    const insertSegment = d1Db.prepare('INSERT INTO active_segment (session_id, started_at_ms, ended_at_ms) VALUES (?, ?, ?)');
+    const base = Date.UTC(2026, 7, 1, 0, 0);
+    d1Db.transaction(() => {
+      ids.forEach((id, index) => {
+        const startedAtMs = base + index * 60_000;
+        insertSession.run(id, startedAtMs, startedAtMs + 60_000, startedAtMs);
+        insertSegment.run(id, startedAtMs, startedAtMs + 60_000);
+      });
+    })();
+
+    const segments = await d1.segmentsForSessions(ids);
+    expect(segments).toHaveLength(116);
+    expect([...segments.values()].every((rows) => rows.length === 1)).toBe(true);
+    expect(Math.max(...backing.bindCounts)).toBeLessThanOrEqual(100);
+    d1Db.close();
   });
 });

@@ -347,17 +347,23 @@ export class D1Storage implements Storage {
 
   async segmentsForSessions(sessionIds: string[]): Promise<Map<string, ActiveSegmentRow[]>> {
     const map = new Map<string, ActiveSegmentRow[]>();
-    if (sessionIds.length === 0) return map;
-    const placeholders = sessionIds.map(() => '?').join(',');
-    const { results } = await this.db
-      .prepare(`SELECT * FROM active_segment WHERE session_id IN (${placeholders}) ORDER BY started_at_ms, id`)
-      .bind(...sessionIds)
-      .all<Record<string, unknown>>();
-    for (const r of results) {
-      const seg = rowToSegment(r);
-      const arr = map.get(seg.sessionId) ?? [];
-      arr.push(seg);
-      map.set(seg.sessionId, arr);
+    // Cloudflare D1 每条语句最多 100 个 bound parameters。海螺会读取全历史，
+    // 不能把所有 session ID 拼成一条 IN 查询，否则会话超过阈值后直接失败。
+    const uniqueIds = [...new Set(sessionIds)];
+    const D1_MAX_BOUND_PARAMETERS = 100;
+    for (let offset = 0; offset < uniqueIds.length; offset += D1_MAX_BOUND_PARAMETERS) {
+      const batch = uniqueIds.slice(offset, offset + D1_MAX_BOUND_PARAMETERS);
+      const placeholders = batch.map(() => '?').join(',');
+      const { results } = await this.db
+        .prepare(`SELECT * FROM active_segment WHERE session_id IN (${placeholders}) ORDER BY started_at_ms, id`)
+        .bind(...batch)
+        .all<Record<string, unknown>>();
+      for (const r of results) {
+        const seg = rowToSegment(r);
+        const arr = map.get(seg.sessionId) ?? [];
+        arr.push(seg);
+        map.set(seg.sessionId, arr);
+      }
     }
     return map;
   }
