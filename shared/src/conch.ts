@@ -86,6 +86,19 @@ export interface ConchContextResult {
   userPrompt: string;
   /** 不含备注的时间线行数（日志/调试用，避免备注全文进日志）。 */
   lineCount: number;
+  /** 每科近期原始事实与已明确完成的章节范围，供服务端阻止模型自相矛盾。 */
+  subjectFacts: Map<SubjectId, ConchSubjectFacts>;
+}
+
+export interface ConchSubjectFacts {
+  /** 有备注的最近记录，按新→旧排列；原话优先于模型推测。 */
+  latestNotes: string[];
+  /** 明确完成记录中提取出的章节范围，例如“第6章题目”。 */
+  completedScopes: string[];
+  /** 明确完成练习的章节，例如“第6章”；同章做题推荐须有更新的原始事实支撑。 */
+  completedPracticeChapters: string[];
+  /** 明确完成视频/网课的章节，例如“第6章”；同章视频推荐须有更新的原始事实支撑。 */
+  completedVideoChapters: string[];
 }
 
 /** 单科目行数超过该值时，早于 45 天的部分按月聚合。 */
@@ -93,6 +106,25 @@ export const CONCH_MAX_LINES_PER_SUBJECT = 150;
 const CONCH_FULL_DETAIL_DAYS = 45;
 const CONCH_AGG_MONTH_NOTES = 3;
 const CONCH_NOTE_TRUNCATE = 20;
+const EXPLICIT_COMPLETION = /完成|做完|订正(?:并)?理解完|理解完|看完/;
+const CHAPTER_SCOPE = /第[0-9一二三四五六七八九十]+章[^，。；、\s"“”】【】]{0,16}/g;
+const CHAPTER_KEY = /第[0-9一二三四五六七八九十]+章/g;
+const UNFOUNDED_NEGATIVE_COMPLETION = /未订正|未完成|未最终|未做|没做|未(?:全部)?看完|缺少(?:订正|理解|完成|题目)/;
+const REVIEW_ACTION = /复习|回看|复盘|巩固/;
+const PRACTICE_ACTIVITY = /做|题|练习|作业|刷题/;
+const VIDEO_ACTIVITY = /视频|网课|看课/;
+
+function chapterScopes(note: string): string[] {
+  return [...note.matchAll(CHAPTER_SCOPE)]
+    .map((match) => match[0].replace(/[的\s]/g, ''))
+    .filter((scope, index, all) => scope.length > 3 && all.indexOf(scope) === index);
+}
+
+function chapterKeys(note: string): string[] {
+  return [...note.matchAll(CHAPTER_KEY)]
+    .map((match) => match[0])
+    .filter((chapter, index, all) => all.indexOf(chapter) === index);
+}
 
 function fmtBeijing(ms: number, withDate = true): string {
   const d = new Date(ms + SHANGHAI_OFFSET_MS);
@@ -163,6 +195,7 @@ export function buildConchContext(input: ConchBuildInput): ConchContextResult {
   const active: SubjectId[] = [];
   const skipped: ConchSkippedEntry[] = [];
   const blocks: string[] = [];
+  const subjectFacts = new Map<SubjectId, ConchSubjectFacts>();
   let lineCount = 0;
 
   for (const def of SUBJECTS) {
@@ -186,6 +219,32 @@ export function buildConchContext(input: ConchBuildInput): ConchContextResult {
     const inWindow = all
       .filter((s) => (s.endedAtMs ?? nowMs) >= windowStartMs && s.startedAtMs <= nowMs)
       .sort((a, b) => a.startedAtMs - b.startedAtMs);
+
+    const recentFacts = [...inWindow]
+      .reverse()
+      .flatMap((s) => {
+        const note = s.endNote ?? s.intentNote;
+        return note ? [{ atMs: s.endedAtMs ?? s.startedAtMs, note }] : [];
+      })
+      .slice(0, 3);
+    const completedScopes = inWindow.flatMap((s) => {
+      const note = s.endNote ?? s.intentNote;
+      return note && EXPLICIT_COMPLETION.test(note) ? chapterScopes(note) : [];
+    });
+    const completedPracticeChapters = inWindow.flatMap((s) => {
+      const note = s.endNote ?? s.intentNote;
+      return note && EXPLICIT_COMPLETION.test(note) && PRACTICE_ACTIVITY.test(note) ? chapterKeys(note) : [];
+    });
+    const completedVideoChapters = inWindow.flatMap((s) => {
+      const note = s.endNote ?? s.intentNote;
+      return note && EXPLICIT_COMPLETION.test(note) && VIDEO_ACTIVITY.test(note) ? chapterKeys(note) : [];
+    });
+    subjectFacts.set(def.id, {
+      latestNotes: recentFacts.map((fact) => fact.note),
+      completedScopes: [...new Set(completedScopes)],
+      completedPracticeChapters: [...new Set(completedPracticeChapters)],
+      completedVideoChapters: [...new Set(completedVideoChapters)],
+    });
 
     let totalSecs = 0;
     for (const s of inWindow) totalSecs += secsOf(s, windowStartMs);
@@ -250,6 +309,9 @@ export function buildConchContext(input: ConchBuildInput): ConchContextResult {
       [
         `=== ${def.displayName} (${def.id}) ===`,
         `累计 ${inWindow.length} 次 · ${fmtHours(totalSecs)} ｜ 近7天 ${recentSessions} 次 · ${fmtHours(recentSecs)} ｜ 最近活动 ${lastActivity || '—'}`,
+        ...(recentFacts.length > 0
+          ? ['【当前事实（新→旧，优先级最高，不得反驳）】', ...recentFacts.map((fact) => `${fmtBeijing(fact.atMs)} "${fact.note}"`)]
+          : []),
         ...aggLines,
         ...lines,
       ].join('\n'),
@@ -268,7 +330,7 @@ export function buildConchContext(input: ConchBuildInput): ConchContextResult {
         blocks.join('\n\n') +
         '\n\n请返回符合 schema 的原始 JSON。';
 
-  return { active, skipped, userPrompt, lineCount };
+  return { active, skipped, userPrompt, lineCount, subjectFacts };
 }
 
 /* ---------- LLM 输出解析（字段级宽容、结构级严格） ---------- */
@@ -358,25 +420,66 @@ export function parseConchLlmOutput(raw: string, expected: readonly SubjectId[])
   );
 }
 
+/**
+ * 模型只能推荐，不拥有覆盖时钟事实的权力。
+ * 对明确完成的章节范围重复执行，或理由中凭空断言“未订正/未完成”时，退回为
+ * 基于最新原始记录的保守动作，避免把模型猜测呈现为用户学习事实。
+ */
+export function enforceConchFacts(
+  recs: ConchSubjectRec[],
+  subjectFacts: ReadonlyMap<SubjectId, ConchSubjectFacts>,
+): ConchSubjectRec[] {
+  return recs.map((rec) => {
+    const facts = subjectFacts.get(rec.subject_id);
+    if (!facts) return rec;
+    const actionScopes = chapterScopes(rec.next_action);
+    const repeatsCompletedScope = !REVIEW_ACTION.test(rec.next_action) && actionScopes.some((scope) => facts.completedScopes.includes(scope));
+    const repeatsCompletedPractice = !REVIEW_ACTION.test(rec.next_action) && PRACTICE_ACTIVITY.test(rec.next_action)
+      && chapterKeys(rec.next_action).some((chapter) => facts.completedPracticeChapters.includes(chapter));
+    const repeatsCompletedVideo = !REVIEW_ACTION.test(rec.next_action) && VIDEO_ACTIVITY.test(rec.next_action)
+      && chapterKeys(rec.next_action).some((chapter) => facts.completedVideoChapters.includes(chapter));
+    const inventsNegativeCompletion = UNFOUNDED_NEGATIVE_COMPLETION.test(`${rec.next_action} ${rec.rationale}`);
+    if (!repeatsCompletedScope && !repeatsCompletedPractice && !repeatsCompletedVideo && !inventsNegativeCompletion) return rec;
+    return {
+      ...rec,
+      next_action: '按最近记录继续下一项已确定范围',
+      action_kind: 'other',
+      topic: null,
+      pattern: null,
+      rationale: facts.latestNotes[0] ? `最近记录：${truncate(facts.latestNotes[0], 80)}` : '时钟未提供下一项的明确范围',
+      confidence: 'low',
+      alternatives: [],
+    };
+  });
+}
+
 /* ---------- system prompt（定稿，见设计文档 §5.4） ---------- */
 
 export const CONCH_SYSTEM_PROMPT = `你是「神奇海螺」，一名 11408 考研备考的节奏分析师。输入是用户（单用户本人）各科目
 的真实计时记录：起止时间、有效时长、手动备注。你的唯一任务：为每个给出的科目推断
 「下一步最应该做什么」。
 
+【事实边界】
+1. 引号内的备注是原始事实。出现“完成”“做完”“订正并理解完”“理解完”等明确完成表述时，
+   其所指范围已经完成；不得把同一范围写成未完成、未订正、缺少或再次推荐完成它。
+2. 没有某一步的记录，只能说明你无法从计时记录确认，绝不能写成该步骤没有做、尚未完成或缺失。
+   常见学习顺序、章节顺序和你的主观推测都不能作为否定完成状态的证据。
+3. rationale 只可复述或归纳输入中直接存在的正面事实；不得编造任何负面完成判断。
+4. 每科开头的“当前事实（新→旧，优先级最高）”必须先读；以它为当前状态，不得退回较早记录。
+5. 若明确记录已经完成某章题目、练习、收尾题、视频或网课，不得推荐该章同类动作；除非输入中有更新记录明确指出一个尚未完成的子范围。
+
 【推断原则】
 1. 先识别每个科目各自的节奏。常见如：看课→做对应章节题；基础题→强化题→冲刺题；
    看书→刷题；看课→看书→做题。不同科目节奏可能不同，逐个科目独立归纳，不要套用。
 2. 以该科目最后一条记录为锚点外推下一步：上一步是看 E 章课，下一步大概率是做 E 章题；
    上一步是 B 章强化题且其节奏是基础→强化→冲刺，则下一步可能是 B 章冲刺题。
-3. 检查缺步：对照近期「章节 × 步骤」的覆盖，若某章只看了课没做题、或只做了基础题
-   缺强化，则优先建议补上这一步，并在 rationale 说明缺什么。
+3. 信息不足时，给出基于最后一条记录的保守继续动作，confidence 设为 "low"；不要用“补缺步”填补不确定性。
 4. 只依据备注中出现过的事实推断。不得编造备注里从未出现的教材名、题集名、题号、
    课程名；引用资料时用用户自己的叫法（如"你一直在做的那本题集"）。
 5. next_action 必须具体可立即执行，≤40 个汉字。好例子："做第5章 定积分的冲刺题"；
    坏例子："继续学数学"。
 6. 若某科目历史太稀疏或规律不明，confidence 给 "low"，给出最稳妥的一般性下一步
-   （如"继续上次未完成的进度"），并在 rationale 说明缺什么信息。
+   （如"按最近已记录范围继续"），并在 rationale 只说明可见记录，不宣称存在未完成事项。
 7. alternatives 给 1–3 条与 next_action 不同方向的备选（如主推荐是补题，备选可以是
    推进下一章、回看错题、换一种学习形式），每条同样具体、≤40 汉字；没有合适备选时给 []。
 
