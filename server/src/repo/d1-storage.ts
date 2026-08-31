@@ -385,23 +385,33 @@ export class D1Storage implements Storage {
   }
 
   async adjustmentsForSessions(sessionIds: string[]): Promise<ManualAdjustmentRow[]> {
-    if (sessionIds.length === 0) return [];
-    const placeholders = sessionIds.map(() => '?').join(',');
-    const { results } = await this.db
-      .prepare(
-        `SELECT * FROM manual_adjustment WHERE session_id IN (${placeholders}) ORDER BY created_at_ms, id`,
-      )
-      .bind(...sessionIds)
-      .all<Record<string, unknown>>();
-    return results.map((r) => ({
-      id: r.id as number,
-      sessionId: r.session_id as string,
-      kind: r.kind as ManualAdjustmentRow['kind'],
-      beforeJson: r.before_json as string,
-      afterJson: r.after_json as string,
-      reason: (r.reason as string | null) ?? null,
-      createdAtMs: r.created_at_ms as number,
-    }));
+    const out: ManualAdjustmentRow[] = [];
+    const uniqueIds = [...new Set(sessionIds)];
+    const D1_MAX_BOUND_PARAMETERS = 100;
+    // 与 segmentsForSessions 同理：范围 API 的关联修正也可能覆盖全历史，
+    // 不能在单条 IN 查询中超出 D1 的 100 个绑定参数限制。
+    for (let offset = 0; offset < uniqueIds.length; offset += D1_MAX_BOUND_PARAMETERS) {
+      const batch = uniqueIds.slice(offset, offset + D1_MAX_BOUND_PARAMETERS);
+      const placeholders = batch.map(() => '?').join(',');
+      const { results } = await this.db
+        .prepare(
+          `SELECT * FROM manual_adjustment WHERE session_id IN (${placeholders}) ORDER BY created_at_ms, id`,
+        )
+        .bind(...batch)
+        .all<Record<string, unknown>>();
+      for (const r of results) {
+        out.push({
+          id: r.id as number,
+          sessionId: r.session_id as string,
+          kind: r.kind as ManualAdjustmentRow['kind'],
+          beforeJson: r.before_json as string,
+          afterJson: r.after_json as string,
+          reason: (r.reason as string | null) ?? null,
+          createdAtMs: r.created_at_ms as number,
+        });
+      }
+    }
+    return out.sort((a, b) => a.createdAtMs - b.createdAtMs || (a.id ?? 0) - (b.id ?? 0));
   }
 
   async maxEventId(): Promise<number> {

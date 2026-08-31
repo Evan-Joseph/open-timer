@@ -161,18 +161,24 @@ describe('SQLite / D1 范围查询一致性', () => {
       "INSERT INTO session (id, user_id, subject_id, status, intent_note, end_note, end_reason, started_at_ms, ended_at_ms, active_seconds, created_at_ms) VALUES (?, 'owner', 'math', 'stopped', NULL, NULL, 'manual', ?, ?, 60, ?)",
     );
     const insertSegment = d1Db.prepare('INSERT INTO active_segment (session_id, started_at_ms, ended_at_ms) VALUES (?, ?, ?)');
+    const insertAdjustment = d1Db.prepare(
+      "INSERT INTO manual_adjustment (session_id, kind, before_json, after_json, reason, created_at_ms) VALUES (?, 'note', '{}', '{}', NULL, ?)",
+    );
     const base = Date.UTC(2026, 7, 1, 0, 0);
     d1Db.transaction(() => {
       ids.forEach((id, index) => {
         const startedAtMs = base + index * 60_000;
         insertSession.run(id, startedAtMs, startedAtMs + 60_000, startedAtMs);
         insertSegment.run(id, startedAtMs, startedAtMs + 60_000);
+        insertAdjustment.run(id, startedAtMs + 61_000);
       });
     })();
 
     const segments = await d1.segmentsForSessions(ids);
+    const adjustments = await d1.adjustmentsForSessions(ids);
     expect(segments).toHaveLength(116);
     expect([...segments.values()].every((rows) => rows.length === 1)).toBe(true);
+    expect(adjustments).toHaveLength(116);
     expect(Math.max(...backing.bindCounts)).toBeLessThanOrEqual(100);
     d1Db.close();
   });
