@@ -31,9 +31,9 @@ export function createConchLlmClient(
   cfg: ConchConfig,
   opts?: { timeoutMs?: number; fetchImpl?: typeof fetch },
 ): ConchLlmClient {
-  // Flash 模型的完整生产输入实测约 21 秒；45 秒足以吸收边缘波动，
-  // 也不会让低频的交互入口在无反馈状态下悬挂过久。
-  const timeoutMs = opts?.timeoutMs ?? 45_000;
+  // Ling Flash 对完整生产输入重复实测约 9 秒；30 秒为短时供应商波动留余量，
+  // 也避免低频入口在无反馈状态下悬挂过久。
+  const timeoutMs = opts?.timeoutMs ?? 30_000;
   const fetchImpl = opts?.fetchImpl ?? fetch;
 
   return {

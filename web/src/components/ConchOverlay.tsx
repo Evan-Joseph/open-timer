@@ -337,7 +337,7 @@ export default function ConchOverlay({ onClose, store }: Props) {
                 <Shell size={20} aria-hidden className="conch-breathe" />
                 <span>神奇海螺正在看已完成的记录…</span>
               </div>
-              <span className="conch-loading-sub">通常约 20 秒；超过 45 秒会自动结束并允许重试</span>
+              <span className="conch-loading-sub">通常约 10 秒；超过 30 秒会自动结束并允许重试</span>
             </div>
           )}
 
