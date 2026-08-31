@@ -164,6 +164,12 @@ test('视觉审计样式断言', async ({ page }) => {
   await page.getByTestId('unlock-btn').click();
   const del = page.getByRole('button', { name: '删除一位' });
   expect(await del.getAttribute('aria-disabled')).toBe('true');
+  const delStyle = await del.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return { opacity: style.opacity, background: style.backgroundColor, color: style.color };
+  });
+  expect(delStyle.opacity).toBe('1');
+  expect(delStyle.background).toBe('rgb(231, 231, 233)');
   console.log('del-key aria-disabled OK');
 
   console.log('ALL STYLE ASSERTIONS PASSED');
@@ -173,7 +179,7 @@ test('视觉审计样式断言', async ({ page }) => {
  * 深色模式契约（docs/DESIGN.md §2/§4）：
  * - 文字 token 对比度：text-1/text-2 ≥4.5:1，text-3 ≥3:1（仅非关键信息），
  *   在 --bg / --bg-elevated / --surface-2 三个表面上逐一验证；
- * - 语义色（accent/danger/success）对底色 ≥3:1；
+ * - 语义色（accent/danger/success）对底色 ≥3:1；填充操作由下方逐科目的实测断言覆盖；
  * - 阅读/编辑弹层使用实色 --popover-surface，防止底层时钟文字穿透。
  */
 test('深色模式对比度与材质 token', async ({ page }) => {
@@ -232,7 +238,6 @@ test('深色模式对比度与材质 token', async ({ page }) => {
     for (const name of ['--accent', '--danger', '--success', '--amber']) {
       pairs[`${name}/bg`] = ratio(hexToRgb(tok(name)), bg);
     }
-    pairs['white/accent'] = ratio([255, 255, 255], hexToRgb(tok('--accent')));
     return {
       ratios: pairs,
       popoverSurface: colorOf(tok('--popover-surface')),
@@ -242,7 +247,7 @@ test('深色模式对比度与材质 token', async ({ page }) => {
 
   for (const [pair, value] of Object.entries(report.ratios)) {
     console.log(`contrast ${pair}: ${value.toFixed(2)}:1`);
-    const min = pair.startsWith('text-3/') ? 3 : pair.includes('/bg') || pair.startsWith('white/') ? 3 : 4.5;
+    const min = pair.startsWith('text-3/') || pair.includes('/bg') ? 3 : 4.5;
     expect(value, pair).toBeGreaterThanOrEqual(min);
   }
   // 材质 token：深色弹层 rgb(36,36,38)；遮罩 rgba(0,0,0,0.44)（序列化格式不定，按分量比较）
@@ -257,6 +262,56 @@ test('深色模式对比度与材质 token', async ({ page }) => {
   const dialogBg = await page.locator('.dialog-content').evaluate((el) => getComputedStyle(el).backgroundColor);
   expect(dialogBg).toBe('rgb(36, 36, 38)');
   await page.keyboard.press('Escape');
+});
+
+/**
+ * 科目色同时承担“身份 + 上下文操作”两层信息，但不染指全局设置、危险操作和休息告警。
+ * 主按钮的前景/背景在浅深主题、常态/悬停均以 AA 常规文本阈值校验。
+ */
+test('科目主题操作色与禁用态在浅深主题均可读', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await setup(page);
+
+  const subjects = ['数学二', '英语二', '数据结构', '计算机组成原理', '操作系统', '计算机网络', '思想政治理论'];
+  const contrast = async () => page.getByTestId('start-btn').evaluate((el) => {
+    const color = (value: string): [number, number, number] => value.match(/[\d.]+/g)!.slice(0, 3).map(Number) as [number, number, number];
+    const lin = (c: number) => {
+      c /= 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    };
+    const lum = ([r, g, b]: [number, number, number]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    const style = getComputedStyle(el);
+    const [a, b] = [lum(color(style.backgroundColor)), lum(color(style.color))];
+    return { ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05), background: style.backgroundColor, color: style.color };
+  });
+
+  for (const name of subjects) {
+    await page.getByRole('radio', { name }).click();
+    const base = await contrast();
+    expect(base.ratio, `浅色 ${name} 主操作常态`).toBeGreaterThanOrEqual(4.5);
+    await page.getByTestId('start-btn').hover();
+    await page.waitForTimeout(180);
+    const hovered = await contrast();
+    expect(hovered.ratio, `浅色 ${name} 主操作悬停`).toBeGreaterThanOrEqual(4.5);
+  }
+
+  // 数学保留独立铜色，避免与“休息到期”的琥珀告警复用；禁用控件不是半透明故障态。
+  await page.getByRole('radio', { name: '数学二' }).click();
+  await expect(page.locator('.clockface.idle')).toHaveAttribute('data-color', 'copper');
+  expect(await page.getByRole('button', { name: '后一天' }).evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+
+  await page.getByRole('button', { name: '设置' }).click();
+  await page.getByRole('radio', { name: '深色' }).click();
+  await page.keyboard.press('Escape');
+  for (const name of subjects) {
+    await page.getByRole('radio', { name }).click();
+    const base = await contrast();
+    expect(base.ratio, `深色 ${name} 主操作常态`).toBeGreaterThanOrEqual(4.5);
+    await page.getByTestId('start-btn').hover();
+    await page.waitForTimeout(180);
+    const hovered = await contrast();
+    expect(hovered.ratio, `深色 ${name} 主操作悬停`).toBeGreaterThanOrEqual(4.5);
+  }
 });
 
 /**

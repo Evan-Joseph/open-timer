@@ -13,11 +13,12 @@ import migrationSql0001 from '../../migrations/0001_init.sql';
 import migrationSql0002 from '../../migrations/0002_user_pref.sql';
 import migrationSql0003 from '../../migrations/0003_index_session_ended.sql';
 import migrationSql0004 from '../../migrations/0004_conch_revision.sql';
+import migrationSql0005 from '../../migrations/0005_conch_cache.sql';
 
 /** 全部迁移 SQL（按序号拼接；均为幂等，可重复执行）。
  *  注意：新增迁移文件必须在此显式导入，否则 Worker 不会执行
  *  （SQLite 适配器按目录加载，两边加载方式不同，曾因此漏掉 0003）。 */
-const migrationSql = `${migrationSql0001}\n${migrationSql0002}\n${migrationSql0003}\n${migrationSql0004}`;
+const migrationSql = `${migrationSql0001}\n${migrationSql0002}\n${migrationSql0003}\n${migrationSql0004}\n${migrationSql0005}`;
 
 /** Workers 运行时上下文（本地声明，不引入 workers-types 以免与 Node 类型冲突） */
 interface ExecutionContext {
@@ -43,6 +44,11 @@ interface Env {
 
 /** 同一 Worker isolate 内共享：迁移完成后不再探测数据库 */
 let migrated = false;
+/**
+ * Hono 应用也按 isolate 复用：登录/API 的内存限流器不再每次 fetch 归零。
+ * 海螺的上游额度与结果协调仍由 D1 负责，不能依赖此内存层跨 isolate 一致。
+ */
+let workerAppPromise: Promise<ReturnType<typeof createApp>> | null = null;
 
 async function ensureMigrated(env: Env, storage: D1Storage): Promise<void> {
   // 始终执行幂等迁移（全部 IF NOT EXISTS / ON CONFLICT，可重复执行），
@@ -51,6 +57,38 @@ async function ensureMigrated(env: Env, storage: D1Storage): Promise<void> {
   if (migrated) return;
   await storage.migrate();
   migrated = true;
+}
+
+async function getWorkerApp(env: Env, baseUrl: string): Promise<ReturnType<typeof createApp>> {
+  if (!workerAppPromise) {
+    workerAppPromise = (async () => {
+      const storage = new D1Storage(env.DB, migrationSql);
+      await ensureMigrated(env, storage);
+      const config: AppConfig = {
+        dbPath: 'd1://clock',
+        port: 443,
+        baseUrl,
+        isProduction: true,
+        sessionTtlMs: 7 * 86_400_000,
+        minSegmentMs: 10_000,
+        conch: loadConchConfig({
+          CONCH_API_BASE: env.CONCH_API_BASE,
+          CONCH_API_KEY: env.CONCH_API_KEY,
+          CONCH_MODEL: env.CONCH_MODEL,
+          CONCH_THINKING_BUDGET: env.CONCH_THINKING_BUDGET,
+        }),
+        version: '0.1.0',
+      };
+      return createApp({ storage, config, backupBucket: env.BACKUP });
+    })();
+  }
+  try {
+    return await workerAppPromise;
+  } catch (error) {
+    // 初始化失败不能永久毒化 isolate；下一请求可在已修复的绑定/迁移后重新尝试。
+    workerAppPromise = null;
+    throw error;
+  }
 }
 
 export default {
@@ -83,29 +121,8 @@ export default {
 
 async function handle(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
-  const config: AppConfig = {
-    dbPath: 'd1://clock',
-    port: 443,
-    baseUrl: url.origin,
-    isProduction: true,
-    sessionTtlMs: 7 * 86_400_000,
-    minSegmentMs: 10_000, // 误触过滤：短于 10 秒的已关闭片段不计入
-    conch: loadConchConfig({
-      CONCH_API_BASE: env.CONCH_API_BASE,
-      CONCH_API_KEY: env.CONCH_API_KEY,
-      CONCH_MODEL: env.CONCH_MODEL,
-      CONCH_THINKING_BUDGET: env.CONCH_THINKING_BUDGET,
-    }),
-    version: '0.1.0',
-  };
-  const storage = new D1Storage(env.DB, migrationSql);
-  // 模块级标志：同一 isolate 内只探测/执行一次迁移，避免每请求一次 D1 查询
-  await ensureMigrated(env, storage);
-
-  const app = createApp({ storage, config, backupBucket: env.BACKUP });
-
   if (url.pathname.startsWith('/api/')) {
-    return app.fetch(request);
+    return (await getWorkerApp(env, url.origin)).fetch(request);
   }
 
   // 静态资产（web/dist 通过 assets binding 托管），SPA fallback 到 index.html
@@ -124,6 +141,6 @@ async function handle(request: Request, env: Env): Promise<Response> {
   }
   // 安全头与 API 同源：静态响应（尤其 HTML 外壳）同样必须携带 CSP/XFO/HSTS，
   // 与 app.ts 的 '*' 中间件共用 headers.ts 单一实现，覆盖全部响应（含 404）。
-  applySecurityHeaders((name, value) => headers.set(name, value), { isProduction: config.isProduction });
+  applySecurityHeaders((name, value) => headers.set(name, value), { isProduction: true });
   return new Response(assetRes.body, { status: assetRes.status, statusText: assetRes.statusText, headers });
 }

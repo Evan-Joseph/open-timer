@@ -30,7 +30,7 @@
 3. `web/public/_headers` 为静态响应提供 CSP、XFO、nosniff、Referrer-Policy、HSTS；`/assets/*` 使用一年 immutable cache。Worker API 响应仍由 `headers.ts` 附加相同安全头。
 4. 新增 `/api/v1/snapshot`，同一 Worker/D1 读取返回 state + 当前日 sessions，避免客户端双请求和跨日不一致。
 5. 隐藏标签不轮询，恢复可见/焦点/bfcache/resume 时立即刷新，保留体验与可靠性。
-6. 海螺缓存用单行 `conch_revision` 校验，已完成时间线不变时不调用 LLM。
+6. 海螺先用单行 `conch_revision` 校验本机缓存；本机 miss 时用 D1 的 `conch_response_cache` 复用跨设备/跨 Worker 的成功结果，并以条件写租约合并并行生成。实时 state、休息预算与会话 HTTP 响应仍不进 CDN 缓存。
 
 ## 仍建议在 Cloudflare 控制台完成的操作
 

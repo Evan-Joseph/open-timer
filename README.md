@@ -66,6 +66,7 @@ npm run test:e2e        # Playwright（自动起服务，端口 4390）
 - 会话跨北京时间 00:00 不拆分；日报按窗口裁剪入账。
 - 作废/修正保留事件链与 manual_adjustment 审计，不抹历史。
 - 每日备份：Cron Triggers（北京 23:00）把 `events.jsonl`（与导出端点同格式，可重放）与 `sessions.jsonl` 写入 R2 `clock-11408-backup`，滚动保留 30 天（`server/src/backup.ts`）。
+- 海螺：客户端只缓存最近成功展示结果；服务端 D1 先以“已完成时间线 revision + 模型 + 窗口”命中共享建议，命中仅轻量读取活动态，不重扫历史。缓存到下一个输入变化边界失效，最晚不跨下一个北京时间自然日；租约合并并行生成，动态 API 响应仍禁止 CDN 长缓存。
 
 ## 迁移
 

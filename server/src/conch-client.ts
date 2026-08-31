@@ -27,11 +27,14 @@ export interface ConchLlmClient {
   ask(params: { system: string; user: string }): Promise<ConchLlmResult>;
 }
 
+/** 单次海螺请求的总上游等待上限。DeepSeek 的空内容重试共享这一个预算。 */
+export const CONCH_LLM_TIMEOUT_MS = 90_000;
+
 export function createConchLlmClient(
   cfg: ConchConfig,
   opts?: { timeoutMs?: number; fetchImpl?: typeof fetch },
 ): ConchLlmClient {
-  const timeoutMs = opts?.timeoutMs ?? 90_000;
+  const timeoutMs = opts?.timeoutMs ?? CONCH_LLM_TIMEOUT_MS;
   const fetchImpl = opts?.fetchImpl ?? fetch;
   // DeepSeek 官方端点与 SiliconFlow 等兼容网关的 reasoning 参数不同。
   // 仅按精确官方 hostname 走官方协议；其余端点保留原有兼容请求形状。
@@ -69,9 +72,14 @@ export function createConchLlmClient(
       // DeepSeek JSON Output 官方说明偶发空 content；保留同一高质量模型与输入重试一次。
       // 其他兼容端点维持单次调用，避免改变其既有配额与失败语义。
       const attempts = isOfficialDeepSeek ? 2 : 1;
+      // 两次尝试共享同一请求预算。此前每次各等 90 秒，第二次重试会把总等待拉到
+      // 180 秒，并让 Worker 生成租约可能在原请求仍运行时过期。
+      const deadlineMs = Date.now() + timeoutMs;
       for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const remainingMs = deadlineMs - Date.now();
+        if (remainingMs <= 0) throw new ConchLlmError('timeout', 'llm timeout');
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const timer = setTimeout(() => controller.abort(), remainingMs);
         try {
           const res = await fetchImpl(`${cfg.apiBase}/chat/completions`, {
             method: 'POST',

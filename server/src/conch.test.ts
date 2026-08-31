@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeAll, afterAll } from 'vitest';
+import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +10,7 @@ import { SqliteStorage } from '../src/repo/sqlite-storage.js';
 
 const PASSWORD = '246813';
 const DAY = 86_400_000;
+const HOUR = 3_600_000;
 
 function makeConfig(dbPath: string, conch: ConchConfig | null): AppConfig {
   return {
@@ -24,13 +25,14 @@ function makeConfig(dbPath: string, conch: ConchConfig | null): AppConfig {
   };
 }
 
-/** 记录最后一次请求的假 LLM；content 可按用例替换 */
-function fakeLlm(state: { content: string; error?: ConchLlmError }): ConchLlmClient & { calls: Array<{ system: string; user: string }> } {
+/** 记录最后一次请求的假 LLM；content 可按用例替换。 */
+function fakeLlm(state: { content: string; error?: ConchLlmError; delayMs?: number }): ConchLlmClient & { calls: Array<{ system: string; user: string }> } {
   const calls: Array<{ system: string; user: string }> = [];
   return {
     calls,
     async ask(params) {
       calls.push(params);
+      if (state.delayMs) await new Promise((resolve) => setTimeout(resolve, state.delayMs));
       if (state.error) throw state.error;
       return { content: state.content };
     },
@@ -39,13 +41,18 @@ function fakeLlm(state: { content: string; error?: ConchLlmError }): ConchLlmCli
 
 interface Harness {
   app: ReturnType<typeof createApp>;
+  storage: SqliteStorage;
   cookie: string;
   llm: ReturnType<typeof fakeLlm>;
   tmp: string;
   setClock: (ms: number) => void;
 }
 
-async function setupHarness(conch: ConchConfig | null, llmState: { content: string; error?: ConchLlmError }): Promise<Harness> {
+async function setupHarness(
+  conch: ConchConfig | null,
+  llmState: { content: string; error?: ConchLlmError; delayMs?: number },
+  options?: { conchMaxPerHour?: number },
+): Promise<Harness> {
   const tmp = mkdtempSync(join(tmpdir(), 'clock-conch-test-'));
   const storage = new SqliteStorage(join(tmp, 'clock.sqlite'));
   storage.migrate();
@@ -56,6 +63,7 @@ async function setupHarness(conch: ConchConfig | null, llmState: { content: stri
     config: makeConfig(join(tmp, 'clock.sqlite'), conch),
     conchLlm: conch ? llm : null,
     now: () => clockMs,
+    conchMaxPerHour: options?.conchMaxPerHour,
   });
 
   const setupRes = await app.request('/api/v1/auth/setup', {
@@ -65,13 +73,13 @@ async function setupHarness(conch: ConchConfig | null, llmState: { content: stri
   });
   expect(setupRes.status).toBe(200);
   const cookie = setupRes.headers.get('set-cookie')!.split(';')[0];
-  return { app, cookie, llm, tmp, setClock: (ms) => (clockMs = ms) };
+  return { app, storage, cookie, llm, tmp, setClock: (ms) => (clockMs = ms) };
 }
 
 const CONCH_STUB: ConchConfig = { apiBase: 'https://stub.invalid/v1', apiKey: 'stub', model: 'stub-model', thinkingBudget: 0 };
 
-/** 用注入时钟在目标时段造一个 1h 的已停止会话 */
-async function startAndStop(h: Harness, subject: string, note: string, startedAtMs: number): Promise<void> {
+/** 用注入时钟在目标时段造一个已停止会话（默认 1h）。 */
+async function startAndStop(h: Harness, subject: string, note: string, startedAtMs: number, durationMs = HOUR): Promise<void> {
   const idem = `k${Math.random().toString(36).slice(2, 10)}x`;
   h.setClock(startedAtMs);
   const start = await h.app.request('/api/v1/sessions', {
@@ -81,7 +89,7 @@ async function startAndStop(h: Harness, subject: string, note: string, startedAt
   });
   expect(start.status).toBe(201);
   const created = await start.json();
-  h.setClock(startedAtMs + 3_600_000);
+  h.setClock(startedAtMs + durationMs);
   const stop = await h.app.request(`/api/v1/sessions/${created.session_id}/stop`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', cookie: h.cookie, 'idempotency-key': `${idem}s` },
@@ -289,6 +297,197 @@ describe('POST /api/v1/conch/ask', () => {
     expect(prompt).toContain('"第5章 定积分 看课"');
     expect(prompt).not.toContain('英语二 (english) ===');
     expect(h.llm.calls[0].system).toContain('神奇海螺');
+    rmSync(h.tmp, { recursive: true, force: true });
+  });
+
+  it('相同 revision / 模型 / 窗口跨请求复用 D1 成功结果，force 才重新调用模型', async () => {
+    const h = await setupHarness(CONCH_STUB, {
+      content: JSON.stringify({
+        subjects: [{ subject_id: 'math', next_action: '继续上次的定积分练习', action_kind: 'problems', topic: null, pattern: null, rationale: '', confidence: 'medium', alternatives: [] }],
+      }),
+    });
+    const nowMs = Date.now();
+    await startAndStop(h, 'math', '定积分练习', nowMs - DAY);
+    h.setClock(nowMs);
+
+    const first = await ask(h, 'all');
+    expect(first.status).toBe(200);
+    const firstBody = await first.json();
+    const sessionsSpy = vi.spyOn(h.storage, 'sessionsOverlapping');
+    const segmentsSpy = vi.spyOn(h.storage, 'segmentsForSessions');
+    const second = await ask(h, 'all');
+    expect(second.status).toBe(200);
+    expect((await second.json()).generated_at).toBe(firstBody.generated_at);
+    expect(h.llm.calls).toHaveLength(1);
+    // 命中 D1 共享缓存只需轻量 revision / active-session / audit 读取，不能重复扫完整时间线。
+    expect(sessionsSpy).not.toHaveBeenCalled();
+    expect(segmentsSpy).not.toHaveBeenCalled();
+    sessionsSpy.mockRestore();
+    segmentsSpy.mockRestore();
+
+    const forced = await h.app.request('/api/v1/conch/ask', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: h.cookie },
+      body: JSON.stringify({ window: 'all', force: true }),
+    });
+    expect(forced.status).toBe(200);
+    expect(h.llm.calls).toHaveLength(2);
+    rmSync(h.tmp, { recursive: true, force: true });
+  });
+
+  it('并行 miss 只允许一个请求调模型，竞争请求等待共享结果后可重试', async () => {
+    const h = await setupHarness(CONCH_STUB, {
+      delayMs: 40,
+      content: JSON.stringify({
+        subjects: [{ subject_id: 'math', next_action: '完成上次练习', action_kind: 'problems', topic: null, pattern: null, rationale: '', confidence: 'medium', alternatives: [] }],
+      }),
+    });
+    const nowMs = Date.now();
+    await startAndStop(h, 'math', '练习', nowMs - DAY);
+    h.setClock(nowMs);
+
+    const sessionsSpy = vi.spyOn(h.storage, 'sessionsOverlapping');
+    const segmentsSpy = vi.spyOn(h.storage, 'segmentsForSessions');
+    const [first, contender] = await Promise.all([ask(h, 'all'), ask(h, 'all')]);
+    expect([first.status, contender.status].sort()).toEqual([200, 409]);
+    const wait = first.status === 409 ? first : contender;
+    expect(await wait.json()).toMatchObject({ error: 'CONCH_GENERATING', retry_after_ms: 3000 });
+    expect(h.llm.calls).toHaveLength(1);
+    expect(sessionsSpy).toHaveBeenCalledTimes(1);
+    expect(segmentsSpy).toHaveBeenCalledTimes(1);
+    sessionsSpy.mockRestore();
+    segmentsSpy.mockRestore();
+
+    const after = await ask(h, 'all');
+    expect(after.status).toBe(200);
+    expect(h.llm.calls).toHaveLength(1);
+    rmSync(h.tmp, { recursive: true, force: true });
+  });
+
+  it('跨北京时间自然日会使滚动窗口缓存失效，即使 completed revision 未变', async () => {
+    const h = await setupHarness(CONCH_STUB, {
+      content: JSON.stringify({
+        subjects: [{ subject_id: 'math', next_action: '继续定积分练习', action_kind: 'problems', topic: null, pattern: null, rationale: '', confidence: 'medium', alternatives: [] }],
+      }),
+    });
+    const nowMs = Date.now();
+    await startAndStop(h, 'math', '定积分练习', nowMs - DAY);
+    h.setClock(nowMs);
+
+    expect((await ask(h, '7d')).status).toBe(200);
+    const revision = await conchRevision(h);
+    expect(h.llm.calls).toHaveLength(1);
+
+    // 当前时刻后 24h 一定已越过本次响应的“下一个北京时间日界”。
+    h.setClock(nowMs + DAY);
+    const nextDay = await ask(h, '7d');
+    expect(nextDay.status).toBe(200);
+    expect(await conchRevision(h)).toBe(revision);
+    expect(h.llm.calls).toHaveLength(2);
+    rmSync(h.tmp, { recursive: true, force: true });
+  });
+
+  it('7d 缓存在同日有历史段移出滚动窗口时失效，即使 completed revision 未变', async () => {
+    const h = await setupHarness(CONCH_STUB, {
+      content: JSON.stringify({
+        subjects: [{ subject_id: 'math', next_action: '继续定积分练习', action_kind: 'problems', topic: null, pattern: null, rationale: '', confidence: 'medium', alternatives: [] }],
+      }),
+    });
+    // 北京时间 08-08 09:00；第一段始于 08-01 09:30，今天 09:30 起会被 7d 窗口裁剪。
+    const nowMs = Date.UTC(2026, 7, 8, 1, 0);
+    await startAndStop(h, 'math', '即将移出 7d 的旧段', nowMs - 7 * DAY + HOUR / 2);
+    await startAndStop(h, 'math', '保持活跃的近期段', nowMs - DAY);
+    h.setClock(nowMs);
+
+    const first = await ask(h, '7d');
+    expect(first.status).toBe(200);
+    const firstBody = await first.json();
+    expect(Date.parse(firstBody.cache_valid_until)).toBe(nowMs + HOUR / 2);
+    const revision = await conchRevision(h);
+    expect(h.llm.calls).toHaveLength(1);
+
+    h.setClock(nowMs + HOUR);
+    expect((await ask(h, '7d')).status).toBe(200);
+    expect(await conchRevision(h)).toBe(revision);
+    expect(h.llm.calls).toHaveLength(2);
+    rmSync(h.tmp, { recursive: true, force: true });
+  });
+
+  it('7d 窗口正裁剪异常长段时返回新结果但不写共享缓存', async () => {
+    const h = await setupHarness(CONCH_STUB, {
+      content: JSON.stringify({
+        subjects: [{ subject_id: 'math', next_action: '继续定积分练习', action_kind: 'problems', topic: null, pattern: null, rationale: '', confidence: 'medium', alternatives: [] }],
+      }),
+    });
+    const nowMs = Date.UTC(2026, 7, 8, 1, 0);
+    // 该段横跨 7d 窗口起点，窗口内时长会持续变化，不能复用缓存。
+    await startAndStop(h, 'math', '跨窗口长段', nowMs - 7 * DAY - HOUR, 2 * HOUR);
+    await startAndStop(h, 'math', '保持活跃的近期段', nowMs - DAY);
+    h.setClock(nowMs);
+    const revision = await conchRevision(h);
+
+    const first = await ask(h, '7d');
+    expect(first.status).toBe(200);
+    expect(Date.parse((await first.json()).cache_valid_until)).toBe(nowMs);
+    expect(await h.storage.getConchResponseCache(revision, CONCH_STUB.model, '7d')).toBeNull();
+
+    expect((await ask(h, '7d')).status).toBe(200);
+    expect(h.llm.calls).toHaveLength(2);
+    rmSync(h.tmp, { recursive: true, force: true });
+  });
+
+  it('生成期间 completed timeline 改变时不写入旧上下文的缓存', async () => {
+    const h = await setupHarness(CONCH_STUB, {
+      content: JSON.stringify({
+        subjects: [{ subject_id: 'math', next_action: '继续定积分练习', action_kind: 'problems', topic: null, pattern: null, rationale: '', confidence: 'medium', alternatives: [] }],
+      }),
+    });
+    const nowMs = Date.now();
+    await startAndStop(h, 'math', '定积分练习', nowMs - DAY);
+    h.setClock(nowMs);
+    const before = await conchRevision(h);
+    const originalAsk = h.llm.ask.bind(h.llm);
+    h.llm.ask = async (params) => {
+      const result = await originalAsk(params);
+      // 模拟另一个标签页在模型返回前刚完成了会影响建议的修改。
+      await h.storage.bumpConchRevision();
+      return result;
+    };
+
+    const stale = await ask(h, 'all');
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ error: 'CONCH_CONTEXT_STALE', retry_after_ms: 250 });
+    expect(await h.storage.getConchResponseCache(before, CONCH_STUB.model, 'all')).toBeNull();
+    rmSync(h.tmp, { recursive: true, force: true });
+  });
+
+  it('上游额度在同一持久化库跨 createApp 实例生效，缓存命中不消耗额度', async () => {
+    const h = await setupHarness(CONCH_STUB, {
+      content: JSON.stringify({
+        subjects: [{ subject_id: 'math', next_action: '继续练习', action_kind: 'problems', topic: null, pattern: null, rationale: '', confidence: 'medium', alternatives: [] }],
+      }),
+    }, { conchMaxPerHour: 1 });
+    const nowMs = Date.now();
+    await startAndStop(h, 'math', '练习', nowMs - DAY);
+    h.setClock(nowMs);
+    expect((await ask(h, 'all')).status).toBe(200);
+    expect((await ask(h, 'all')).status).toBe(200); // D1 cache hit
+    expect(h.llm.calls).toHaveLength(1);
+
+    const secondWorkerApp = createApp({
+      storage: h.storage,
+      config: makeConfig(join(h.tmp, 'clock.sqlite'), CONCH_STUB),
+      conchLlm: h.llm,
+      now: () => nowMs,
+      conchMaxPerHour: 1,
+    });
+    const blocked = await secondWorkerApp.request('/api/v1/conch/ask', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: h.cookie },
+      body: JSON.stringify({ window: 'all', force: true }),
+    });
+    expect(blocked.status).toBe(429);
+    expect(h.llm.calls).toHaveLength(1);
     rmSync(h.tmp, { recursive: true, force: true });
   });
 

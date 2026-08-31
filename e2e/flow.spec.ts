@@ -356,6 +356,22 @@ test.describe('截图矩阵与视觉', () => {
     await expect(page.locator('html.animations-off')).toHaveCount(1);
     await page.screenshot({ path: 'e2e/screens/idle-reduced-motion.png', fullPage: true });
 
+    // Motion 浮层也必须同步归零，不能只关 CSS animation 后仍播放 250ms Motion 进入动画。
+    await page.getByTestId('history-toggle').click();
+    await expect(page.getByTestId('history-strip')).toBeVisible();
+    const historyMotion = await page.getByTestId('history-strip').evaluate((el) =>
+      el.getAnimations().map((animation) => Number(animation.effect?.getTiming().duration ?? 0)),
+    );
+    expect(historyMotion.every((duration) => duration <= 0)).toBe(true);
+    await page.keyboard.press('Escape');
+    await page.getByTestId('conch-toggle').click();
+    await expect(page.getByTestId('conch-panel')).toBeVisible();
+    const conchMotion = await page.getByTestId('conch-panel').evaluate((el) =>
+      el.getAnimations().map((animation) => Number(animation.effect?.getTiming().duration ?? 0)),
+    );
+    expect(conchMotion.every((duration) => duration <= 0)).toBe(true);
+    await page.keyboard.press('Escape');
+
     await page.getByRole('radio', { name: '操作系统' }).click();
     await page.getByTestId('start-btn').click();
     await page.waitForTimeout(800);
@@ -992,6 +1008,7 @@ test.describe('多端偏好同步', () => {
         body: JSON.stringify({
           window: 'all',
           generated_at: new Date().toISOString(),
+          cache_valid_until: new Date(Date.now() + 86_400_000).toISOString(),
           revision: state.revision,
           conch_revision: state.conch_revision,
           model: 'e2e-stub',
@@ -1030,6 +1047,90 @@ test.describe('多端偏好同步', () => {
     expect(askCount).toBe(2);
   });
 
+  test('神奇海螺本机缓存越过 cache_valid_until 后不展示旧建议', async ({ page }) => {
+    await doSetup(page);
+    const state = await (await page.request.get('/api/v1/state')).json();
+    await page.evaluate(({ conchRevision }) => {
+      localStorage.setItem('clock-conch-cache-v5', JSON.stringify({
+        all: {
+          ts: Date.now() - 60_000,
+          data: {
+            window: 'all',
+            generated_at: new Date(Date.now() - 60_000).toISOString(),
+            cache_valid_until: new Date(Date.now() - 1).toISOString(),
+            conch_revision: conchRevision,
+            revision: 1,
+            model: 'e2e-stub',
+            subjects: [],
+            skipped: [],
+          },
+        },
+      }));
+    }, { conchRevision: state.conch_revision });
+
+    let askCount = 0;
+    await page.route('**/api/v1/conch/ask', async (route) => {
+      askCount += 1;
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          window: 'all',
+          generated_at: new Date().toISOString(),
+          cache_valid_until: new Date(Date.now() + 86_400_000).toISOString(),
+          conch_revision: state.conch_revision,
+          revision: state.revision,
+          model: 'e2e-stub',
+          subjects: [],
+          skipped: [],
+        }),
+      });
+    });
+
+    await page.getByTestId('conch-toggle').click();
+    await expect(page.locator('.conch-empty')).toBeVisible();
+    expect(askCount).toBe(1);
+    await expect(page.getByText(/缓存/)).toHaveCount(0);
+  });
+
+  test('神奇海螺发现另一处正在生成时自动等待并读取共享结果', async ({ page }) => {
+    await doSetup(page);
+    await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v5'));
+    let askCount = 0;
+    await page.route('**/api/v1/conch/ask', async (route) => {
+      askCount += 1;
+      if (askCount === 1) {
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'CONCH_GENERATING', retry_after_ms: 250 }),
+        });
+        return;
+      }
+      const state = await (await page.request.get('/api/v1/state')).json();
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          window: 'all', generated_at: new Date().toISOString(), cache_valid_until: new Date(Date.now() + 86_400_000).toISOString(), revision: state.revision,
+          conch_revision: state.conch_revision, model: 'e2e-stub', subjects: [], skipped: [],
+        }),
+      });
+    });
+
+    await page.getByTestId('conch-toggle').click();
+    await expect(page.locator('.conch-empty')).toBeVisible({ timeout: 5_000 });
+    expect(askCount).toBe(2);
+    await expect(page.getByText('海螺正在另一处整理同一批记录，稍后会自动显示。')).toHaveCount(0);
+  });
+
+  test('退出 owner 态会清除设备本地海螺建议缓存', async ({ page }) => {
+    await doSetup(page);
+    await page.evaluate(() => localStorage.setItem('clock-conch-cache-v5', '{"all":{"ts":1,"data":{}}}'));
+    await page.getByRole('button', { name: '设置' }).click();
+    await page.getByRole('button', { name: '退出登录' }).click();
+    await expect(page.getByTestId('unlock-btn')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('clock-conch-cache-v5'))).toBeNull();
+  });
+
   test('神奇海螺遇到真实 fetch 失败时显示可重试的网络错误', async ({ page }) => {
     await doSetup(page);
     await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v5'));
@@ -1054,7 +1155,7 @@ test.describe('多端偏好同步', () => {
       await route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
-          window: 'all', generated_at: new Date().toISOString(), revision: state.revision,
+          window: 'all', generated_at: new Date().toISOString(), cache_valid_until: new Date(Date.now() + 86_400_000).toISOString(), revision: state.revision,
           conch_revision: state.conch_revision, model: 'e2e-stub', subjects: [], skipped: [],
         }),
       });
@@ -1140,6 +1241,7 @@ test.describe('多端偏好同步', () => {
         body: JSON.stringify({
           window: 'all',
           generated_at: new Date().toISOString(),
+          cache_valid_until: new Date(Date.now() + 86_400_000).toISOString(),
           revision: state.revision,
           conch_revision: state.conch_revision,
           model: 'e2e-stub',

@@ -515,17 +515,19 @@ paths:
               required: [window]
               properties:
                 window: { type: string, enum: [all, 30d, 7d] }
+                force: { type: boolean, description: 显式重新问一次；绕过同键缓存并以新结果覆盖它 }
       responses:
         '200':
-          description: 结构化建议；conch_revision 可作为长期本地缓存键
+          description: 结构化建议；conch_revision 与 cache_valid_until 共同决定本地缓存是否仍可使用
           content:
             application/json:
               schema:
                 type: object
-                required: [window, generated_at, conch_revision, revision, model, subjects, skipped]
+                required: [window, generated_at, cache_valid_until, conch_revision, revision, model, subjects, skipped]
                 properties:
                   window: { type: string, enum: [all, 30d, 7d] }
                   generated_at: { type: string, format: date-time }
+                  cache_valid_until: { type: string, format: date-time, description: 当前建议输入最早变化的时刻，最晚不跨下一个北京时间自然日；到达后必须重新校验 }
                   conch_revision: { type: integer }
                   revision: { type: integer }
                   model: { type: string }
@@ -534,6 +536,7 @@ paths:
         '400': { description: window 非法 }
         '401': { description: 未登录 }
         '402': { description: 上游推理额度不足（CONCH_QUOTA_EXHAUSTED） }
+        '409': { description: 同一 conch_revision + model + window 正在生成，或生成期间 completed timeline 已改变；响应含 retry_after_ms，客户端应等待后重试 }
         '422': { description: LLM 输出不符合契约 }
         '429': { description: 请求过频 }
         '500': { description: 未预期内部错误（INTERNAL；不含上游响应或栈信息） }

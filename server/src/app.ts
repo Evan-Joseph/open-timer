@@ -21,12 +21,13 @@ import { applySecurityHeaders, clientIp } from './headers.js';
 import { eventToLine, runBackup } from './backup.js';
 import { ulid } from './util/ulid.js';
 import { hashPassword, verifyPassword } from './password.js';
-import { createConchLlmClient, ConchLlmError, type ConchLlmClient } from './conch-client.js';
+import { CONCH_LLM_TIMEOUT_MS, createConchLlmClient, ConchLlmError, type ConchLlmClient } from './conch-client.js';
 import {
   SUBJECTS,
   AGGREGATE_GROUPS,
   TIMEZONE,
   DAY_MS,
+  SHANGHAI_OFFSET_MS,
   buildDailySummary,
   isValidShanghaiDate,
   isSubjectId,
@@ -37,9 +38,12 @@ import {
   computeActiveSeconds,
   isCountedSegment,
   buildConchContext,
+  conchWindowDays,
   parseConchLlmOutput,
   CONCH_SYSTEM_PROMPT,
   subjectById,
+  type ConchSubjectRec,
+  type ConchWindow,
 } from '@clock/shared';
 
 const SUBJECT_ID_ENUM = SUBJECTS.map((s) => s.id) as [string, ...string[]];
@@ -58,6 +62,8 @@ export interface AppDeps {
   backupBucket?: import('./backup.js').BackupBucket;
   /** 神奇海螺 LLM 客户端（测试注入；显式 null = 强制未配置 503） */
   conchLlm?: ConchLlmClient | null;
+  /** 海螺实际调用上游的每小时上限（测试可缩小；生产默认 20）。 */
+  conchMaxPerHour?: number;
 }
 
 export function createApp(deps: AppDeps): Hono {
@@ -1044,10 +1050,122 @@ export function createApp(deps: AppDeps): Hono {
 
   /* ---------- 神奇海螺：下一步推荐（owner-only，独立限流；日志不落备注/LLM 体） ---------- */
 
-  const ConchAskSchema = z.object({ window: z.enum(['all', '30d', '7d']) });
+  const ConchAskSchema = z.object({
+    window: z.enum(['all', '30d', '7d']),
+    /** 显式“重新问一次”只绕过缓存于当前请求，不改 completed-timeline revision。 */
+    force: z.boolean().optional(),
+  });
   const ConchRequestIdSchema = z.string().min(14).max(72).regex(/^conch-[a-z0-9]+(?:-[a-z0-9]+)*$/);
-  const conchLimiter = new RateLimiter(3_600_000, 20);
-  type ConchInternalStage = 'prepare' | 'read_sessions' | 'read_segments' | 'build_context' | 'read_revisions' | 'parse_output' | 'shape_response';
+  // LLM 客户端的所有内部重试共用 90 秒总预算；再留 15 秒完成 D1 读写和响应收尾。
+  const CONCH_LEASE_MS = CONCH_LLM_TIMEOUT_MS + 15_000;
+  const CONCH_RETRY_AFTER_MS = 3_000;
+  const CONCH_CONTEXT_RETRY_AFTER_MS = 250;
+  const conchMaxPerHour = deps.conchMaxPerHour ?? 20;
+  type ConchInternalStage = 'prepare' | 'read_cache' | 'acquire_lease' | 'read_sessions' | 'read_segments' | 'build_context' | 'read_revisions' | 'parse_output' | 'shape_response';
+  type CachedConchSubject = ConchSubjectRec & { last_active_date: string };
+  type CachedConchPayload = {
+    subjects: CachedConchSubject[];
+    skipped: import('@clock/shared').ConchSkippedEntry[];
+    generated_at_ms: number;
+    valid_until_ms: number;
+  };
+
+  function nextShanghaiDayStartMs(nowMs: number): number {
+    return (Math.floor((nowMs + SHANGHAI_OFFSET_MS) / DAY_MS) + 1) * DAY_MS - SHANGHAI_OFFSET_MS;
+  }
+
+  /**
+   * `all` 与“最近 7 个北京日”门槛会在下一个北京日界变化；7d/30d 还会以当前时刻
+   * 连续滚动。把缓存有效期提前到任一计入段或会话行将移出窗口的时刻，避免同日误用
+   * 过期建议。极端的跨窗口长段没有稳定的下一边界，调用方直接返回本次新结果而不缓存。
+   */
+  function conchCacheValidUntilMs(
+    nowMs: number,
+    window: ConchWindow,
+    sessions: import('@clock/shared').SessionRow[],
+    segmentsBySession: Map<string, import('@clock/shared').ActiveSegmentRow[]>,
+  ): number {
+    let validUntilMs = nextShanghaiDayStartMs(nowMs);
+    const days = conchWindowDays(window);
+    if (days === 0) return validUntilMs;
+    const rollingStartMs = nowMs - days * DAY_MS;
+
+    for (const session of sessions) {
+      if (session.status !== 'stopped' || session.endedAtMs === null) continue;
+      const segments = segmentsBySession.get(session.id) ?? [];
+      if (!segments.some((segment) => isCountedSegment(segment, config.minSegmentMs))) continue;
+
+      // inWindow 由会话结束时刻决定；即使尾段是未计入误触，行仍会在此刻消失。
+      if (session.endedAtMs >= rollingStartMs) {
+        validUntilMs = Math.min(validUntilMs, session.endedAtMs + days * DAY_MS);
+      }
+      // 每个计入段又会单独影响窗口裁剪后的时长。窗口起点一旦走过段的开始时刻，
+      // conchSessionSeconds 就会开始裁剪该段，因此失效点是 start + days，不是 end + days。
+      // 只有异常长段正跨窗口起点，输入会持续变化，不能写进共享缓存。
+      for (const segment of segments) {
+        if (!isCountedSegment(segment, config.minSegmentMs) || segment.endedAtMs === null || segment.endedAtMs <= rollingStartMs) {
+          continue;
+        }
+        if (segment.startedAtMs <= rollingStartMs) return nowMs;
+        validUntilMs = Math.min(validUntilMs, segment.startedAtMs + days * DAY_MS);
+      }
+    }
+    return validUntilMs;
+  }
+
+  /** 缓存内容来自 D1，仍按与模型输出相同的清洗规则复验，旧版本 payload 自动 miss。 */
+  function parseCachedPayload(rawPayload: string | null, nowMs: number): CachedConchPayload | null {
+    if (!rawPayload) return null;
+    try {
+      const parsed = JSON.parse(rawPayload) as Partial<CachedConchPayload>;
+      if (
+        !Array.isArray(parsed.subjects) ||
+        !Array.isArray(parsed.skipped) ||
+        !Number.isFinite(parsed.generated_at_ms) ||
+        !Number.isFinite(parsed.valid_until_ms) ||
+        parsed.valid_until_ms! <= nowMs
+      ) {
+        return null;
+      }
+      const recs = parseConchLlmOutput(
+        JSON.stringify({ subjects: parsed.subjects }),
+        SUBJECTS.map((subject) => subject.id),
+      );
+      if (!recs) return null;
+      const rawBySubject = new Map(
+        parsed.subjects
+          .filter((subject): subject is CachedConchSubject => typeof subject === 'object' && subject !== null)
+          .map((subject) => [subject.subject_id, subject]),
+      );
+      const subjects: CachedConchSubject[] = [];
+      for (const rec of recs) {
+        const lastActiveDate = rawBySubject.get(rec.subject_id)?.last_active_date;
+        if (typeof lastActiveDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(lastActiveDate)) return null;
+        subjects.push({ ...rec, last_active_date: lastActiveDate });
+      }
+      const represented = new Set(subjects.map((subject) => subject.subject_id));
+      const skipped: import('@clock/shared').ConchSkippedEntry[] = [];
+      const seenSkipped = new Set<string>();
+      for (const entry of parsed.skipped) {
+        if (typeof entry !== 'object' || entry === null) return null;
+        const raw = entry as { subject_id?: unknown; reason?: unknown };
+        if (typeof raw.subject_id !== 'string' || seenSkipped.has(raw.subject_id)) continue;
+        const subject = SUBJECTS.find((candidate) => candidate.id === raw.subject_id);
+        if (!subject || (raw.reason !== 'not_started' && raw.reason !== 'inactive')) return null;
+        if (represented.has(subject.id)) continue;
+        seenSkipped.add(raw.subject_id);
+        skipped.push({ subject_id: subject.id, display_name: subject.displayName, reason: raw.reason });
+      }
+      return {
+        subjects,
+        skipped,
+        generated_at_ms: parsed.generated_at_ms!,
+        valid_until_ms: parsed.valid_until_ms!,
+      };
+    } catch {
+      return null;
+    }
+  }
 
   function conchRequestId(c: Context): string | null {
     const parsed = ConchRequestIdSchema.safeParse(c.req.header('x-client-request-id'));
@@ -1091,86 +1209,194 @@ export function createApp(deps: AppDeps): Hono {
     logConch('entered', requestId, startedAtMs);
     let internalStage: ConchInternalStage = 'prepare';
     try {
-      if (!config.conch || deps.conchLlm === null) return c.json({ error: 'CONCH_NOT_CONFIGURED' }, 503);
-      const llm = deps.conchLlm ?? createConchLlmClient(config.conch);
+      const conchConfig = config.conch;
+      if (!conchConfig || deps.conchLlm === null) return c.json({ error: 'CONCH_NOT_CONFIGURED' }, 503);
       const raw = await c.req.json().catch(() => null);
       const body = ConchAskSchema.safeParse(raw);
       if (!body.success) return c.json({ error: 'INVALID_WINDOW' }, 400);
-      const ip = clientIp((name) => c.req.header(name));
-      if (!conchLimiter.allow(`conch:${ip}`, now())) return c.json({ error: 'RATE_LIMITED' }, 429);
 
       const nowMs = now();
-      // 全量一次取（ended_at 索引 range + 活动部分索引），窗口过滤在 builder 内，
-      // 保证活动门槛（全量/近7天）数据完整。
-      internalStage = 'read_sessions';
-      const sessions = await storage.sessionsOverlapping(0, nowMs + 1);
-      internalStage = 'read_segments';
-      const segMap = await storage.segmentsForSessions(sessions.map((s) => s.id));
-      internalStage = 'build_context';
-      const ctx = buildConchContext({
-        nowMs,
-        window: body.data.window,
-        sessions,
-        segmentsBySession: segMap,
-        minSegmentMs: config.minSegmentMs,
-      });
+      const window = body.data.window as ConchWindow;
       internalStage = 'read_revisions';
-      const [revision, conchRevision] = await Promise.all([storage.maxEventId(), storage.getConchRevision()]);
-      const baseResp = {
-        window: body.data.window,
-        generated_at: toIso(nowMs),
-        conch_revision: conchRevision,
-        revision,
-        model: config.conch.model,
+      const conchRevision = await storage.getConchRevision();
+
+      const contextStale = () =>
+        c.json({ error: 'CONCH_CONTEXT_STALE', retry_after_ms: CONCH_CONTEXT_RETRY_AFTER_MS }, 409);
+
+      /**
+       * 缓存命中不重拉时间线：只读当前活动会话以刷新“进行中”徽标，再取审计水位。
+       * 若 semantic revision 在这两个轻量读中前进，交给客户端立刻重新请求，绝不返回旧建议。
+       */
+      const responseFromCache = async (cached: CachedConchPayload) => {
+        const [currentConchRevision, revision, active] = await Promise.all([
+          storage.getConchRevision(),
+          storage.maxEventId(),
+          storage.getActiveSession('owner'),
+        ]);
+        if (currentConchRevision !== conchRevision) return null;
+        const runningSubject = active?.session.status === 'running' ? active.session : null;
+        return {
+          window,
+          generated_at: toIso(cached.generated_at_ms),
+          cache_valid_until: toIso(cached.valid_until_ms),
+          conch_revision: conchRevision,
+          revision,
+          model: conchConfig.model,
+          subjects: cached.subjects.map((subject) => ({
+            ...subject,
+            display_name: subjectById(subject.subject_id)!.displayName,
+            running_now: runningSubject?.subjectId === subject.subject_id,
+            last_active_date:
+              runningSubject?.subjectId === subject.subject_id
+                ? utcMsToShanghaiDate(runningSubject.startedAtMs)
+                : subject.last_active_date,
+          })),
+          skipped: cached.skipped,
+        };
       };
 
-      // 无活跃科目：不调 LLM，直接返回门槛结果（省 token）
-      if (ctx.active.length === 0) {
-        return c.json({ ...baseResp, subjects: [], skipped: ctx.skipped });
+      const cacheHit = async (): Promise<Response | null> => {
+        internalStage = 'read_cache';
+        const cached = parseCachedPayload(
+          await storage.getConchResponseCache(conchRevision, conchConfig.model, window),
+          nowMs,
+        );
+        if (!cached) return null;
+        const response = await responseFromCache(cached);
+        return response ? c.json(response) : contextStale();
+      };
+
+      // 普通打开先走 D1 共享缓存：命中只需 revision、缓存、活动会话和审计水位，不读完整时间轴。
+      if (!body.data.force) {
+        const response = await cacheHit();
+        if (response) return response;
       }
 
-      let content: string;
+      // D1 条件写入充当租约：冷启动、并行标签或不同 isolate 同时 miss 时，只有一个请求可读完整时间线并调模型。
+      internalStage = 'acquire_lease';
+      const leaseToken = generateToken('conchlease');
+      const acquired = await storage.acquireConchGenerationLease(
+        conchRevision,
+        conchConfig.model,
+        window,
+        leaseToken,
+        nowMs + CONCH_LEASE_MS,
+        nowMs,
+      );
+      if (!acquired) {
+        return c.json({ error: 'CONCH_GENERATING', retry_after_ms: CONCH_RETRY_AFTER_MS }, 409);
+      }
+
       try {
-        const result = await llm.ask({ system: CONCH_SYSTEM_PROMPT, user: ctx.userPrompt });
-        content = result.content;
-      } catch (err) {
-        const upstreamStatus = err instanceof ConchLlmError ? err.upstreamStatus : undefined;
-        logConch('upstream_error', requestId, startedAtMs, upstreamStatus);
-        if (err instanceof ConchLlmError && err.kind === 'timeout') {
-          return c.json({ error: 'LLM_TIMEOUT' }, 504);
+        // 竞争方可能刚在本请求获得租约前完成：二次读避免无谓的完整时间线读取与上游调用。
+        if (!body.data.force) {
+          const response = await cacheHit();
+          if (response) return response;
         }
-        if (err instanceof ConchLlmError && err.kind === 'auth') {
-          return c.json({ error: 'CONCH_CREDENTIAL_INVALID' }, 503);
-        }
-        if (err instanceof ConchLlmError && err.kind === 'quota') {
-          return c.json({ error: 'CONCH_QUOTA_EXHAUSTED' }, 402);
-        }
-        if (err instanceof ConchLlmError && err.kind === 'invalid') {
-          return c.json({ error: 'LLM_OUTPUT_INVALID' }, 422);
-        }
-        return c.json({ error: 'LLM_UPSTREAM' }, 502);
-      }
+        if ((await storage.getConchRevision()) !== conchRevision) return contextStale();
 
-      internalStage = 'parse_output';
-      const recs = parseConchLlmOutput(content, ctx.active);
-      logConch('upstream_ok', requestId, startedAtMs);
-      if (!recs) return c.json({ error: 'LLM_OUTPUT_INVALID' }, 422);
+        // 仅租约持有者读取完整上下文。builder 内保证活动门槛（全量/近 7 天）数据完整。
+        internalStage = 'read_sessions';
+        const sessions = await storage.sessionsOverlapping(0, nowMs + 1);
+        internalStage = 'read_segments';
+        const segMap = await storage.segmentsForSessions(sessions.map((s) => s.id));
+        internalStage = 'build_context';
+        const ctx = buildConchContext({
+          nowMs,
+          window,
+          sessions,
+          segmentsBySession: segMap,
+          minSegmentMs: config.minSegmentMs,
+        });
+        const validUntilMs = conchCacheValidUntilMs(nowMs, window, sessions, segMap);
+        // 生成上下文期间完成/备注/撤回/修正会推进 semantic revision；此时上下文已过期，不能继续调用模型。
+        // validUntil===nowMs 表示异常长段正跨滚动窗口：当前上下文仍可生成一次，但结果不得缓存。
+        if (
+          (await storage.getConchRevision()) !== conchRevision ||
+          (validUntilMs > nowMs && now() >= validUntilMs)
+        ) {
+          return contextStale();
+        }
 
-      internalStage = 'shape_response';
-      const subjects = recs.map((rec) => {
-        const def = subjectById(rec.subject_id)!;
-        const subSessions = sessions.filter((s) => s.subjectId === rec.subject_id && s.status !== 'voided');
-        let lastActiveMs = 0;
-        for (const s of subSessions) lastActiveMs = Math.max(lastActiveMs, s.endedAtMs ?? s.startedAtMs);
-        return {
-          ...rec,
-          display_name: def.displayName,
-          running_now: subSessions.some((s) => s.status === 'running'),
-          last_active_date: utcMsToShanghaiDate(lastActiveMs > 0 ? lastActiveMs : nowMs),
+        const lastActiveDate = (subjectId: string) => {
+          let lastActiveMs = 0;
+          for (const session of sessions) {
+            if (session.subjectId === subjectId && session.status === 'stopped' && session.endedAtMs !== null) {
+              lastActiveMs = Math.max(lastActiveMs, session.endedAtMs);
+            }
+          }
+          return utcMsToShanghaiDate(lastActiveMs || nowMs);
         };
-      });
+        const toCachedPayload = (recs: ConchSubjectRec[], generatedAtMs: number): CachedConchPayload => ({
+          subjects: recs.map((rec) => ({ ...rec, last_active_date: lastActiveDate(rec.subject_id) })),
+          skipped: ctx.skipped,
+          generated_at_ms: generatedAtMs,
+          valid_until_ms: validUntilMs,
+        });
+        const saveAndRespond = async (payload: CachedConchPayload): Promise<Response> => {
+          internalStage = 'shape_response';
+          // 极端长段正跨滚动窗口时没有可重用的稳定上下文：本次结果仍可返回，但绝不写缓存。
+          if (payload.valid_until_ms <= nowMs) {
+            const response = await responseFromCache(payload);
+            return response ? c.json(response) : contextStale();
+          }
+          // 上游推理越过已计算的最早窗口边界时，原上下文已经过期；宁可轻量重试，也不首显旧建议。
+          if (now() >= payload.valid_until_ms) return contextStale();
+          const saved = await storage.saveConchResponseCacheIfCurrentRevision(
+            conchRevision,
+            conchConfig.model,
+            window,
+            JSON.stringify(payload),
+            payload.generated_at_ms,
+          );
+          if (!saved) return contextStale();
+          const response = await responseFromCache(payload);
+          return response ? c.json(response) : contextStale();
+        };
 
-      return c.json({ ...baseResp, subjects, skipped: ctx.skipped });
+        // 无活跃科目同样缓存到次日：后续打开无需再扫完整历史，且不消耗上游额度。
+        if (ctx.active.length === 0) return saveAndRespond(toCachedPayload([], nowMs));
+
+        // 只给真正走向模型的请求占额度；缓存命中与等待同一租约不消耗 20/h。
+        const quotaWindowStartMs = Math.floor(nowMs / 3_600_000) * 3_600_000;
+        if (!(await storage.takeConchQuota(quotaWindowStartMs, conchMaxPerHour, nowMs))) {
+          return c.json({ error: 'RATE_LIMITED' }, 429);
+        }
+
+        const llm = deps.conchLlm ?? createConchLlmClient(conchConfig);
+
+        let content: string;
+        try {
+          const result = await llm.ask({ system: CONCH_SYSTEM_PROMPT, user: ctx.userPrompt });
+          content = result.content;
+        } catch (err) {
+          const upstreamStatus = err instanceof ConchLlmError ? err.upstreamStatus : undefined;
+          logConch('upstream_error', requestId, startedAtMs, upstreamStatus);
+          if (err instanceof ConchLlmError && err.kind === 'timeout') {
+            return c.json({ error: 'LLM_TIMEOUT' }, 504);
+          }
+          if (err instanceof ConchLlmError && err.kind === 'auth') {
+            return c.json({ error: 'CONCH_CREDENTIAL_INVALID' }, 503);
+          }
+          if (err instanceof ConchLlmError && err.kind === 'quota') {
+            return c.json({ error: 'CONCH_QUOTA_EXHAUSTED' }, 402);
+          }
+          if (err instanceof ConchLlmError && err.kind === 'invalid') {
+            return c.json({ error: 'LLM_OUTPUT_INVALID' }, 422);
+          }
+          return c.json({ error: 'LLM_UPSTREAM' }, 502);
+        }
+
+        internalStage = 'parse_output';
+        const recs = parseConchLlmOutput(content, ctx.active);
+        logConch('upstream_ok', requestId, startedAtMs);
+        if (!recs) return c.json({ error: 'LLM_OUTPUT_INVALID' }, 422);
+        // 显式“重新问一次”同样覆写同一语义缓存行；条件写确保只会覆写仍对应当前时间线的结果。
+        return saveAndRespond(toCachedPayload(recs, now()));
+      } finally {
+        // finally 前被回收时也会在完整上游预算之后自然失效；不让清理失败覆盖真实响应。
+        await storage.releaseConchGenerationLease(conchRevision, conchConfig.model, window, leaseToken).catch(() => {});
+      }
     } catch {
       logConch('internal_error', requestId, startedAtMs, undefined, internalStage);
       return c.json({ error: 'INTERNAL' }, 500);

@@ -232,6 +232,7 @@ test('L3 逾期告警延续到设置、回顾与海螺浮层', async ({ page }) 
       body: JSON.stringify({
         window: 'all',
         generated_at: new Date().toISOString(),
+        cache_valid_until: new Date(Date.now() + 86_400_000).toISOString(),
         revision: state.revision,
         conch_revision: state.conch_revision,
         model: 'e2e-stub',

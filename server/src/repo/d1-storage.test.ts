@@ -81,8 +81,8 @@ class SqliteBackedD1 implements D1Database {
       },
       async run() {
         const statement = db.prepare(query);
-        statement.run(...values);
-        return { success: true };
+        const result = statement.run(...values);
+        return { success: true, meta: { changes: result.changes } };
       },
     };
   }
@@ -98,7 +98,7 @@ describe('SQLite / D1 范围查询一致性', () => {
     const dir = mkdtempSync(join(tmpdir(), 'clock-d1-parity-'));
     const sqlite = new SqliteStorage(join(dir, 'sqlite.db'));
     const d1Db = new Database(':memory:');
-    const migrationSql = ['0001_init.sql', '0002_user_pref.sql', '0003_index_session_ended.sql', '0004_conch_revision.sql']
+    const migrationSql = ['0001_init.sql', '0002_user_pref.sql', '0003_index_session_ended.sql', '0004_conch_revision.sql', '0005_conch_cache.sql']
       .map((file) => readFileSync(join(MIGRATIONS_DIR, file), 'utf8'))
       .join('\n');
     const d1 = new D1Storage(new SqliteBackedD1(d1Db), migrationSql);
@@ -149,7 +149,7 @@ describe('SQLite / D1 范围查询一致性', () => {
 
   it('segmentsForSessions 在超过 D1 100 个绑定参数时分批读取并合并', async () => {
     const d1Db = new Database(':memory:');
-    const migrationSql = ['0001_init.sql', '0002_user_pref.sql', '0003_index_session_ended.sql', '0004_conch_revision.sql']
+    const migrationSql = ['0001_init.sql', '0002_user_pref.sql', '0003_index_session_ended.sql', '0004_conch_revision.sql', '0005_conch_cache.sql']
       .map((file) => readFileSync(join(MIGRATIONS_DIR, file), 'utf8'))
       .join('\n');
     const backing = new SqliteBackedD1(d1Db, 100);
@@ -180,6 +180,31 @@ describe('SQLite / D1 范围查询一致性', () => {
     expect([...segments.values()].every((rows) => rows.length === 1)).toBe(true);
     expect(adjustments).toHaveLength(116);
     expect(Math.max(...backing.bindCounts)).toBeLessThanOrEqual(100);
+    d1Db.close();
+  });
+
+  it('海螺共享缓存、生成租约与小时额度走 D1 条件写入', async () => {
+    const d1Db = new Database(':memory:');
+    const migrationSql = ['0001_init.sql', '0002_user_pref.sql', '0003_index_session_ended.sql', '0004_conch_revision.sql', '0005_conch_cache.sql']
+      .map((file) => readFileSync(join(MIGRATIONS_DIR, file), 'utf8'))
+      .join('\n');
+    const d1 = new D1Storage(new SqliteBackedD1(d1Db), migrationSql);
+    await d1.migrate();
+
+    expect(await d1.getConchResponseCache(3, 'model-a', 'all')).toBeNull();
+    expect(await d1.saveConchResponseCacheIfCurrentRevision(0, 'model-a', 'all', '{"subjects":[]}', 123)).toBe(true);
+    await d1.bumpConchRevision();
+    expect(await d1.saveConchResponseCacheIfCurrentRevision(0, 'model-a', 'all', '{"subjects":["stale"]}', 124)).toBe(false);
+    await d1.bumpConchRevision();
+    expect(await d1.saveConchResponseCacheIfCurrentRevision(2, 'model-a', 'all', '{"subjects":[]}', 125)).toBe(true);
+    expect(await d1.getConchResponseCache(2, 'model-a', 'all')).toBe('{"subjects":[]}');
+    expect(await d1.acquireConchGenerationLease(2, 'model-a', 'all', 'lease-a', 2_000, 1_000)).toBe(true);
+    expect(await d1.acquireConchGenerationLease(2, 'model-a', 'all', 'lease-b', 2_000, 1_000)).toBe(false);
+    await d1.releaseConchGenerationLease(2, 'model-a', 'all', 'lease-a');
+    expect(await d1.acquireConchGenerationLease(2, 'model-a', 'all', 'lease-b', 2_000, 1_000)).toBe(true);
+    expect(await d1.takeConchQuota(0, 2, 1_000)).toBe(true);
+    expect(await d1.takeConchQuota(0, 2, 1_001)).toBe(true);
+    expect(await d1.takeConchQuota(0, 2, 1_002)).toBe(false);
     d1Db.close();
   });
 });

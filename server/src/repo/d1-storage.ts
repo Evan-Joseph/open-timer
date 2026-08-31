@@ -19,7 +19,7 @@ export interface D1Statement {
   bind(...values: unknown[]): D1Statement;
   first<T = unknown>(colName?: string): Promise<T | null>;
   all<T = Record<string, unknown>>(): Promise<{ results: T[] }>;
-  run(): Promise<{ success: boolean }>;
+  run(): Promise<{ success: boolean; meta?: { changes?: number } }>;
 }
 
 export interface D1Database {
@@ -429,6 +429,86 @@ export class D1Storage implements Storage {
 
   async bumpConchRevision(): Promise<void> {
     await this.db.prepare('UPDATE conch_timeline_state SET revision = revision + 1 WHERE id = 1').run();
+  }
+
+  async getConchResponseCache(conchRevision: number, model: string, window: 'all' | '30d' | '7d'): Promise<string | null> {
+    const row = await this.db
+      .prepare('SELECT payload_json FROM conch_response_cache WHERE conch_revision = ? AND model = ? AND window = ?')
+      .bind(conchRevision, model, window)
+      .first<{ payload_json: string }>();
+    return row?.payload_json ?? null;
+  }
+
+  async saveConchResponseCacheIfCurrentRevision(
+    conchRevision: number,
+    model: string,
+    window: 'all' | '30d' | '7d',
+    payloadJson: string,
+    generatedAtMs: number,
+  ): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        `INSERT INTO conch_response_cache (conch_revision, model, window, payload_json, generated_at_ms)
+         SELECT ?, ?, ?, ?, ?
+         WHERE EXISTS (
+           SELECT 1 FROM conch_timeline_state WHERE id = 1 AND revision = ?
+         )
+         ON CONFLICT(conch_revision, model, window) DO UPDATE SET
+           payload_json = excluded.payload_json,
+           generated_at_ms = excluded.generated_at_ms`,
+      )
+      .bind(conchRevision, model, window, payloadJson, generatedAtMs, conchRevision)
+      .run();
+    return (result.meta?.changes ?? 0) > 0;
+  }
+
+  async acquireConchGenerationLease(
+    conchRevision: number,
+    model: string,
+    window: 'all' | '30d' | '7d',
+    leaseToken: string,
+    expiresAtMs: number,
+    nowMs: number,
+  ): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        `INSERT INTO conch_generation_lease (conch_revision, model, window, lease_token, expires_at_ms)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(conch_revision, model, window) DO UPDATE SET
+           lease_token = excluded.lease_token,
+           expires_at_ms = excluded.expires_at_ms
+         WHERE conch_generation_lease.expires_at_ms <= ?`,
+      )
+      .bind(conchRevision, model, window, leaseToken, expiresAtMs, nowMs)
+      .run();
+    return (result.meta?.changes ?? 0) > 0;
+  }
+
+  async releaseConchGenerationLease(
+    conchRevision: number,
+    model: string,
+    window: 'all' | '30d' | '7d',
+    leaseToken: string,
+  ): Promise<void> {
+    await this.db
+      .prepare('DELETE FROM conch_generation_lease WHERE conch_revision = ? AND model = ? AND window = ? AND lease_token = ?')
+      .bind(conchRevision, model, window, leaseToken)
+      .run();
+  }
+
+  async takeConchQuota(windowStartMs: number, maxHits: number, nowMs: number): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        `INSERT INTO conch_rate_window (window_start_ms, hit_count, updated_at_ms)
+         VALUES (?, 1, ?)
+         ON CONFLICT(window_start_ms) DO UPDATE SET
+           hit_count = conch_rate_window.hit_count + 1,
+           updated_at_ms = excluded.updated_at_ms
+         WHERE conch_rate_window.hit_count < ?`,
+      )
+      .bind(windowStartMs, nowMs, maxHits)
+      .run();
+    return (result.meta?.changes ?? 0) > 0;
   }
 
   /* ---- API 凭据 ---- */

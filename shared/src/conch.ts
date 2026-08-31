@@ -59,6 +59,8 @@ export interface ConchSkippedEntry {
 export interface ConchAskResponse {
   window: ConchWindow;
   generated_at: string;
+  /** 当前建议输入最早变化的时刻；与 revision/model 共同决定缓存可用性。 */
+  cache_valid_until: string;
   /** 仅在海螺已完成时间线事实变化时推进，用于长期缓存失效。 */
   conch_revision: number;
   /** 通用审计 revision，保留给诊断/兼容；不作为海螺缓存键。 */

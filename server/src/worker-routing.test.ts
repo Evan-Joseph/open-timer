@@ -17,7 +17,8 @@ describe('Worker Static Assets / API routing contract', () => {
     expect(wrangler).toMatch(/"run_worker_first"\s*:\s*\[\s*"\/api\/\*"\s*\]/);
     // /api/* 在 asset fallback 前返回 Hono JSON（包括 400 / NOT_FOUND），不会落 index.html。
     expect(worker).toContain("if (url.pathname.startsWith('/api/'))");
-    expect(worker).toContain('return app.fetch(request)');
+    expect(worker).toContain('getWorkerApp(env, url.origin)');
+    expect(worker).toContain('.fetch(request)');
     // asset-first 后，静态响应安全头由 _headers 接管。
     expect(headers).toContain('Content-Security-Policy:');
     expect(headers).toContain('X-Frame-Options: DENY');

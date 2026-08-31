@@ -19,8 +19,10 @@ import type { DailySummaryApi, RangeDailySummaryApi, RangeSessionsApi, SessionAp
 import { apiGet } from '../lib/api.js';
 import { formatBeijingTime, formatDurationZh } from '../lib/clock.js';
 import { useAnimationsEnabled } from '../lib/settings.js';
+import { useMotionInitial, useMotionTransition } from '../lib/motion.js';
 import { PREFS_APPLIED_EVT, schedulePrefsPush, setConchOpenLocal, setHistoryOpenLocal } from '../lib/prefs.js';
 import ConchOverlay from './ConchOverlay.js';
+import SubjectIcon from './SubjectIcon.js';
 import { useModalFocus } from '../lib/modal-focus.js';
 import { LEARNING_DAY, QUIET_PERIODS, shanghaiDayRangeUtc, timelineRange, type TimelineScale } from '@clock/shared';
 
@@ -77,9 +79,13 @@ function formatHistoryDuration(seconds: number): string {
 
 export default function Timeline({ store }: { store: ClockStore }) {
   const animationsEnabled = useAnimationsEnabled();
+  const motionTransition = useMotionTransition();
+  const viewInitial = useMotionInitial({ opacity: 0, y: 6 });
+  const historyOverlayInitial = useMotionInitial({ opacity: 0 });
+  const historyPanelInitial = useMotionInitial({ opacity: 0, y: 14, scale: 0.985 });
   /** 只读监督态：时间轴可看，编辑/撤回/继续/海螺（要调 LLM）全部封死 */
   const readOnly = store.phase === 'readonly';
-  const viewTransition = animationsEnabled ? { duration: 0.22, ease: [0.2, 0, 0, 1] as const } : { duration: 0 };
+  const viewTransition = motionTransition;
   const [viewDate, setViewDate] = useState(store.todayDate);
   const [popover, setPopover] = useState<{ row: SessionRow; containerX: number } | null>(null);
   const [hoverPreview, setHoverPreview] = useState<{ row: SessionRow; containerX: number } | null>(null);
@@ -630,6 +636,11 @@ export default function Timeline({ store }: { store: ClockStore }) {
   }, [dateSessions]);
 
   const totalSeconds = overview.reduce((a, b) => a + b.seconds, 0);
+  // 有记录的科目已在概览中展示“身份 + 时长”；图例只补未出现科目，避免同一行信息重复。
+  const legendSubjects = useMemo(() => {
+    const activeIds = new Set(overview.map((item) => item.subject_id));
+    return activeIds.size > 0 ? store.subjects.filter((subject) => !activeIds.has(subject.subject_id)) : store.subjects;
+  }, [overview, store.subjects]);
 
   const historyModel = useMemo(() => {
     const current = [...historySummaries].sort((a, b) => a.date.localeCompare(b.date));
@@ -815,7 +826,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
       {!historyOpen && <motion.div
         key={mode}
         className="timeline-view-shell"
-        initial={{ opacity: 0, y: 6 }}
+        initial={viewInitial}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -4 }}
         transition={viewTransition}
@@ -851,7 +862,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
                 data-testid="timeline-list-row"
                 onClick={(e) => openRowPopover(row, e.currentTarget)}
               >
-                <span className="pill-dot" aria-hidden />
+                <SubjectIcon subjectId={row.subjectId} size={14} />
                 <span className="list-subject">{row.displayName}</span>
                 <span className="list-time">
                   {row.startLabel} – {row.endLabel ?? '进行中'}
@@ -941,7 +952,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
           style={{ left: `clamp(148px, ${hoverPreview.containerX}px, calc(100% - 148px))` }}
         >
           <div className="seg-preview-title">
-            <span className="pill-dot" data-color={hoverPreview.row.colorId} aria-hidden />
+            <SubjectIcon subjectId={hoverPreview.row.subjectId} size={14} data-color={hoverPreview.row.colorId} />
             <strong>{hoverPreview.row.displayName}</strong>
           </div>
           <div className="seg-preview-meta">
@@ -954,6 +965,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
       {!historyOpen && popover && (
         <div
           className="seg-popover"
+          data-color={popover.row.colorId}
           role="dialog"
           aria-label="会话详情"
           data-testid="seg-popover"
@@ -961,7 +973,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
         >
           <div className="popover-head">
             <span className="popover-subject" data-color={popover.row.colorId}>
-              <span className="pill-dot" aria-hidden /> {popover.row.displayName}
+              <SubjectIcon subjectId={popover.row.subjectId} size={15} /> {popover.row.displayName}
             </span>
             <button className="icon-btn" aria-label="关闭" onClick={() => setPopover(null)}>
               <X size={16} />
@@ -1027,7 +1039,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
               >
                 {startSaving ? '更新中…' : '更新起点'}
               </button>
-              <button className="ghost-btn" onClick={() => void handleResume()} data-testid="popover-resume">
+              <button className="ghost-btn contextual-action" onClick={() => void handleResume()} data-testid="popover-resume">
                 <Play size={14} aria-hidden /> 继续这段
               </button>
               <button className="ghost-btn danger-btn" onClick={() => void handleWithdraw()} data-testid="withdraw-btn">
@@ -1044,7 +1056,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
             const subj = store.subjects.find((s) => s.subject_id === it.subject_id);
             return (
               <span key={it.subject_id} className="overview-item" data-color={subj?.color_id}>
-                <span className="pill-dot" aria-hidden />
+                <SubjectIcon subjectId={it.subject_id} size={13} />
                 {subj?.display_name ?? it.subject_id} <strong>{formatDurationZh(it.seconds)}</strong>
               </span>
             );
@@ -1052,10 +1064,10 @@ export default function Timeline({ store }: { store: ClockStore }) {
         </div>
       )}
 
-      {!historyOpen && <div className="legend" aria-hidden={false}>
-        {store.subjects.map((s) => (
+      {!historyOpen && legendSubjects.length > 0 && <div className="legend" aria-label={overview.length > 0 ? '未出现科目' : '科目图例'}>
+        {legendSubjects.map((s) => (
           <span key={s.subject_id} className="legend-item" data-color={s.color_id}>
-            <span className="pill-dot" aria-hidden /> {s.display_name}
+            <SubjectIcon subjectId={s.subject_id} size={13} /> {s.display_name}
           </span>
         ))}
       </div>}
@@ -1067,10 +1079,10 @@ export default function Timeline({ store }: { store: ClockStore }) {
         <motion.div
           key="history-overlay"
           className="history-overlay-backdrop"
-          initial={{ opacity: 0 }}
+          initial={historyOverlayInitial}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.25, ease: [0.2, 0, 0, 1] }}
+          transition={motionTransition}
           onClick={closeHistory}
         >
           <motion.div
@@ -1081,10 +1093,10 @@ export default function Timeline({ store }: { store: ClockStore }) {
             role="dialog"
             aria-modal="true"
             aria-label="近 7 天执行回顾"
-            initial={{ opacity: 0, y: 14, scale: 0.985 }}
+            initial={historyPanelInitial}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.985 }}
-            transition={{ duration: 0.25, ease: [0.2, 0, 0, 1] }}
+            transition={motionTransition}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="history-overlay-head">
@@ -1164,7 +1176,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
                     <div className="history-subject-list">
                       {historyModel.subjects.map((subject) => (
                         <span key={subject.subjectId} data-color={subject.colorId}>
-                          <i className="pill-dot" aria-hidden /> {subject.label}
+                          <SubjectIcon subjectId={subject.subjectId} size={13} /> {subject.label}
                           <strong>{formatDurationZh(subject.seconds)}</strong>
                           <small>{Math.round(subject.share * 100)}%</small>
                         </span>

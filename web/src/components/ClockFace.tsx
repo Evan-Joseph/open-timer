@@ -2,24 +2,28 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, useMotionValue, useSpring, useReducedMotion } from 'motion/react';
-import { Pause, Play, Square, Flag, Undo2 } from 'lucide-react';
+import { Pause, Play, Square, Undo2 } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
 import type { SyncAnchor } from '../lib/clock.js';
 import { useMonotonicSeconds, useDualMonotonic, useWallSeconds, useBeijingTime, formatHms, formatHmsShort, formatDurationZh, formatBeijingTime, restPlanForFocus, restStageOf, restStageLabel } from '../lib/clock.js';
 import { useAnimationsEnabled, useSettings } from '../lib/settings.js';
 import { PREFS_APPLIED_EVT, schedulePrefsPush } from '../lib/prefs.js';
 import { consumeConchStartMark } from '../lib/conch-mark.js';
+import { useMotionInitial, useMotionTransition } from '../lib/motion.js';
 import { playFinishChime, playAwayReminder } from '../lib/sound.js';
 import { isQuietMinute } from '@clock/shared';
+import SubjectIcon from './SubjectIcon.js';
 
 /* 逾期（L3）不再使用阻断式全屏召回弹窗：统一由红色洗色氛围 + away-line 文案表达。
    恢复/开始下一段的入口在常规控件里（继续计时 / 空闲页开始），无需独占弹窗。 */
 
 function M({ children, ...props }: any) {
   const animationsEnabled = useAnimationsEnabled();
+  const transition = useMotionTransition();
+  const initial = useMotionInitial({ opacity: 0, y: 6 });
   if (!animationsEnabled) return <div {...props}>{children}</div>;
   return (
-    <motion.div {...props} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.22 }}>
+    <motion.div {...props} initial={initial} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={transition}>
       {children}
     </motion.div>
   );
@@ -380,6 +384,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   }, [store.sessions]);
 
   const subjectOf = (id: string | null | undefined) => subjects.find((s) => s.subject_id === id);
+  const selectedSubjectDef = subjectOf(selectedSubject);
 
   const handleStop = async () => {
     const pausedAtMs = active?.paused_at ? Date.parse(active.paused_at) : Number.NaN;
@@ -458,12 +463,12 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     // 并把「继续这段」提为唯一 primary——这是它唯一配得上强调的场景。
     const isMisfire = lastStopped.seconds < 10;
     return (
-      <section className="clockface" data-away-level={reminderLevel} aria-live="polite">
+      <section className="clockface" data-away-level={reminderLevel} data-color={subj?.color_id} aria-live="polite">
         {edgeFlash}
         <M className="finish-card">
           <div className="finish-glow" aria-hidden />
           <div className="subject-pill" data-color={subj?.color_id}>
-            <span className="pill-dot" aria-hidden />
+            <SubjectIcon subjectId={lastStopped.subjectId} size={16} />
             {subj?.display_name ?? lastStopped.subjectId}
           </div>
           {isMisfire ? (
@@ -522,7 +527,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             </button>
             {/* 误触恢复：常规场景 ghost；<10s 短会话时提为 primary（唯一配得上强调的场景） */}
             <button
-              className={isMisfire ? 'primary-btn' : 'ghost-btn'}
+              className={isMisfire ? 'primary-btn contextual-action' : 'ghost-btn'}
               data-testid="finish-resume-btn"
               disabled={store.busy}
               onClick={() => {
@@ -536,7 +541,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
               <Play size={isMisfire ? 18 : 14} aria-hidden /> 继续这段
             </button>
             <button
-              className={isMisfire ? 'ghost-btn' : 'primary-btn'}
+              className={isMisfire ? 'ghost-btn' : 'primary-btn contextual-action'}
               onClick={() => {
                 if (noteDraft.trim()) void store.setNote(lastStopped.sessionId, noteDraft.trim());
                 markFinishDismissed(lastStopped.sessionId, lastStopped.focusEndedAtMs);
@@ -556,14 +561,14 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   if (active) {
     const subj = subjectOf(active.subject_id);
     return (
-      <section className={`clockface ${paused ? 'is-paused' : 'is-running'}`} data-away-level={reminderLevel}>
+      <section className={`clockface ${paused ? 'is-paused' : 'is-running'}`} data-away-level={reminderLevel} data-color={subj?.color_id}>
       {edgeFlash}
       {/* 状态转换一次性 fx：点火（开始）/帷幕（暂停）/回升（继续），key 重触发 */}
       {fx && ((fx.kind === 'settle' && paused) || (fx.kind !== 'settle' && !paused)) && (
         <span key={fx.key} className={`clock-fx fx-${fx.kind}`} aria-hidden />
       )}
         <div className="subject-pill large" data-color={subj?.color_id}>
-          <span className="pill-dot" aria-hidden />
+          <SubjectIcon subjectId={active.subject_id} size={18} />
           {subj?.display_name ?? active.subject_id}
           <span className="pill-status">{paused ? '· 离开中' : '· 进行中'}</span>
         </div>
@@ -602,11 +607,11 @@ export default function ClockFace({ store }: { store: ClockStore }) {
 
         {!readOnly && <div className="control-row">
           {paused ? (
-            <button className="control-btn resume" onClick={store.resume} disabled={busy} aria-label="继续计时" title="继续">
+            <button className="control-btn resume contextual-action" onClick={store.resume} disabled={busy} aria-label="继续计时" title="继续">
               <Play size={24} />
             </button>
           ) : (
-            <button className="control-btn pause" onClick={store.pause} disabled={busy} aria-label="暂停计时" title="暂停">
+            <button className="control-btn pause contextual-action" onClick={store.pause} disabled={busy} aria-label="暂停计时" title="暂停">
               <Pause size={24} />
             </button>
           )}
@@ -629,7 +634,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
                   onClick={() => store.switchSubject(s.subject_id)}
                   disabled={busy}
                 >
-                  <span className="pill-dot" aria-hidden />
+                  <SubjectIcon subjectId={s.subject_id} size={14} />
                   {s.display_name}
                 </button>
               ))}
@@ -653,7 +658,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   });
 
   return (
-    <section className="clockface idle" data-away-level={reminderLevel}>
+    <section className="clockface idle" data-away-level={reminderLevel} data-color={selectedSubjectDef?.color_id}>
       {edgeFlash}
       <div className="idle-clock" data-testid="idle-clock" key={idleTime}>
         {idleTime}
@@ -699,7 +704,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             data-color={s.color_id}
             onClick={() => pickSubject(s.subject_id)}
           >
-            <span className="pill-dot" aria-hidden />
+            <SubjectIcon subjectId={s.subject_id} size={15} />
             {s.display_name}
           </button>
         ))}
@@ -714,8 +719,8 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         aria-label="本次目标（可选）"
       />
 
-      <button className="start-btn" data-testid="start-btn" disabled={busy} onClick={() => store.start(selectedSubject, intentDraft || null)}>
-        <Flag size={20} aria-hidden /> 开始
+      <button className="start-btn contextual-action" data-testid="start-btn" disabled={busy} onClick={() => store.start(selectedSubject, intentDraft || null)}>
+        <Play size={20} aria-hidden /> 开始
       </button>
 
       <div className="today-hint">今天已记录 {formatDurationZh(state?.today_active_seconds ?? 0)}</div>

@@ -152,6 +152,8 @@ export interface ConchSkippedApi {
 export interface ConchAskResponseApi {
   window: ConchWindow;
   generated_at: string;
+  /** 服务端缓存与本机展示缓存的共同失效时刻（最早输入变化边界，最晚为下一个北京时间自然日）。 */
+  cache_valid_until: string;
   conch_revision: number;
   revision: number;
   model: string;
@@ -169,23 +171,34 @@ export interface ApiResult<T> {
 export interface ConchAskResult extends ApiResult<ConchAskResponseApi> {
   networkError: boolean;
   requestId: string;
+  /** 同一建议正在生成，或时间线在生成中更新；客户端应等待后自动重试。 */
+  generating: boolean;
+  retryAfterMs: number | null;
 }
 
 /**
  * 海螺不产生状态变更，不能继承会话写路径的 Idempotency-Key。
  * Safari 旧版缺少 crypto.randomUUID() 时仍使用 Web Crypto 的随机字节生成诊断号。
  */
-export async function conchAsk(window: ConchWindow): Promise<ConchAskResult> {
+export async function conchAsk(window: ConchWindow, force = false): Promise<ConchAskResult> {
   let requestId = 'conch-client-unavailable';
   try {
     requestId = `conch-${createClientUuid()}`;
-    const result = await apiPost<ConchAskResponseApi>('/api/v1/conch/ask', { window }, {
+    const result = await apiPost<ConchAskResponseApi>('/api/v1/conch/ask', { window, ...(force ? { force: true } : {}) }, {
       idempotency: false,
       clientRequestId: requestId,
     });
-    return { ...result, networkError: false, requestId };
+    const error = (result.data as unknown as { error?: string; retry_after_ms?: unknown } | null)?.error;
+    const retryAfter = (result.data as unknown as { retry_after_ms?: unknown } | null)?.retry_after_ms;
+    return {
+      ...result,
+      networkError: false,
+      requestId,
+      generating: result.status === 409 && (error === 'CONCH_GENERATING' || error === 'CONCH_CONTEXT_STALE'),
+      retryAfterMs: typeof retryAfter === 'number' && Number.isFinite(retryAfter) ? retryAfter : null,
+    };
   } catch {
-    return { ok: false, status: 0, data: null, networkError: true, requestId };
+    return { ok: false, status: 0, data: null, networkError: true, requestId, generating: false, retryAfterMs: null };
   }
 }
 

@@ -20,7 +20,9 @@ docs/     API、设计、审计、交接
 |---|---|---|
 | 背景/表面 | `--bg` `--bg-elevated` `--surface-1` `--surface-2` | 分层：页面底 → 卡片 → 次级 |
 | 文字 | `--text-1` `--text-2` `--text-3` | 主/次/弱；`--text-3` 仅非关键信息（对比 ≥3:1） |
-| 语义色 | `--accent`(systemBlue) `--danger`(systemRed) `--success`(systemGreen) `--amber` `--on-accent`(accent 底上的白) | HIG 语义色，浅/深各一套 |
+| 语义色 | `--accent`(systemBlue) `--danger`(systemRed) `--success`(systemGreen) `--amber` | 全局导航、危险、成功与休息提醒各自独占语义，浅/深各一套 |
+| 上下文操作色 | `--action-accent` `--action-press` `--action-on` | 默认是 AA 对比的系统蓝；在科目上下文继承 `--sc`/`--sc-on`，只供开始、暂停/继续和“开始这个科目”使用 |
+| 禁用态 | `--disabled-surface` `--disabled-text` `--disabled-border` | 禁用控件维持完整不透明表面，不用全局 `opacity: .4` 伪装成加载或渲染故障 |
 | 边框/阴影 | `--border` `--shadow` `--shadow-sm` `--shadow-up` `--shadow-hover` `--shadow-knob` | 分层阴影，向上用 `--shadow-up`，悬停抬升用 `--shadow-hover`，分段控件滑块用 `--shadow-knob` |
 | 材质 | `--material`(顶栏 0.72) `--popover-surface`(阅读/编辑弹层实色) `--overlay-scrim`(遮罩 0.44) | backdrop-filter 只用于顶栏与浮层；弹层不透出底下时钟文字 |
 | 圆角 | `--radius-xs`3（微图形：时间轴片段/信标旗） `--radius-sm`6 `--radius`10 `--radius-lg`12 `--radius-xl`14；胶囊 999px | 控件 ≤ 卡片 ≤ 浮层 |
@@ -28,7 +30,7 @@ docs/     API、设计、审计、交接
 | 字级 | `--fs-xs..3xl` = 11/12/13/14/15/17/22/28；`--fs-mini`10 | 大数字不用此表，用 dvh clamp；10px 是注记字号下限，禁止更小 |
 | 动效 | `--ease-standard`(0.2,0,0,1) `--ease-expo`(0.16,1,0.3,1)；`--dur-press`0.1 `--dur-hover`0.15 `--dur-enter`0.25 `--dur-state`0.28 `--dur-shake`0.4 `--dur-wash`0.5 `--dur-glide`0.9(linear) `--dur-pulse`1.2 `--dur-breathe`2.4 `--dur-breathe-slow`2.8 `--dur-breathe-pill`3.2 | 全部过渡取此组；振荡呼吸动画用 ease-in-out（频率下限 2.4s，WCAG 2.3.1）；`--dur-wash`+`--ease-expo` 专属全视口洗色；`--dur-glide` 专属信标匀速漂移 |
 
-科目色：`[data-color=amber|teal|blue|indigo|violet|cyan|coral]` → `--sc`/`--sc-bg`，浅/深两套，色相分散避免蓝紫扎堆。
+科目色：`[data-color=copper|teal|blue|indigo|violet|cyan|coral]` → `--sc`/`--sc-bg`/`--sc-on`，浅/深两套。数学使用铜色，保留琥珀给休息提醒；身份一律由“Lucide 图标 + 中文名称 + 颜色”冗余编码，时间轴过窄片段才只保留颜色。
 
 ## 3. 按钮层级（styles.css「按钮系统」段）
 
@@ -51,6 +53,7 @@ docs/     API、设计、审计、交接
 - 例外：结束反馈卡检测到 <10s 短会话时提示「是误触吗？」，此时「继续这段」临时提为 primary——这是它唯一配得上强调的场景（参照 Clockify 阈值思路）。
 - 查看型弹层（时间轴详情）以浏览为主、动作皆低频编辑：全部 ghost，不设备注 Save 按钮——备注 Enter/失焦自动保存（参照 Super Productivity inline-markdown 模式）。
 - 主控制（暂停/继续/结束）为 56px 圆形，播放/暂停是最高权重；结束为同尺寸 danger 色图标。
+- 科目上下文内，开始、暂停/继续和海螺的开工按钮继承当前科目 action token；设置、日期导航、关闭、撤回与休息告警不得被科目色污染。
 
 **工具栏契约**（2026-08-20，参考 HIG toolbars / Radix SegmentedControl 单一 size 下发）：同一工具栏行只允许一个高度档（时间轴工具栏 = 32px 行），行内控件 `align-items: center`、间距统一 `--space-2`（8px），中心 Y 共线（E2E 断言 ±1px）。
 
@@ -98,7 +101,7 @@ docs/     API、设计、审计、交接
 
 ## 7. 动效与无障碍
 
-- 只用 CSS transition + 已有 `motion/react`，不新增 GSAP。
+- 只用 CSS transition + 已有 `motion/react`，不新增 GSAP；Motion 浮层统一经 `web/src/lib/motion.ts` 读取应用动画设置与 `prefers-reduced-motion`，关闭时 `initial=false` 且 `duration=0`。
 - 状态切换进入/退出各自定义；页面级状态变化只过渡背景/边框/透明度/transform，不用 `transition: all`。
 - 全局 `@media (prefers-reduced-motion: reduce)` 与 `html.animations-off` 双兜底：停掉动画与过渡、保留静态终态和布局功能，避免 0.01ms 动画闪回起始帧。
 - 计时数字 `font-variant-numeric: tabular-nums` + `font-synthesis: none`，秒变化零布局跳动。
@@ -108,7 +111,7 @@ docs/     API、设计、审计、交接
 **UI 偏好同步**（服务端 `user_pref` 单行 JSON，`GET/PUT /api/v1/prefs`，owner-only）：
 - localStorage 即时层 + 服务端事实层；last-write-wins；登录态可见页面每 5 分钟轮询偏好、空闲 120s / 运行中 10s 轮询状态，本地变更 500ms 防抖推送；页面隐藏时停后台轮询、恢复可见立即校验；在途窗口 3s 内拉取不得回滚本地变更（防竞态）。状态刷新走 `/snapshot`（一 Worker 请求携带同次 state + 当天 sessions），而非 `/state` + `/sessions` 两次请求。
 - 同步键：theme / animations / finishSound / ambientKind / timelineScale / timelineMode / selectedSubject（空闲页选中科目）。
-- local-only 明确排除：ambientVolume（设备响度差异，默认 0）、全屏态、reduced-motion 派生态、输入草稿、clock-last-subject、historyOpen / conchOpen（浮层开合会触发本地读/LLM 请求，2026-08-24 起不跨端同步）。
+- local-only 明确排除：ambientVolume（设备响度差异，默认 45%）、全屏态、reduced-motion 派生态、输入草稿、clock-last-subject、historyOpen / conchOpen（浮层开合会触发本地读/LLM 请求，2026-08-24 起不跨端同步）。
 - 参照 Super Productivity sync/local-only-keys 与 Pomotroid 后端持久化范式。
 
 **时钟同步正确姿势**（2026-08-22 联网核验背书：本实现 = Cristian 中点锚定算法，与微软 Live Share SDK 同构）：

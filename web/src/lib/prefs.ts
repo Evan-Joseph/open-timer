@@ -6,7 +6,7 @@
  * - last-write-wins，按服务端 updated_at_ms 取新；单用户无冲突对话框；
  * - 轮询搭车：独立 10s 间隔拉取（仅登录态），变更即应用到本地并广播；
  * - 本地变更防抖 500ms 推送；
- * - local-only 明确排除：ambientVolume（设备响度差异大，默认 0 不同步）、
+ * - local-only 明确排除：ambientVolume（设备响度差异大，默认 45% 不同步）、
  *   全屏态、reduced-motion 派生态、各类输入草稿、clock-last-subject（设备习惯）、
  *   浮层开合态 historyOpen/conchOpen（2026-08-24 下线：开合同步会让多端各自打开
  *   浮层重复发请求，海螺是昂贵 LLM 调用；开合态纯设备本地）。

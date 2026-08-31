@@ -1,4 +1,4 @@
-/** 本地设置（localStorage + 服务端多端同步）。音量是设备本地项（默认 0，不同步）。 */
+/** 本地设置（localStorage + 服务端多端同步）。音量是设备本地项（默认 45%，不同步）。 */
 
 import { useEffect, useState } from 'react';
 import type { AmbientKind } from './ambient.js';
@@ -11,14 +11,14 @@ export interface LocalSettings {
   finishSound: boolean;
   /** 环境音类型（默认 none） */
   ambientKind: AmbientKind;
-  /** 环境音音量 0..1（设备本地，不同步；默认 0） */
+  /** 环境音音量 0..1（设备本地，不同步；默认 45%） */
   ambientVolume: number;
 }
 
 const DEFAULTS: LocalSettings = {
   finishSound: false,
   ambientKind: 'none',
-  ambientVolume: 0,
+  ambientVolume: 0.45,
 };
 
 function load(): LocalSettings {

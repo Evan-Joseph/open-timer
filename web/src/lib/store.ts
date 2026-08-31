@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SubjectApi, StateApi, SessionApi, SnapshotApi, StopSessionApi } from './api.js';
 import { apiGet, apiPost, apiPatch, createClientUuid } from './api.js';
+import { clearConchCache } from './conch-cache.js';
 import type { SyncAnchor } from './clock.js';
 import { shanghaiTodayLocal } from './clock.js';
 
@@ -312,12 +313,14 @@ export function useClockStore(): ClockStore {
 
   const logout = useCallback(async () => {
     await apiPost('/api/v1/auth/logout');
+    clearConchCache();
     // 回到只读监督态（而非阻断式登录页）：监督者仍可查看
     authEpochRef.current += 1;
     setPhase('readonly');
   }, []);
 
   const expireOwnerSession = useCallback(() => {
+    clearConchCache();
     authEpochRef.current += 1;
     setPhase('readonly');
     // 进入只读态会立即刷新公开快照；普通 error 会被该成功刷新清掉，故用 toast 保留一次引导。

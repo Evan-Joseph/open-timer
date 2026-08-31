@@ -26,7 +26,7 @@ Base URL：`https://clock.4c666.top`
 
 ```json
 [
-  { "subject_id": "math", "display_name": "数学二", "aggregate_group": "math", "color_id": "amber", "sort_order": 1 },
+  { "subject_id": "math", "display_name": "数学二", "aggregate_group": "math", "color_id": "copper", "sort_order": 1 },
   { "subject_id": "english", "display_name": "英语二", "aggregate_group": "english", "color_id": "teal", "sort_order": 2 },
   { "subject_id": "data-structures", "display_name": "数据结构", "aggregate_group": "408", "color_id": "blue", "sort_order": 3 },
   { "subject_id": "computer-organization", "display_name": "计算机组成原理", "aggregate_group": "408", "color_id": "indigo", "sort_order": 4 },
@@ -84,7 +84,7 @@ Web 客户端内部刷新用的原子快照：一次请求返回同次的 `state
 
 ### 3b. `GET /api/v1/conch/revision`（owner）
 
-神奇海螺本地缓存校验专用：只返回 `{ "conch_revision": 12, "model": "..." }`，不拉时间线、不调用模型。客户端仅当完成时间线 revision 与当前模型都未变时复用建议；它属于已登录页面内部机制，不是科目任务的常规消费接口。
+神奇海螺本地缓存校验专用：只返回 `{ "conch_revision": 12, "model": "..." }`，不拉时间线、不调用模型。客户端仅当完成时间线 revision 与当前模型都未变，且响应的 `cache_valid_until` 尚未到达时复用建议；它属于已登录页面内部机制，不是科目任务的常规消费接口。
 
 ### 4. `GET /api/v1/daily-summary?date=YYYY-MM-DD&timezone=Asia%2FShanghai` ⭐ 每晚 22:30 复盘用
 
@@ -253,7 +253,7 @@ GET /api/v1/sessions?from=YYYY-MM-DD&to=YYYY-MM-DD
 | PATCH | `/api/v1/sessions/:id/note` | 更新备注，body `{ "note": "..." }`（≤200 字） |
 | POST | `/api/v1/sessions/:id/retime` | 修正时长：delta 落到末段结束时刻（而非仅改快照），汇总按段重算即反映；审计留痕。body `{ "delta_seconds": -300, "reason": "文字或 null" }`（±24h 内；reason 键必须存在，可为 null）；使末段时长为负时 400 `INVALID_RETIME` |
 | POST | `/api/v1/sessions/:id/adjust-start` | 起点补录：把已停止会话的开始时间向前调整（同步首段与净时长），body `{ "started_at": "ISO8601", "reason": "文字或 null" }`；必须早于首段结束时刻，否则 400 `INVALID_START` |
-| POST | `/api/v1/conch/ask` | 神奇海螺：下一步推荐。body `{ "window": "all"\|"30d"\|"7d" }`。服务端仅组装已完成且通过误触过滤的时间线 → 活动门槛过滤（近 7 个北京日无已完成有效会话的科目不送 LLM）→ 调 OpenAI 兼容端点（`CONCH_*` secrets）→ 结构化返回 `{ window, generated_at, conch_revision, revision, model, subjects[], skipped[] }`。`conch_revision` 只随完成/备注/修正/撤回/重开推进，客户端据此长期缓存。独立限流 20 次/小时；无活跃科目时不调 LLM 直接返回。未配置或上游凭据无效 → 503 `CONCH_NOT_CONFIGURED` / `CONCH_CREDENTIAL_INVALID`；上游推理额度不足 → 402 `CONCH_QUOTA_EXHAUSTED`；LLM 超时 504 `LLM_TIMEOUT`、其他上游错误 502 `LLM_UPSTREAM`、输出无法解析 422 `LLM_OUTPUT_INVALID`、未预期内部错误 500 `INTERNAL`。不需要幂等键；浏览器可带受限 `X-Client-Request-Id: conch-…`，服务端只在格式合法时回显，用于安全日志关联，不记录问题正文、备注、Cookie 或模型响应。设计见 `docs/神奇海螺-下一步推荐-设计-2026-08-23.md` |
+| POST | `/api/v1/conch/ask` | 神奇海螺：下一步推荐。body `{ "window": "all"\|"30d"\|"7d", "force"?: true }`，`force` 仅表示显式重新问一次。服务端仅组装已完成且通过误触过滤的时间线 → 活动门槛过滤（近 7 个北京日无已完成有效会话的科目不送 LLM）→ 调 OpenAI 兼容端点（`CONCH_*` secrets）→ 结构化返回 `{ window, generated_at, cache_valid_until, conch_revision, revision, model, subjects[], skipped[] }`。成功结果按 `conch_revision + model + window` 存在 D1，到下一个输入变化边界自动失效，最晚不跨下一个北京时间自然日；近 7/30 天会额外在历史段移出连续滚动窗口时失效。命中只读 revision、活动态与审计水位，不重扫完整时间线。并行 miss 只有一个请求会调用模型，其他请求收到 `409 CONCH_GENERATING` 或 `CONCH_CONTEXT_STALE` 与 `retry_after_ms` 后应等待重试。额度是跨 Worker 的实际模型调用 20 次/小时，缓存命中不占额度；无活跃科目不调 LLM。未配置或上游凭据无效 → 503 `CONCH_NOT_CONFIGURED` / `CONCH_CREDENTIAL_INVALID`；上游推理额度不足 → 402 `CONCH_QUOTA_EXHAUSTED`；LLM 超时 504 `LLM_TIMEOUT`、其他上游错误 502 `LLM_UPSTREAM`、输出无法解析 422 `LLM_OUTPUT_INVALID`、未预期内部错误 500 `INTERNAL`。不需要幂等键；浏览器可带受限 `X-Client-Request-Id: conch-…`，服务端只在格式合法时回显，用于安全日志关联，不记录问题正文、备注、Cookie 或模型响应。设计见 `docs/神奇海螺-下一步推荐-设计-2026-08-23.md` |
 | POST | `/api/v1/auth/logout` | 登出 |
 
 上表会话写操作都需携带 `Idempotency-Key` 头（示例：`curl -H "Idempotency-Key: $(uuidgen)"`）。auth 与 credentials 端点不要求该头。
@@ -266,7 +266,7 @@ GET /api/v1/sessions?from=YYYY-MM-DD&to=YYYY-MM-DD
 | 401 | `UNAUTHORIZED` / `INVALID_CREDENTIALS` | 未登录 / 密码错误 |
 | 403 | `CSRF_REJECTED` | 写请求 Origin 与 Host 不同源 |
 | 404 | `SESSION_NOT_FOUND` / `NOT_FOUND` | 会话不存在 / 未知路径 |
-| 409 | `ACTIVE_SESSION_EXISTS` / `ILLEGAL_TRANSITION` / `ALREADY_SETUP` / `NOT_SETUP` / `NOT_ACTIVE_SESSION` | 状态冲突 |
+| 409 | `ACTIVE_SESSION_EXISTS` / `ILLEGAL_TRANSITION` / `ALREADY_SETUP` / `NOT_SETUP` / `NOT_ACTIVE_SESSION` / `CONCH_GENERATING` / `CONCH_CONTEXT_STALE` | 状态冲突；海螺生成中，或生成期间完成时间线/滚动窗口已变化时，响应另带 `retry_after_ms`，客户端应等待后重试 |
 | 429 | `RATE_LIMITED` | 登录或 API 请求过频 |
 | 500 | `INTERNAL` | 服务端内部错误（不泄漏栈与路径） |
 

@@ -77,6 +77,31 @@ export interface Storage {
   getConchRevision(): Promise<number>;
   /** 仅在已完成时间线事实变化后调用。 */
   bumpConchRevision(): Promise<void>;
+  /** 跨 Worker 的成功推荐缓存。只保存已清洗后的结构化建议，key 与语义 revision / 模型 / 窗口绑定。 */
+  getConchResponseCache(conchRevision: number, model: string, window: 'all' | '30d' | '7d'): Promise<string | null>;
+  /**
+   * 仅当写入瞬间 semantic revision 仍等于缓存键时保存。这个条件写阻止旧上下文
+   * 在完成/备注/撤回并发发生后被误写进新 revision 的缓存行。
+   */
+  saveConchResponseCacheIfCurrentRevision(
+    conchRevision: number,
+    model: string,
+    window: 'all' | '30d' | '7d',
+    payloadJson: string,
+    generatedAtMs: number,
+  ): Promise<boolean>;
+  /** 同一语义键的上游推理租约。true 表示本请求获得唯一生成权；leaseToken 用于安全释放。 */
+  acquireConchGenerationLease(
+    conchRevision: number,
+    model: string,
+    window: 'all' | '30d' | '7d',
+    leaseToken: string,
+    expiresAtMs: number,
+    nowMs: number,
+  ): Promise<boolean>;
+  releaseConchGenerationLease(conchRevision: number, model: string, window: 'all' | '30d' | '7d', leaseToken: string): Promise<void>;
+  /** 仅在真正调用上游前占用一次小时额度；跨 Worker / 冷启动一致。 */
+  takeConchQuota(windowStartMs: number, maxHits: number, nowMs: number): Promise<boolean>;
 
   /* ---- API 凭据 ---- */
   listCredentials(): Promise<ApiCredentialRow[]>;

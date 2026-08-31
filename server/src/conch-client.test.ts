@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createConchLlmClient } from './conch-client.js';
 
 const DEEPSEEK_CONFIG = {
@@ -88,5 +88,25 @@ describe('Conch LLM client', () => {
 
     await expect(client.ask({ system: 'system', user: 'user' })).rejects.toMatchObject({ kind: 'invalid' });
     expect(calls).toBe(2);
+  });
+
+  it('DeepSeek 空内容重试共享同一总超时预算，不会再额外等待一整个 timeout', async () => {
+    let fakeNow = 1_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => fakeNow);
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      // 第一轮恰好耗尽总预算但返回空内容；第二轮必须在发请求前超时。
+      fakeNow += 90;
+      return new Response(JSON.stringify({ choices: [{ message: { content: '' } }] }), { status: 200 });
+    }) as typeof fetch;
+    const client = createConchLlmClient(DEEPSEEK_CONFIG, { fetchImpl, timeoutMs: 90 });
+
+    try {
+      await expect(client.ask({ system: 'system', user: 'user' })).rejects.toMatchObject({ kind: 'timeout' });
+      expect(calls).toBe(1);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });
