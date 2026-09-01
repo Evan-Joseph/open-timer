@@ -1,4 +1,4 @@
-/** 科目身份的第二编码：图标辅助颜色与中文名称，窄时间轴片段仍只保留颜色。 */
+/** 科目身份的图标编码：与中文名称、色彩共同使用；宽时间轴片段也可复用。 */
 
 import { Braces, Cpu, Landmark, Languages, Network, Sigma, Terminal, type LucideProps } from 'lucide-react';
 

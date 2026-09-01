@@ -924,7 +924,15 @@ export default function Timeline({ store }: { store: ClockStore }) {
                   aria-label={`${seg.displayName} ${seg.startLabel} 到 ${seg.endLabel ?? '现在'}，${formatDurationZh(seg.seconds)}`}
                   onClick={() => openPopover(seg)}
                 />
-                <span className="seg-fill" style={{ left: `${fillLeft}%`, width: `${fillWidth}%` }} aria-hidden />
+                <span className="seg-fill" style={{ left: `${fillLeft}%`, width: `${fillWidth}%` }} aria-hidden>
+                  <SubjectIcon
+                    subjectId={seg.subjectId}
+                    className="seg-subject-icon"
+                    size={12}
+                    strokeWidth={2.2}
+                    data-testid="timeline-segment-icon"
+                  />
+                </span>
               </span>
             );
           })}

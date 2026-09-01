@@ -183,6 +183,40 @@ test('1024x640 中 7 天泳道不触发页面滚动', async ({ page }) => {
   ).toBeLessThanOrEqual(historyClearance.viewportBottom);
 });
 
+test('七科色板在浅深主题均可区分，宽时间轴片段显示身份图标', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await enterReadyState(page);
+
+  const subjectColors = () => page.locator('.subject-chip').evaluateAll((chips) => (
+    chips.map((chip) => getComputedStyle(chip).getPropertyValue('--sc').trim())
+  ));
+
+  const light = await subjectColors();
+  expect(light).toHaveLength(7);
+  expect(light.every(Boolean)).toBe(true);
+  expect(new Set(light).size).toBe(7);
+  const colorKeys = await page.locator('.subject-chip').evaluateAll((chips) => (
+    chips.map((chip) => chip.getAttribute('data-color'))
+  ));
+  expect(new Set(colorKeys)).toEqual(new Set(['copper', 'teal', 'blue', 'indigo', 'violet', 'cyan', 'coral']));
+
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+  const dark = await subjectColors();
+  expect(dark).toHaveLength(7);
+  expect(dark.every(Boolean)).toBe(true);
+  expect(new Set(dark).size).toBe(7);
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+
+  await recordRecentSession(page, '数据结构', 1_050);
+  const fill = page.locator('.seg[data-color="blue"] .seg-fill').last();
+  await expect(fill).toBeVisible();
+  // 生产中由真实时长决定宽度；容器查询必须让窄段保持安静、宽段再补身份图标。
+  await fill.evaluate((element) => { element.style.width = '24px'; });
+  await expect(fill.locator('.seg-subject-icon')).toBeHidden();
+  await fill.evaluate((element) => { element.style.width = '52px'; });
+  await expect(fill.locator('.seg-subject-icon')).toBeVisible();
+});
+
 test('全屏与窗口模式共用同一布局，逾期告警状态一致', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await enterReadyState(page);

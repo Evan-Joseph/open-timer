@@ -30,7 +30,7 @@ docs/     API、设计、审计、交接
 | 字级 | `--fs-xs..3xl` = 11/12/13/14/15/17/22/28；`--fs-mini`10 | 大数字不用此表，用 dvh clamp；10px 是注记字号下限，禁止更小 |
 | 动效 | `--ease-standard`(0.2,0,0,1) `--ease-expo`(0.16,1,0.3,1)；`--dur-press`0.1 `--dur-hover`0.15 `--dur-enter`0.25 `--dur-state`0.28 `--dur-shake`0.4 `--dur-wash`0.5 `--dur-glide`0.9(linear) `--dur-pulse`1.2 `--dur-breathe`2.4 `--dur-breathe-slow`2.8 `--dur-breathe-pill`3.2 | 全部过渡取此组；振荡呼吸动画用 ease-in-out（频率下限 2.4s，WCAG 2.3.1）；`--dur-wash`+`--ease-expo` 专属全视口洗色；`--dur-glide` 专属信标匀速漂移 |
 
-科目色：`[data-color=copper|teal|blue|indigo|violet|cyan|coral]` → `--sc`/`--sc-bg`/`--sc-on`，浅/深两套。数学使用铜色，保留琥珀给休息提醒；身份一律由“Lucide 图标 + 中文名称 + 颜色”冗余编码，时间轴过窄片段才只保留颜色。
+科目色：公开 `color_id` 保持 `copper|teal|blue|indigo|violet|cyan|coral`，CSS 映射为数学二铜/英语二青绿/数据结构钴蓝/计算机组成原理紫罗兰/操作系统橄榄/计算机网络橙/思想政治理论玫瑰，即 `[data-color]` → `--sc`/`--sc-bg`/`--sc-on` 的浅/深两套视觉 token。视觉色沿色环拉开，保留琥珀给休息提醒；身份一律由“Lucide 图标 + 中文名称 + 颜色”冗余编码。当天时间轴宽段从左侧显示图标，窄段与 7 天泳道保持纯色块，并由相邻图例提供图标与名称。
 
 ## 3. 按钮层级（styles.css「按钮系统」段）
 

@@ -123,14 +123,14 @@
   --font: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Helvetica Neue', sans-serif;
   --font-num: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
 
-  /* 科目色：浅/深两套；色相分散，避免蓝紫扎堆 */
-  --c-copper: #9a4a2a;     --c-copper-action: #9a4a2a; --c-copper-action-press: #7c3a21; --c-copper-action-on: #ffffff; --c-copper-bg: #fae6de;
-  --c-teal: #0f766e;       --c-teal-action: #0f766e;   --c-teal-action-press: #0b5e58;   --c-teal-action-on: #ffffff;   --c-teal-bg: #ccfbf1;
-  --c-blue: #1d4ed8;       --c-blue-action: #1d4ed8;   --c-blue-action-press: #1e40af;   --c-blue-action-on: #ffffff;   --c-blue-bg: #dbeafe;
-  --c-indigo: #4338ca;     --c-indigo-action: #4338ca; --c-indigo-action-press: #3730a3; --c-indigo-action-on: #ffffff; --c-indigo-bg: #e0e7ff;
-  --c-violet: #6d28d9;     --c-violet-action: #6d28d9; --c-violet-action-press: #5b21b6; --c-violet-action-on: #ffffff; --c-violet-bg: #ede9fe;
-  --c-cyan: #0e7490;       --c-cyan-action: #0e7490;   --c-cyan-action-press: #155e75;   --c-cyan-action-on: #ffffff;   --c-cyan-bg: #cffafe;
-  --c-coral: #be123c;      --c-coral-action: #be123c;  --c-coral-action-press: #9f1239;  --c-coral-action-on: #ffffff;  --c-coral-bg: #ffe4e6;
+  /* 科目色：浅/深两套；七科沿色环分散，避免 408 蓝紫扎堆、英语与计算机网络近色。 */
+  --c-copper: #9a4a2a;     --c-copper-on: #ffffff;     --c-copper-action: #9a4a2a; --c-copper-action-press: #7c3a21; --c-copper-action-on: #ffffff; --c-copper-bg: #fae6de;
+  --c-teal: #0f766e;       --c-teal-on: #ffffff;       --c-teal-action: #0f766e;   --c-teal-action-press: #0b5e58;   --c-teal-action-on: #ffffff;   --c-teal-bg: #ccfbf1;
+  --c-blue: #1d4ed8;       --c-blue-on: #ffffff;       --c-blue-action: #1d4ed8;   --c-blue-action-press: #1e40af;   --c-blue-action-on: #ffffff;   --c-blue-bg: #dbeafe;
+  --c-violet: #6d28d9;     --c-violet-on: #ffffff;     --c-violet-action: #6d28d9; --c-violet-action-press: #5b21b6; --c-violet-action-on: #ffffff; --c-violet-bg: #ede9fe;
+  --c-olive: #4d7c0f;      --c-olive-on: #ffffff;      --c-olive-action: #4d7c0f;  --c-olive-action-press: #3f6212;  --c-olive-action-on: #ffffff;  --c-olive-bg: #ecfccb;
+  --c-orange: #c2410c;     --c-orange-on: #ffffff;     --c-orange-action: #c2410c; --c-orange-action-press: #9a3412; --c-orange-action-on: #ffffff; --c-orange-bg: #ffedd5;
+  --c-rose: #be123c;       --c-rose-on: #ffffff;       --c-rose-action: #be123c;   --c-rose-action-press: #9f1239;   --c-rose-action-on: #ffffff;   --c-rose-bg: #ffe4e6;
 }
 
 [data-theme='dark'] {
@@ -163,23 +163,23 @@
   --popover-surface: #242426;
 
   /* 深色表面上的身份色保持明亮；实心 action 另用同一色相的深阶 + 白字，主题过渡不中途跌破 AA。 */
-  --c-copper: #f2a57f;     --c-copper-action: #9a4a2a; --c-copper-action-press: #7c3a21; --c-copper-action-on: #ffffff; --c-copper-bg: rgba(154, 74, 42, 0.3);
-  --c-teal: #2dd4bf;       --c-teal-action: #0f766e;   --c-teal-action-press: #0b5e58;   --c-teal-action-on: #ffffff;   --c-teal-bg: rgba(15, 118, 110, 0.3);
-  --c-blue: #60a5fa;       --c-blue-action: #1d4ed8;   --c-blue-action-press: #1e40af;   --c-blue-action-on: #ffffff;   --c-blue-bg: rgba(29, 78, 216, 0.32);
-  --c-indigo: #818cf8;     --c-indigo-action: #4338ca; --c-indigo-action-press: #3730a3; --c-indigo-action-on: #ffffff; --c-indigo-bg: rgba(67, 56, 202, 0.34);
-  --c-violet: #c084fc;     --c-violet-action: #6d28d9; --c-violet-action-press: #5b21b6; --c-violet-action-on: #ffffff; --c-violet-bg: rgba(109, 40, 217, 0.3);
-  --c-cyan: #22d3ee;       --c-cyan-action: #0e7490;   --c-cyan-action-press: #155e75;   --c-cyan-action-on: #ffffff;   --c-cyan-bg: rgba(14, 116, 144, 0.32);
-  --c-coral: #fb7185;      --c-coral-action: #be123c;  --c-coral-action-press: #9f1239;  --c-coral-action-on: #ffffff;  --c-coral-bg: rgba(190, 18, 60, 0.32);
+  --c-copper: #f2a57f;     --c-copper-on: #1d1d1f;     --c-copper-action: #9a4a2a; --c-copper-action-press: #7c3a21; --c-copper-action-on: #ffffff; --c-copper-bg: rgba(154, 74, 42, 0.3);
+  --c-teal: #2dd4bf;       --c-teal-on: #1d1d1f;       --c-teal-action: #0f766e;   --c-teal-action-press: #0b5e58;   --c-teal-action-on: #ffffff;   --c-teal-bg: rgba(15, 118, 110, 0.3);
+  --c-blue: #60a5fa;       --c-blue-on: #1d1d1f;       --c-blue-action: #1d4ed8;   --c-blue-action-press: #1e40af;   --c-blue-action-on: #ffffff;   --c-blue-bg: rgba(29, 78, 216, 0.32);
+  --c-violet: #c084fc;     --c-violet-on: #1d1d1f;     --c-violet-action: #6d28d9; --c-violet-action-press: #5b21b6; --c-violet-action-on: #ffffff; --c-violet-bg: rgba(109, 40, 217, 0.3);
+  --c-olive: #a3e635;      --c-olive-on: #1d1d1f;      --c-olive-action: #4d7c0f;  --c-olive-action-press: #3f6212;  --c-olive-action-on: #ffffff;  --c-olive-bg: rgba(77, 124, 15, 0.32);
+  --c-orange: #fb923c;     --c-orange-on: #1d1d1f;     --c-orange-action: #c2410c; --c-orange-action-press: #9a3412; --c-orange-action-on: #ffffff; --c-orange-bg: rgba(194, 65, 12, 0.32);
+  --c-rose: #fb7185;       --c-rose-on: #1d1d1f;       --c-rose-action: #be123c;   --c-rose-action-press: #9f1239;   --c-rose-action-on: #ffffff;   --c-rose-bg: rgba(190, 18, 60, 0.32);
 }
 
-/* 科目色绑定（data-color 属性） */
-[data-color='copper'] { --sc: var(--c-copper); --sc-action: var(--c-copper-action); --sc-action-press: var(--c-copper-action-press); --sc-action-on: var(--c-copper-action-on); --sc-bg: var(--c-copper-bg); }
-[data-color='teal'] { --sc: var(--c-teal); --sc-action: var(--c-teal-action); --sc-action-press: var(--c-teal-action-press); --sc-action-on: var(--c-teal-action-on); --sc-bg: var(--c-teal-bg); }
-[data-color='blue'] { --sc: var(--c-blue); --sc-action: var(--c-blue-action); --sc-action-press: var(--c-blue-action-press); --sc-action-on: var(--c-blue-action-on); --sc-bg: var(--c-blue-bg); }
-[data-color='indigo'] { --sc: var(--c-indigo); --sc-action: var(--c-indigo-action); --sc-action-press: var(--c-indigo-action-press); --sc-action-on: var(--c-indigo-action-on); --sc-bg: var(--c-indigo-bg); }
-[data-color='violet'] { --sc: var(--c-violet); --sc-action: var(--c-violet-action); --sc-action-press: var(--c-violet-action-press); --sc-action-on: var(--c-violet-action-on); --sc-bg: var(--c-violet-bg); }
-[data-color='cyan'] { --sc: var(--c-cyan); --sc-action: var(--c-cyan-action); --sc-action-press: var(--c-cyan-action-press); --sc-action-on: var(--c-cyan-action-on); --sc-bg: var(--c-cyan-bg); }
-[data-color='coral'] { --sc: var(--c-coral); --sc-action: var(--c-coral-action); --sc-action-press: var(--c-coral-action-press); --sc-action-on: var(--c-coral-action-on); --sc-bg: var(--c-coral-bg); }
+/* 公开 color_id 是稳定的 API palette key；视觉 token 可独立重排，避免把显示调整扩散为 API 变更。 */
+[data-color='copper'] { --sc: var(--c-copper); --sc-on: var(--c-copper-on); --sc-action: var(--c-copper-action); --sc-action-press: var(--c-copper-action-press); --sc-action-on: var(--c-copper-action-on); --sc-bg: var(--c-copper-bg); }
+[data-color='teal'] { --sc: var(--c-teal); --sc-on: var(--c-teal-on); --sc-action: var(--c-teal-action); --sc-action-press: var(--c-teal-action-press); --sc-action-on: var(--c-teal-action-on); --sc-bg: var(--c-teal-bg); }
+[data-color='blue'] { --sc: var(--c-blue); --sc-on: var(--c-blue-on); --sc-action: var(--c-blue-action); --sc-action-press: var(--c-blue-action-press); --sc-action-on: var(--c-blue-action-on); --sc-bg: var(--c-blue-bg); }
+[data-color='indigo'] { --sc: var(--c-violet); --sc-on: var(--c-violet-on); --sc-action: var(--c-violet-action); --sc-action-press: var(--c-violet-action-press); --sc-action-on: var(--c-violet-action-on); --sc-bg: var(--c-violet-bg); }
+[data-color='violet'] { --sc: var(--c-olive); --sc-on: var(--c-olive-on); --sc-action: var(--c-olive-action); --sc-action-press: var(--c-olive-action-press); --sc-action-on: var(--c-olive-action-on); --sc-bg: var(--c-olive-bg); }
+[data-color='cyan'] { --sc: var(--c-orange); --sc-on: var(--c-orange-on); --sc-action: var(--c-orange-action); --sc-action-press: var(--c-orange-action-press); --sc-action-on: var(--c-orange-action-on); --sc-bg: var(--c-orange-bg); }
+[data-color='coral'] { --sc: var(--c-rose); --sc-on: var(--c-rose-on); --sc-action: var(--c-rose-action); --sc-action-press: var(--c-rose-action-press); --sc-action-on: var(--c-rose-action-on); --sc-bg: var(--c-rose-bg); }
 /* 仅落在科目上下文中时覆盖 action 语义；设置、全局导航与告警继续取稳定语义 token。 */
 [data-color] { --action-accent: var(--sc-action); --action-press: var(--sc-action-press); --action-on: var(--sc-action-on); }
 
@@ -1008,10 +1008,17 @@ body:has(.app .clockface[data-away-level='3']) .dialog-content :is(.seg-item.act
 }
 .seg-hit:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .seg-fill {
-  position: absolute; top: 0; bottom: 0; border-radius: var(--radius-xs);
+  position: absolute; top: 0; bottom: 0; display: flex; align-items: center;
+  overflow: hidden; padding-inline: 3px; border-radius: var(--radius-xs);
   background: var(--sc);
+  container-type: inline-size;
   opacity: 0.92;
   pointer-events: none;
+}
+.seg-subject-icon { display: none; flex: 0 0 auto; color: var(--sc-on); opacity: 0.88; }
+/* 小于 34px 的片段只保留色彩，避免图标压缩成噪点；宽段从左侧补上身份图标。 */
+@container (min-width: 34px) {
+  .seg-fill .seg-subject-icon { display: block; }
 }
 .seg-hit:hover ~ .seg-fill { opacity: 1; box-shadow: 0 0 0 2px var(--sc-bg); }
 .seg.active .seg-fill { opacity: 1; box-shadow: 0 0 0 2px var(--sc-bg); }
