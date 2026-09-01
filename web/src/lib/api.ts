@@ -24,6 +24,7 @@ export interface SessionApi {
   window_active_seconds: number;
   status: 'running' | 'paused' | 'stopped' | 'voided';
   end_reason: 'manual' | 'subject_switch' | 'void' | null;
+  /** 兼容读取字段（end_note 优先，否则 intent_note）；前端编辑面必须显式使用 intent_note / end_note。 */
   note: string | null;
   intent_note: string | null;
   /** 仅结束备注（跨端判断「刚结束待补备注」用） */
@@ -228,6 +229,8 @@ function newIdempotencyKey(): string {
 interface RequestOptions {
   /** 会话写操作默认启用；读取、连接管理和海螺请求明确关闭。 */
   idempotency?: boolean;
+  /** 同一逻辑写入在响应丢失后重试时复用，不能由每次 fetch 重新生成。 */
+  idempotencyKey?: string;
   /** 仅海螺用于把 Safari 端请求与 Worker 安全日志关联。 */
   clientRequestId?: string;
 }
@@ -236,7 +239,7 @@ async function request(method: string, path: string, body?: unknown, options: Re
   const headers: Record<string, string> = {};
   if (body !== undefined) headers['content-type'] = 'application/json';
   const needsIdempotency = options.idempotency ?? (method !== 'GET' && method !== 'HEAD');
-  if (needsIdempotency) headers['idempotency-key'] = newIdempotencyKey();
+  if (needsIdempotency) headers['idempotency-key'] = options.idempotencyKey ?? newIdempotencyKey();
   if (options.clientRequestId) headers['x-client-request-id'] = options.clientRequestId;
   const res = await fetch(path, {
     method,
@@ -264,8 +267,8 @@ export async function apiPost<T>(path: string, body?: unknown, options?: Request
   return { ok: res.ok, status: res.status, data };
 }
 
-export async function apiPatch<T>(path: string, body: unknown): Promise<ApiResult<T>> {
-  const res = await request('PATCH', path, body);
+export async function apiPatch<T>(path: string, body: unknown, options?: RequestOptions): Promise<ApiResult<T>> {
+  const res = await request('PATCH', path, body, options);
   let data: T | null = null;
   try {
     data = (await res.json()) as T;

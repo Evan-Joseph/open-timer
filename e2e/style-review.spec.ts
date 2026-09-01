@@ -25,6 +25,8 @@ async function setup(page: any) {
     localStorage.setItem('clock-timeline-scale', 'default');
     localStorage.setItem('clock-timeline-mode', 'track');
     document.documentElement.setAttribute('data-theme', 'light');
+    // React 已挂载时，localStorage 自身不会向同页派发 storage；显式走应用偏好广播。
+    window.dispatchEvent(new CustomEvent('clock-prefs-applied'));
   });
   const stopBtn = page.getByRole('button', { name: '结束并保存' });
   if ((await stopBtn.count()) > 0) {

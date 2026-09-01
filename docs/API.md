@@ -194,7 +194,7 @@ GET /api/v1/sessions?from=YYYY-MM-DD&to=YYYY-MM-DD
       "end_reason": "manual",
       "intent_note": "高数第 1 讲",
       "end_note": "完成后回看错题",
-      "note": "高数第 1 讲",
+      "note": "完成后回看错题",
       "segments": [
         { "started_at": "2026-08-10T00:10:00.000Z", "ended_at": "2026-08-10T00:40:00.000Z" },
         { "started_at": "2026-08-10T00:45:00.000Z", "ended_at": "2026-08-10T01:10:00.000Z" }

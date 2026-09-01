@@ -15,6 +15,8 @@ export interface ClockStore {
   isOwner: boolean;
   subjects: SubjectApi[];
   state: StateApi | null;
+  /** 所有状态下都可用的服务端墙钟中点锚；空闲页也不得退回客户端 Date.now()。 */
+  serverNowAnchor: Pick<SyncAnchor, 'serverNowMs' | 'anchorPerfMs'> | null;
   anchor: SyncAnchor | null;
   /** 当前开放段（本轮连续专注）的单调锚点，用于节奏环 */
   segmentAnchor: SyncAnchor | null;
@@ -97,6 +99,12 @@ export function useClockStore(): ClockStore {
   const syncEpochRef = useRef(0);
   const refreshSeqRef = useRef(0);
   const appliedSessionsSeqRef = useRef(0);
+  /**
+   * 结束备注的网络响应若丢失，同一会话的同一未确认草稿必须复用幂等键。
+   * 每个会话只保留当前草稿：内容变更（包括改回旧文案）就是新的逻辑写入，
+   * 不能命中此前已落库但浏览器未收到响应的旧回放。
+   */
+  const pendingNoteIdempotencyRef = useRef<Map<string, { note: string; key: string }>>(new Map());
 
   const todayDate = state?.today_date ?? shanghaiTodayLocal();
 
@@ -552,10 +560,17 @@ export function useClockStore(): ClockStore {
 
   const setNote = useCallback(
     async (sessionId: string, note: string) => {
-      const res = await apiPatch(`/api/v1/sessions/${sessionId}/note`, { note }).catch(() => null);
+      const pending = pendingNoteIdempotencyRef.current.get(sessionId);
+      const idempotencyKey = pending?.note === note ? pending.key : createClientUuid();
+      pendingNoteIdempotencyRef.current.set(sessionId, { note, key: idempotencyKey });
+      const res = await apiPatch(`/api/v1/sessions/${sessionId}/note`, { note }, { idempotencyKey }).catch(() => null);
       if (!res?.ok) {
         flashError('备注保存失败，请重试');
         return false;
+      }
+      // 只清理仍属于本次写入的暂存项；迟到响应不得删掉后续草稿的键。
+      if (pendingNoteIdempotencyRef.current.get(sessionId)?.key === idempotencyKey) {
+        pendingNoteIdempotencyRef.current.delete(sessionId);
       }
       notifyPeers();
       // 已完成备注是海螺输入，等待 conch_revision 快照落地再返回。
@@ -610,6 +625,13 @@ export function useClockStore(): ClockStore {
     }
     anchorRef.current = next;
     return next;
+  }, [state]);
+
+  // 空闲态没有 active-session anchor，但页面时间、日期、静默窗口仍必须继续以服务端
+  // 中点时间为事实源。用 performance.now() 外推，避免 120s 空闲轮询让分钟显示停住。
+  const serverNowAnchor = useMemo<Pick<SyncAnchor, 'serverNowMs' | 'anchorPerfMs'> | null>(() => {
+    if (!state) return null;
+    return { serverNowMs: state.server_now_ms, anchorPerfMs: perfAtStateRef.current };
   }, [state]);
 
   // 当前开放段锚点：本段活跃秒数来自服务端（running 增长 / paused 冻结为末段净秒）
@@ -672,6 +694,7 @@ export function useClockStore(): ClockStore {
     isOwner: phase === 'ready',
     subjects,
     state,
+    serverNowAnchor,
     anchor,
     segmentAnchor,
     awayAnchor,

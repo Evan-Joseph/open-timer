@@ -80,6 +80,8 @@ async function doSetup(page: Page) {
     localStorage.setItem('clock-timeline-scale', 'default');
     localStorage.setItem('clock-timeline-mode', 'track');
     document.documentElement.setAttribute('data-theme', 'light');
+    // React 已挂载时，localStorage 自身不会向同页派发 storage；显式走应用偏好广播。
+    window.dispatchEvent(new CustomEvent('clock-prefs-applied'));
   });
   await expect(page.getByTestId('idle-clock')).toBeVisible();
 }
@@ -163,6 +165,84 @@ test.describe('核心流程', () => {
     await expect(page.getByText('备注保存失败，请重试')).toBeVisible();
     await page.unroute('**/api/v1/sessions/*/note');
     await page.getByRole('button', { name: '好，继续' }).click();
+  });
+
+  test('结束备注响应丢失后重试复用同一幂等键', async ({ page }) => {
+    await doSetup(page);
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1_100);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+
+    const keys: string[] = [];
+    let replayHeader: string | null = null;
+    await page.route('**/api/v1/sessions/*/note', async (route) => {
+      keys.push(route.request().headers()['idempotency-key'] ?? '');
+      const upstream = await route.fetch();
+      if (keys.length === 1) {
+        // 模拟「Worker 已成功写入，但浏览器没有收到真实响应」：不能让第二次提交产生新事件。
+        await route.fulfill({ status: 599, contentType: 'application/json', body: JSON.stringify({ error: 'RESPONSE_LOST' }) });
+        return;
+      }
+      replayHeader = upstream.headers()['idempotent-replay'] ?? null;
+      await route.fulfill({ response: upstream });
+    });
+
+    await page.getByLabel('结束备注').fill('响应丢失后仍应只记一次');
+    await page.getByLabel('结束备注').press('Enter');
+    await expect(page.getByTestId('finish-duration')).toBeVisible();
+    await expect(page.getByText('备注保存失败，请重试')).toBeVisible();
+
+    await page.getByLabel('结束备注').press('Enter');
+    await expect(page.getByTestId('idle-clock')).toBeVisible();
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBe(keys[0]);
+    expect(replayHeader).toBe('true');
+  });
+
+  test('结束备注改回旧草稿会生成新的幂等键', async ({ page }) => {
+    await doSetup(page);
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1_100);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+
+    const firstDraft = '先写入但故意丢失响应';
+    const replacement = '随后改成另一条结束备注';
+    const keys: string[] = [];
+    await page.route('**/api/v1/sessions/*/note', async (route) => {
+      keys.push(route.request().headers()['idempotency-key'] ?? '');
+      const upstream = await route.fetch();
+      if (keys.length === 1) {
+        // 服务端已收下 firstDraft，浏览器却没收到响应；这把键只属于这次未确认写入。
+        await route.fulfill({ status: 599, contentType: 'application/json', body: JSON.stringify({ error: 'RESPONSE_LOST' }) });
+        return;
+      }
+      await route.fulfill({ response: upstream });
+    });
+
+    await page.getByLabel('结束备注').fill(firstDraft);
+    await page.getByLabel('结束备注').press('Enter');
+    await expect(page.getByText('备注保存失败，请重试')).toBeVisible();
+
+    await page.getByLabel('结束备注').fill(replacement);
+    await page.getByRole('button', { name: '好，继续' }).click();
+    await expect(page.getByTestId('idle-clock')).toBeVisible();
+    await page.waitForTimeout(1_200);
+
+    // 改回 firstDraft 是新的用户意图，绝不能回放第一次请求导致服务端实际仍停留在 replacement。
+    await page.locator('.seg-hit').last().click();
+    await expect(page.getByTestId('popover-note-input')).toBeVisible();
+    await page.getByTestId('popover-note-input').fill(firstDraft);
+    await page.getByTestId('popover-note-input').press('Enter');
+
+    expect(keys).toHaveLength(3);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[2]).not.toBe(keys[0]);
+    await expect.poll(async () => {
+      const date = (await page.locator('.topbar-date').textContent())!.slice(0, 10);
+      const sessions = await (await page.request.get(`/api/v1/sessions?date=${date}`)).json();
+      return sessions.sessions.find((s: { end_note: string | null }) => s.end_note === firstDraft)?.end_note ?? null;
+    }).toBe(firstDraft);
   });
 
   test('时间轴片段悬停预览，点击后固定打开详情且热区足够大', async ({ page }) => {
@@ -952,7 +1032,9 @@ test.describe('多端偏好同步', () => {
 
   test('跨设备：一端结束会话未填备注，另一端结束卡可补填（5 分钟窗口）', async ({ page, browser }) => {
     await doSetup(page);
+    const plan = '先完成线性表错题订正';
     await page.getByRole('radio', { name: '数学二' }).click();
+    await page.getByLabel('本次目标（可选）').fill(plan);
     await page.getByTestId('start-btn').click();
     await page.waitForSelector('.control-btn.pause', { timeout: 10_000 });
     await page.waitForTimeout(1500);
@@ -964,6 +1046,8 @@ test.describe('多端偏好同步', () => {
     // 端 B（独立设备）：轮询到「刚结束且无结束备注」→ 呈现结束卡可补填
     const { ctxB, pageB } = await freshDevice(browser);
     await pageB.getByTestId('finish-duration').waitFor({ timeout: 30_000 });
+    await expect(pageB.getByLabel('结束备注')).toHaveValue('');
+    await expect(pageB.getByText(`开始时计划：${plan}`)).toBeVisible();
     await pageB.locator('.finish-note').fill('跨端补的备注');
     await pageB.getByRole('button', { name: '好，继续' }).click();
     await pageB.waitForTimeout(800);
@@ -978,6 +1062,34 @@ test.describe('多端偏好同步', () => {
     const body = await res.json();
     const noted = body.sessions.find((s: any) => s.end_note === '跨端补的备注');
     expect(noted).toBeTruthy();
+    await ctxB.close();
+  });
+
+  test('跨设备：清空结束备注仍视为已确认，不重复弹出结束卡', async ({ page, browser }) => {
+    await doSetup(page);
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1_100);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByLabel('结束备注').fill('临时记录，随后清空');
+    await page.getByRole('button', { name: '好，继续' }).click();
+    await page.waitForTimeout(1_200);
+
+    await page.locator('.seg-hit').last().click();
+    const note = page.getByTestId('popover-note-input');
+    await note.fill('');
+    await note.press('Enter');
+    await expect(page.getByTestId('seg-popover')).toHaveCount(0);
+
+    const date = (await page.locator('.topbar-date').textContent())!.slice(0, 10);
+    await expect.poll(async () => {
+      const sessions = await (await page.request.get(`/api/v1/sessions?date=${date}`)).json();
+      return sessions.sessions.some((s: { end_note: string | null }) => s.end_note === '');
+    }).toBe(true);
+
+    // 空字符串是用户已确认的清空结果；端 B 不应把它当作“还未填写”。
+    const { ctxB, pageB } = await freshDevice(browser);
+    await pageB.waitForTimeout(1_200);
+    await expect(pageB.getByTestId('finish-duration')).toHaveCount(0);
     await ctxB.close();
   });
 
@@ -1392,11 +1504,97 @@ test.describe('离开（暂停）时长显示', () => {
 });
 
 test.describe('时间轴 popover 编辑备注', () => {
-  test('点击已停止片段可编辑并保存备注', async ({ page }) => {
+  test('备注保存中禁用会话动作，避免失焦保存后重复执行', async ({ page }) => {
+    await doSetup(page);
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1_100);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+    await page.waitForTimeout(1_200);
+    await page.locator('.seg-hit').last().click();
+
+    let releaseResponse!: () => void;
+    const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    let requestStarted!: () => void;
+    const requestGate = new Promise<void>((resolve) => { requestStarted = resolve; });
+    await page.route('**/api/v1/sessions/*/note', async (route) => {
+      requestStarted();
+      await responseGate;
+      await route.continue();
+    });
+
+    const input = page.getByTestId('popover-note-input');
+    await input.fill('保存期间不得执行其他会话动作');
+    await input.blur();
+    await requestGate;
+
+    await expect(page.getByTestId('popover-save-start')).toBeDisabled();
+    await expect(page.getByTestId('popover-resume')).toBeDisabled();
+    await expect(page.getByTestId('withdraw-btn')).toBeDisabled();
+    await expect(page.getByTestId('seg-popover').getByRole('button', { name: '关闭' })).toBeDisabled();
+
+    releaseResponse();
+    await expect(page.getByTestId('popover-save-start')).toBeEnabled();
+    await expect(page.getByTestId('popover-resume')).toBeEnabled();
+    await expect(page.getByTestId('withdraw-btn')).toBeEnabled();
+    await expect(page.getByTestId('seg-popover').getByRole('button', { name: '关闭' })).toBeEnabled();
+    await page.unroute('**/api/v1/sessions/*/note');
+    await page.getByTestId('seg-popover').getByRole('button', { name: '关闭' }).click();
+    await expect(page.getByTestId('seg-popover')).toHaveCount(0);
+  });
+
+  test('失焦保存失败时按 Escape 仍保留详情与草稿', async ({ page }) => {
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数学二' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1_100);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+    await page.waitForTimeout(1_200);
+    await page.locator('.seg-hit').last().click();
+
+    let requestStarted!: () => void;
+    let releaseFailure!: () => void;
+    const noteRequestStarted = new Promise<void>((resolve) => { requestStarted = resolve; });
+    const releaseNoteFailure = new Promise<void>((resolve) => { releaseFailure = resolve; });
+    await page.route('**/api/v1/sessions/*/note', async (route) => {
+      requestStarted();
+      await releaseNoteFailure;
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'INTERNAL' }) });
+    });
+
+    const draft = '不能因关闭详情而丢失的草稿';
+    const input = page.getByTestId('popover-note-input');
+    await input.fill(draft);
+    await input.blur();
+    await noteRequestStarted;
+    // 在失焦请求仍飞行时关闭详情：修复前会立刻关掉，随后 500 让草稿无处可见。
+    await page.keyboard.press('Escape');
+    releaseFailure();
+
+    await expect(page.getByText('备注保存失败，请重试')).toBeVisible();
+    await expect(page.getByTestId('seg-popover')).toBeVisible();
+    await expect(input).toHaveValue(draft);
+    const state = await (await page.request.get('/api/v1/state')).json();
+    expect(state.active_session).toBeNull();
+
+    await page.unroute('**/api/v1/sessions/*/note');
+    await input.press('Enter');
+    await expect.poll(async () => {
+      const date = (await page.locator('.topbar-date').textContent())!.slice(0, 10);
+      const sessions = await (await page.request.get(`/api/v1/sessions?date=${date}`)).json();
+      return sessions.sessions.find((s: { end_note: string | null }) => s.end_note === draft)?.end_note ?? null;
+    }).toBe(draft);
+    await expect(page.getByTestId('seg-popover')).toHaveCount(0);
+  });
+
+  test('开始计划不填入结束备注；失焦自动保存实际记录', async ({ page }) => {
     await doSetup(page);
     const beforeSegs = await page.locator('.seg').count();
     // 产生一个已停止会话
+    const plan = '先精读英语二阅读真题';
     await page.getByRole('radio', { name: '英语二' }).click();
+    await page.getByLabel('本次目标（可选）').fill(plan);
     await page.getByTestId('start-btn').click();
     await page.waitForTimeout(1200);
     await page.getByRole('button', { name: '结束并保存' }).click();
@@ -1406,16 +1604,22 @@ test.describe('时间轴 popover 编辑备注', () => {
     // 再等 sessions 状态更新为 stopped（片段 stopped 标记依赖 sessions 数据）
     await page.waitForTimeout(1200);
 
-    // 打开 popover → 填备注 → Enter 自动保存（无 Save 按钮，参照 SP inline-markdown）
+    // 开始意图只作为上下文展示，绝不自动填到结束备注输入框。
     await page.locator('.seg-hit').last().click();
     await expect(page.getByTestId('seg-popover')).toBeVisible();
+    const startPlanContext = page.locator('.popover-note', { hasText: plan });
+    await expect(startPlanContext.getByText('开始时计划')).toBeVisible();
+    await expect(startPlanContext).toContainText(plan);
+    await expect(page.getByTestId('popover-note-input')).toHaveValue('');
     await page.getByTestId('popover-note-input').fill('精读真题 2010 年');
-    await page.getByTestId('popover-note-input').press('Enter');
+    await page.getByTestId('popover-note-input').blur();
 
-    // 保存后 popover 关闭，时间轴刷新后再次打开可见备注
-    await expect(page.getByTestId('seg-popover')).toHaveCount(0);
-    await page.waitForTimeout(800);
-    await page.locator('.seg-hit').last().click();
+    // 失焦保存保持详情打开；服务端只能得到结束事实，而不是开始意图。
+    await expect.poll(async () => {
+      const date = (await page.locator('.topbar-date').textContent())!.slice(0, 10);
+      const sessions = await (await page.request.get(`/api/v1/sessions?date=${date}`)).json();
+      return sessions.sessions.find((s: { intent_note: string | null }) => s.intent_note === plan)?.end_note ?? null;
+    }).toBe('精读真题 2010 年');
     await expect(page.getByTestId('popover-note-input')).toHaveValue('精读真题 2010 年');
     await page.keyboard.press('Escape');
   });

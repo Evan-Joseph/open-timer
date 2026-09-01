@@ -100,7 +100,7 @@ function isFinishDismissed(id: string, endedAtMs: number): boolean {
 }
 
 export default function ClockFace({ store }: { store: ClockStore }) {
-  const { state, subjects, anchor, busy } = store;
+  const { state, subjects, anchor, serverNowAnchor, busy } = store;
   const active = state?.active_session ?? null;
   const settings = useSettings();
   /** 只读监督态：所有计时操作封死，仅展示（写端点本就要求 owner，这里是 UI 对齐） */
@@ -109,11 +109,11 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const seconds = useMonotonicSeconds(anchor);
   // 本段活跃秒（running 增长 / paused 冻结）：与总累计用同一 tick 同源计算，杜绝抢秒抖动
   const { total: totalSecs, seg: segmentSecs, prev: prevSecs } = useDualMonotonic(anchor, store.segmentAnchor, 1000);
-  const beijing = useBeijingTime(anchor ? { serverNowMs: anchor.serverNowMs, anchorPerfMs: anchor.anchorPerfMs } : null);
+  const beijing = useBeijingTime(serverNowAnchor);
   const readServerNowMs = useCallback(() => {
-    if (anchor) return anchor.serverNowMs + Math.max(0, performance.now() - anchor.anchorPerfMs);
-    return state?.server_now_ms ?? Date.now();
-  }, [anchor, state?.server_now_ms]);
+    if (serverNowAnchor) return serverNowAnchor.serverNowMs + Math.max(0, performance.now() - serverNowAnchor.anchorPerfMs);
+    return Date.now();
+  }, [serverNowAnchor]);
 
   /* ---------- 结束反馈 state（需先于离开提醒定义，两者耦合） ---------- */
   const [lastStopped, setLastStopped] = useState<{
@@ -125,8 +125,8 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     focusEndedAtMs: number;
   } | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
-  /** 海螺开工时的计划只作结束页提示，绝不自动写成已完成备注。 */
-  const [conchStartPlan, setConchStartPlan] = useState<string | null>(null);
+  /** 会话开始时的计划只作结束页上下文，绝不自动写成已完成备注。 */
+  const [startPlan, setStartPlan] = useState<string | null>(null);
   const [finishSaving, setFinishSaving] = useState(false);
 
   // 最近一次结束会话是空闲页休息状态的可恢复来源，刷新或关闭结束卡后仍保留提示。
@@ -267,7 +267,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         (s) =>
           s.status === 'stopped' &&
           s.ended_at !== null &&
-          !s.end_note &&
+          s.end_note === null &&
           nowMs - Date.parse(s.ended_at) <= 5 * 60_000 &&
           !remoteStopSeenRef.current.has(s.session_id) &&
           !isFinishDismissed(s.session_id, Date.parse(s.ended_at)),
@@ -285,7 +285,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       focusSeconds: cand.last_continuous_seconds,
       focusEndedAtMs: endedMs,
     });
-    setConchStartPlan(null);
+    setStartPlan(cand.intent_note ?? null);
     setAwayAnchorOverride({
       confirmedSeconds: Math.max(0, (nowMs - endedMs) / 1000),
       running: true,
@@ -299,11 +299,11 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   useEffect(() => {
     if (!lastStopped) return;
     const latest = store.sessions.find((s) => s.session_id === lastStopped.sessionId);
-    if (!latest || (latest.status !== 'voided' && !latest.end_note)) return;
+    if (!latest || (latest.status !== 'voided' && latest.end_note === null)) return;
     remoteStopSeenRef.current.add(lastStopped.sessionId);
     setLastStopped(null);
     setNoteDraft('');
-    setConchStartPlan(null);
+    setStartPlan(null);
     setAwayAnchorOverride(null);
   }, [lastStopped, store.sessions]);
 
@@ -336,15 +336,24 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     setLastStopped(null);
     setAwayAnchorOverride(null);
     setNoteDraft('');
-    setConchStartPlan(null);
+    setStartPlan(null);
   };
 
   // 空闲态北京时间与"距上次专注"间隔（5s 步进，共用一个 interval）
   const [idleNowMs, setIdleNowMs] = useState(readServerNowMs);
   useEffect(() => {
-    setIdleNowMs(readServerNowMs());
-    const t = window.setInterval(() => setIdleNowMs(readServerNowMs()), 5000);
-    return () => window.clearInterval(t);
+    let timer: number | null = null;
+    const update = () => {
+      const nowMs = readServerNowMs();
+      setIdleNowMs(nowMs);
+      // 日期/HH:MM 只会在分钟边界变化；按服务端锚调度，不依赖本机墙钟。
+      const nextMinuteIn = 60_000 - (Math.floor(nowMs) % 60_000);
+      timer = window.setTimeout(update, Math.max(50, nextMinuteIn + 20));
+    };
+    update();
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+    };
   }, [readServerNowMs]);
   const idleTime = formatBeijingTime(idleNowMs);
 
@@ -406,9 +415,9 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     if (snapshot) {
       if (settings.finishSound) playFinishChime();
       setLastStopped(snapshot); // 立即呈现结束反馈（store.stop 内部乐观清空活动会话）
-      // 海螺推荐开工的会话：仅展示开始时计划，不预填/伪造结束后的事实备注。
+      // 推荐或手动填写的开始计划都只作上下文展示，不预填/伪造结束后的事实备注。
       const conchMark = consumeConchStartMark(snapshot.sessionId);
-      setConchStartPlan(conchMark?.intentNote ?? null);
+      setStartPlan(conchMark?.intentNote ?? active?.intent_note ?? null);
       setNoteDraft('');
       // 从运行态结束时休息从 0 开始；从暂停态结束时沿用已经发生的休息。
       // 锚点用服务端校准时钟（与暂停态口径一致），不用本机 Date.now()——
@@ -447,7 +456,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       if (dismiss) markFinishDismissed(lastStopped.sessionId, lastStopped.focusEndedAtMs);
       setLastStopped(null);
       setNoteDraft('');
-      setConchStartPlan(null);
+      setStartPlan(null);
       return true;
     } finally {
       setFinishSaving(false);
@@ -545,7 +554,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             aria-label="结束备注"
             disabled={finishSaving}
           />
-          {conchStartPlan && <p className="finish-context">开始时计划：{conchStartPlan}</p>}
+          {startPlan && <p className="finish-context">开始时计划：{startPlan}</p>}
           <div className="finish-actions action-row">
             <button
               className="ghost-btn"
@@ -710,7 +719,11 @@ export default function ClockFace({ store }: { store: ClockStore }) {
           {recentStopped && (
             <div className="readonly-line readonly-sub">
               最近：{subjectOf(recentStopped.subject_id)?.display_name ?? recentStopped.subject_id}
-              {recentStopped.note ? ` · 「${recentStopped.note}」` : ''}
+              {recentStopped.end_note
+                ? ` · 结束备注「${recentStopped.end_note}」`
+                : recentStopped.intent_note
+                  ? ` · 开始时计划「${recentStopped.intent_note}」`
+                  : ''}
             </div>
           )}
           <div className="readonly-hint">只读监督模式 · 点右上角锁图标解锁后可操作</div>

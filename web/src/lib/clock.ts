@@ -103,19 +103,30 @@ export function useDualMonotonic(
 export function useBeijingTime(anchor: { serverNowMs: number; anchorPerfMs: number } | null): string {
   const [text, setText] = useState('--:--');
   useEffect(() => {
-    const compute = () => {
+    let timer: number | null = null;
+    const update = () => {
       if (!anchor) return '--:--';
       const wall = anchor.serverNowMs + (performance.now() - anchor.anchorPerfMs);
-      return new Intl.DateTimeFormat('zh-CN', {
+      const next = new Intl.DateTimeFormat('zh-CN', {
         timeZone: 'Asia/Shanghai',
         hour: '2-digit',
         minute: '2-digit',
         hour12: false,
       }).format(new Date(wall));
+      setText(next);
+      // 分钟数字只在边界变化：以服务端墙钟计算下一次更新，避免最多 5s 的跨分钟滞后。
+      const nextMinuteIn = 60_000 - (Math.floor(wall) % 60_000);
+      timer = window.setTimeout(update, Math.max(50, nextMinuteIn + 20));
+      return next;
     };
-    setText(compute());
-    const t = window.setInterval(() => setText(compute()), 5000);
-    return () => window.clearInterval(t);
+    if (!anchor) {
+      setText('--:--');
+      return;
+    }
+    update();
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+    };
   }, [anchor]);
   return text;
 }

@@ -50,6 +50,8 @@ async function enterReadyState(page: Page) {
     localStorage.setItem('clock-timeline-scale', 'default');
     localStorage.setItem('clock-timeline-mode', 'track');
     document.documentElement.setAttribute('data-theme', 'light');
+    // React 已挂载时，localStorage 自身不会向同页派发 storage；显式走应用偏好广播。
+    window.dispatchEvent(new CustomEvent('clock-prefs-applied'));
   });
 
   await expect(page.getByTestId('idle-clock')).toBeVisible();
@@ -306,7 +308,7 @@ test('L3 逾期告警延续到设置、回顾与海螺浮层', async ({ page }) 
     });
   });
 
-  const surface = async (selector: string) => page.locator(selector).evaluate((element) => {
+  const surface = async (selector: string) => page.locator(selector).first().evaluate((element) => {
     const style = getComputedStyle(element);
     return { background: style.backgroundColor, border: style.borderColor };
   });
@@ -336,4 +338,92 @@ test('L3 逾期告警延续到设置、回顾与海螺浮层', async ({ page }) 
   expect(historyAlert).not.toEqual(historyBase);
   expect(settingsAlert).not.toEqual(settingsBase);
   expect(conchAlert).not.toEqual(conchBase);
+});
+
+// 这里只隔离 CSS 状态矩阵；真实休息策略进入 L3 的路径由 flow.spec.ts 的
+// 「按上一段专注时长…」和「结束后同样进入…」两条流程用例覆盖。
+test('L3 逾期状态覆盖嵌套卡片、流水账、Portal hover 与禁用控件', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await enterReadyState(page);
+  await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v5'));
+  await page.route('**/api/v1/conch/ask', async (route) => {
+    const state = await (await page.request.get('/api/v1/state')).json();
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        window: 'all', generated_at: new Date().toISOString(), cache_valid_until: new Date(Date.now() + 86_400_000).toISOString(),
+        revision: state.revision, conch_revision: state.conch_revision, model: 'e2e-stub', skipped: [],
+        subjects: [{
+          subject_id: 'math', display_name: '数学二', running_now: false, last_active_date: state.today_date,
+          action_kind: 'problems', next_action: '完成一组极限题', rationale: null, pattern: null,
+          alternatives: ['整理本节错题', '复盘例题推导'], confidence: 'high',
+        }],
+      }),
+    });
+  });
+
+  const surface = async (selector: string) => page.locator(selector).first().evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { background: style.backgroundColor, border: style.borderColor, color: style.color };
+  });
+
+  await recordRecentSession(page, '数学二', 1_050);
+  await page.getByTestId('timeline-mode-btn').click();
+  await expect(page.locator('.timeline-list-row').first()).toBeVisible();
+  const listBase = await surface('.timeline-list-row');
+
+  await page.getByRole('button', { name: '设置' }).click();
+  const fullscreenBase = await surface('[data-testid="settings-fullscreen-btn"]');
+  await page.keyboard.press('Escape');
+
+  await page.getByTestId('conch-toggle').click();
+  await expect(page.locator('.conch-card')).toBeVisible();
+  const conchCardBase = await surface('.conch-card');
+  await page.keyboard.press('Escape');
+
+  await page.locator('.clockface').evaluate((element) => element.setAttribute('data-away-level', '3'));
+  const listAlert = await surface('.timeline-list-row');
+  await page.locator('.timeline-list-row').first().hover();
+  const listHover = await surface('.timeline-list-row');
+  expect(listAlert).not.toEqual(listBase);
+  expect(listHover).not.toEqual(listAlert);
+
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+  const darkListAlert = await surface('.timeline-list-row');
+  expect(darkListAlert.background).not.toBe(listAlert.background);
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+
+  await page.getByRole('button', { name: '设置' }).click();
+  const fullscreenAlert = await surface('[data-testid="settings-fullscreen-btn"]');
+  await page.getByTestId('settings-fullscreen-btn').hover();
+  const fullscreenHover = await surface('[data-testid="settings-fullscreen-btn"]');
+  expect(fullscreenAlert).not.toEqual(fullscreenBase);
+  expect(fullscreenHover).not.toEqual(fullscreenAlert);
+
+  const animationItem = page.locator('[aria-label="动画"] .seg-item').first();
+  const beforeDisabled = await animationItem.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { background: style.backgroundColor, border: style.borderColor, color: style.color };
+  });
+  const afterDisabled = await animationItem.evaluate((element) => {
+    (element as HTMLButtonElement).disabled = true;
+    const style = getComputedStyle(element);
+    return { background: style.backgroundColor, border: style.borderColor, color: style.color };
+  });
+  expect(afterDisabled).not.toEqual(beforeDisabled);
+  await page.keyboard.press('Escape');
+
+  await page.getByTestId('conch-toggle').click();
+  await expect(page.locator('.conch-card')).toBeVisible();
+  const conchCardAlert = await surface('.conch-card');
+  const swapStyle = await surface('[data-testid="conch-alt-shuffle-math"]');
+  const textButtonStyle = await surface('[data-testid="scroll-now-btn"]');
+  expect(conchCardAlert).not.toEqual(conchCardBase);
+  expect(swapStyle.border).toBe(textButtonStyle.border);
+  expect(await page.getByTestId('conch-alt-shuffle-math').evaluate((element) => getComputedStyle(element).borderRadius)).toBe(
+    await page.getByTestId('scroll-now-btn').evaluate((element) => getComputedStyle(element).borderRadius),
+  );
+  expect(await page.getByTestId('conch-alt-shuffle-math').evaluate((element) => getComputedStyle(element).height)).toBe(
+    await page.getByTestId('scroll-now-btn').evaluate((element) => getComputedStyle(element).height),
+  );
 });

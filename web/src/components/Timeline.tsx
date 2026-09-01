@@ -42,7 +42,6 @@ interface RenderSeg {
   running: boolean;
   /** 已停止（可撤回） */
   stopped: boolean;
-  note: string | null;
 }
 
 /** 会话级行（弹窗/流水账共用）：一个 session 的所有段合并为一行 */
@@ -61,7 +60,10 @@ interface SessionRow {
   /** 会话仍进行中（今日含未结束段） */
   running: boolean;
   stopped: boolean;
-  note: string | null;
+  /** 开始前的计划，只作上下文，永不作为结束事实写回。 */
+  intentNote: string | null;
+  /** 已结束后用户填写的事实备注，唯一可编辑字段。 */
+  endNote: string | null;
 }
 
 function shiftDate(date: string, delta: number): string {
@@ -100,6 +102,11 @@ export default function Timeline({ store }: { store: ClockStore }) {
   const [noteSaving, setNoteSaving] = useState(false);
   const [startDraft, setStartDraft] = useState('');
   const [startSaving, setStartSaving] = useState(false);
+  /** 同一详情中的失焦、Enter、关闭和低频动作共用一次在途保存，避免并发写或丢草稿。 */
+  const noteSaveRef = useRef<{ sessionId: string; draft: string; promise: Promise<boolean> } | null>(null);
+  /** 低频会话动作必须串行：等待备注后只允许一次起点更新、继续或撤回。 */
+  const sessionActionRef = useRef(false);
+  const [sessionActionBusy, setSessionActionBusy] = useState(false);
   /** 查看历史日时按日期拉取的会话数据 */
   const [historySessions, setHistorySessions] = useState<SessionApi[]>([]);
   /** 单日历史数据加载中：避免数据未到时闪现上一天片段或误报「这一天还没有记录」 */
@@ -365,7 +372,6 @@ export default function Timeline({ store }: { store: ClockStore }) {
           seconds: Math.floor((ce - cs) / 1000),
           running: seg.ended_at === null && isToday,
           stopped: s.status === 'stopped',
-          note: s.note,
         });
       }
     }
@@ -424,7 +430,8 @@ export default function Timeline({ store }: { store: ClockStore }) {
         segCount: parts.length,
         running,
         stopped: s.status === 'stopped',
-        note: s.note,
+        intentNote: s.intent_note,
+        endNote: s.end_note,
       });
     }
     return out.sort((a, b) => a.startLabel.localeCompare(b.startLabel));
@@ -481,11 +488,12 @@ export default function Timeline({ store }: { store: ClockStore }) {
 
   /** 点击固定会话详情；编辑与撤回只存在于固定态。 */
   const openPopover = useCallback((seg: RenderSeg) => {
+    if (noteSaveRef.current || sessionActionRef.current) return;
     const row = sessionRowsRef.current.find((r) => r.sessionId === seg.sessionId);
     if (!row) return;
     if (hoverPreviewTimerRef.current !== null) window.clearTimeout(hoverPreviewTimerRef.current);
     setHoverPreview(null);
-    setNoteDraft(seg.note ?? '');
+    setNoteDraft(row.endNote ?? '');
     setStartDraft(row.startLabel);
     setNoteSaving(false);
     setPopover({ row, containerX: previewPositionForSeg(seg) });
@@ -512,7 +520,8 @@ export default function Timeline({ store }: { store: ClockStore }) {
 
   /** 流水账整行点击：以行元素在 .timeline 容器中的水平中心定位弹窗。 */
   const openRowPopover = useCallback((row: SessionRow, anchor: HTMLElement) => {
-    setNoteDraft(row.note ?? '');
+    if (noteSaveRef.current || sessionActionRef.current) return;
+    setNoteDraft(row.endNote ?? '');
     setStartDraft(row.startLabel);
     setNoteSaving(false);
     const container = anchor.closest('.timeline') as HTMLElement | null;
@@ -524,24 +533,6 @@ export default function Timeline({ store }: { store: ClockStore }) {
     const ar = anchor.getBoundingClientRect();
     setPopover({ row, containerX: ar.left - cr.left + ar.width / 2 });
   }, []);
-
-  // Esc / 点击外部关闭 popover
-  useEffect(() => {
-    if (!popover) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPopover(null);
-    };
-    const onClick = (e: MouseEvent) => {
-      const el = e.target as HTMLElement;
-      if (!el.closest('.seg-popover') && !el.closest('.seg-hit')) setPopover(null);
-    };
-    window.addEventListener('keydown', onKey);
-    window.addEventListener('mousedown', onClick);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('mousedown', onClick);
-    };
-  }, [popover]);
 
   /** 关闭 7 天面板的统一出口：Esc / 遮罩 / 右上角 X 都走这里。开合态为设备本地（不同步）。 */
   const closeHistory = useCallback(() => {
@@ -578,51 +569,133 @@ export default function Timeline({ store }: { store: ClockStore }) {
     return () => window.removeEventListener(PREFS_APPLIED_EVT, reload);
   }, []);
 
-  // 撤回
-  const handleWithdraw = useCallback(async () => {
-    if (!popover) return;
-    const ok = await store.withdraw(popover.row.sessionId, '误记');
-    if (ok) {
-      setPopover(null);
-      // 历史日缓存同步失效
-      historyCacheRef.current.delete(viewDateRef.current);
+  /**
+   * 保存当前结束备注。失焦、Enter、关闭和低频动作都走这里：
+   * 如果失焦请求已在飞行，则等待它，而不重复 PATCH 或让后续 resume/void 抢跑。
+   */
+  const persistNoteDraft = useCallback(async (): Promise<boolean> => {
+    if (!popover) return true;
+    const sessionId = popover.row.sessionId;
+    const draft = noteDraft.trim();
+    if (draft === (popover.row.endNote ?? '')) return true;
+
+    const existing = noteSaveRef.current;
+    if (existing) {
+      return existing.sessionId === sessionId && existing.draft === draft ? existing.promise : false;
     }
-  }, [popover, store]);
+
+    setNoteSaving(true);
+    let promise: Promise<boolean>;
+    promise = store.setNote(sessionId, draft)
+      .then((saved) => {
+        if (!saved) return false;
+        historyCacheRef.current.delete(viewDateRef.current);
+        // 失焦保存后详情仍停留在原处，立刻更新局部快照，避免再次失焦重复写同一备注。
+        setPopover((current) => current?.row.sessionId === sessionId
+          ? { ...current, row: { ...current.row, endNote: draft } }
+          : current);
+        return true;
+      })
+      .finally(() => {
+        if (noteSaveRef.current?.promise === promise) {
+          noteSaveRef.current = null;
+          setNoteSaving(false);
+        }
+      });
+    noteSaveRef.current = { sessionId, draft, promise };
+    return promise;
+  }, [noteDraft, popover, store]);
+
+  const closePopoverAfterPersistingNote = useCallback(async () => {
+    const sessionId = popover?.row.sessionId;
+    if (!sessionId || sessionActionRef.current || !(await persistNoteDraft())) return;
+    setPopover((current) => current?.row.sessionId === sessionId ? null : current);
+  }, [popover, persistNoteDraft]);
+
+  // 保存备注（自动保存模式，参照 Super Productivity inline-markdown：无 Save 按钮，
+  // Enter/失焦即存）。失焦保持详情，Enter 成功后关闭。
+  const handleSaveNote = useCallback(async (closeOnSuccess = false) => {
+    const sessionId = popover?.row.sessionId;
+    if (!sessionId || !(await persistNoteDraft()) || !closeOnSuccess) return;
+    setPopover((current) => current?.row.sessionId === sessionId ? null : current);
+  }, [popover, persistNoteDraft]);
+
+  // 撤回与继续必须等未确认的结束备注完成；失败时保留详情与草稿，不能先改变会话状态。
+  const handleWithdraw = useCallback(async () => {
+    const sessionId = popover?.row.sessionId;
+    if (!sessionId || sessionActionRef.current) return;
+    sessionActionRef.current = true;
+    setSessionActionBusy(true);
+    try {
+      if (!(await persistNoteDraft())) return;
+      const ok = await store.withdraw(sessionId, '误记');
+      if (ok) {
+        setPopover((current) => current?.row.sessionId === sessionId ? null : current);
+        historyCacheRef.current.delete(viewDateRef.current);
+      }
+    } finally {
+      sessionActionRef.current = false;
+      setSessionActionBusy(false);
+    }
+  }, [popover, persistNoteDraft, store]);
 
   // 误触继续：重开已停止会话（覆盖「结束后才意识到点错」的场景）
   const handleResume = useCallback(async () => {
-    if (!popover) return;
-    const ok = await store.resumeSession(popover.row.sessionId);
-    if (ok) {
-      setPopover(null);
-      historyCacheRef.current.delete(viewDateRef.current);
+    const sessionId = popover?.row.sessionId;
+    if (!sessionId || sessionActionRef.current) return;
+    sessionActionRef.current = true;
+    setSessionActionBusy(true);
+    try {
+      if (!(await persistNoteDraft())) return;
+      const ok = await store.resumeSession(sessionId);
+      if (ok) {
+        setPopover((current) => current?.row.sessionId === sessionId ? null : current);
+        historyCacheRef.current.delete(viewDateRef.current);
+      }
+    } finally {
+      sessionActionRef.current = false;
+      setSessionActionBusy(false);
     }
-  }, [popover, store]);
-
-  // 保存备注（自动保存模式，参照 Super Productivity inline-markdown：无 Save 按钮，
-  // Enter/失焦即存）。keepOpen=true 用于失焦保存——不关弹窗，避免抢占其他按钮的点击。
-  const handleSaveNote = useCallback(async (keepOpen = false) => {
-    if (!popover || noteSaving) return;
-    const draft = noteDraft.trim();
-    if (draft === (popover.row.note ?? '')) return; // 无变化不写
-    setNoteSaving(true);
-    const saved = await store.setNote(popover.row.sessionId, draft);
-    setNoteSaving(false);
-    if (!saved) return;
-    historyCacheRef.current.delete(viewDateRef.current);
-    if (!keepOpen) setPopover(null);
-  }, [popover, noteSaving, noteDraft, store]);
+  }, [popover, persistNoteDraft, store]);
 
   const handleSaveStart = useCallback(async () => {
-    if (!popover || startSaving || !/^\d{2}:\d{2}$/.test(startDraft)) return;
-    setStartSaving(true);
-    const ok = await store.adjustStart(popover.row.sessionId, `${viewDateRef.current}T${startDraft}:00+08:00`);
-    setStartSaving(false);
-    if (ok) {
-      setPopover(null);
-      historyCacheRef.current.delete(viewDateRef.current);
+    const sessionId = popover?.row.sessionId;
+    if (!sessionId || startSaving || sessionActionRef.current || !/^\d{2}:\d{2}$/.test(startDraft)) return;
+    sessionActionRef.current = true;
+    setSessionActionBusy(true);
+    try {
+      if (!(await persistNoteDraft())) return;
+      setStartSaving(true);
+      const ok = await store.adjustStart(sessionId, `${viewDateRef.current}T${startDraft}:00+08:00`);
+      setStartSaving(false);
+      if (ok) {
+        setPopover((current) => current?.row.sessionId === sessionId ? null : current);
+        historyCacheRef.current.delete(viewDateRef.current);
+      }
+    } finally {
+      setStartSaving(false);
+      sessionActionRef.current = false;
+      setSessionActionBusy(false);
     }
-  }, [popover, startDraft, startSaving, store]);
+  }, [popover, persistNoteDraft, startDraft, startSaving, store]);
+
+  // Esc / 点击外部关闭也要等待自动保存，不能让网络失败把用户刚写的备注直接吞掉。
+  useEffect(() => {
+    if (!popover) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') void closePopoverAfterPersistingNote();
+    };
+    const onClick = (e: MouseEvent) => {
+      const el = e.target as HTMLElement;
+      if (!el.closest('.seg-popover') && !el.closest('.seg-hit')) void closePopoverAfterPersistingNote();
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('mousedown', onClick);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('mousedown', onClick);
+    };
+  }, [popover, closePopoverAfterPersistingNote]);
 
   // 当日（viewDate）各科小计：跟随所看日期
   const overview = useMemo(() => {
@@ -984,7 +1057,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
             <span className="popover-subject" data-color={popover.row.colorId}>
               <SubjectIcon subjectId={popover.row.subjectId} size={15} /> {popover.row.displayName}
             </span>
-            <button className="icon-btn" aria-label="关闭" onClick={() => setPopover(null)}>
+            <button className="icon-btn" aria-label="关闭" disabled={noteSaving || sessionActionBusy} onClick={() => void closePopoverAfterPersistingNote()}>
               <X size={16} />
             </button>
           </div>
@@ -1014,31 +1087,43 @@ export default function Timeline({ store }: { store: ClockStore }) {
                   onChange={(event) => setStartDraft(event.target.value)}
                   aria-label="编辑开始时间"
                   data-testid="popover-start-input"
+                  disabled={startSaving || sessionActionBusy}
                 />
               </label>
               <label className="popover-field">
-                <span>备注</span>
+                <span>结束备注</span>
                 <input
                   className="popover-note-input"
-                  placeholder="这次想记下什么？（可选，Enter 或失焦自动保存）"
+                  placeholder="本段实际做了什么？（可选，Enter 或失焦自动保存）"
                   value={noteDraft}
                   maxLength={200}
                   onChange={(e) => setNoteDraft(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      void handleSaveNote();
+                      void handleSaveNote(true);
                     }
                   }}
-                  onBlur={() => void handleSaveNote(true)}
+                  onBlur={() => void handleSaveNote()}
                   aria-label="编辑备注"
                   data-testid="popover-note-input"
+                  disabled={noteSaving || sessionActionBusy}
                 />
               </label>
             </div>
           )}
-          {!popover.row.stopped && popover.row.note && <div className="popover-note">「{popover.row.note}」</div>}
-          {popover.row.stopped && readOnly && popover.row.note && <div className="popover-note">「{popover.row.note}」</div>}
+          {popover.row.intentNote && (
+            <div className="popover-note">
+              <span className="popover-note-label">开始时计划</span>
+              <span>「{popover.row.intentNote}」</span>
+            </div>
+          )}
+          {popover.row.stopped && readOnly && popover.row.endNote && (
+            <div className="popover-note">
+              <span className="popover-note-label">结束备注</span>
+              <span>「{popover.row.endNote}」</span>
+            </div>
+          )}
           {popover.row.stopped && !readOnly && (
             <div className="popover-actions action-row">
               {/* 备注已改自动保存（Enter/失焦）：弹窗动作只剩三个低频编辑，统一 ghost 权重。
@@ -1046,15 +1131,15 @@ export default function Timeline({ store }: { store: ClockStore }) {
               <button
                 className="ghost-btn"
                 onClick={() => void handleSaveStart()}
-                disabled={startSaving}
+                disabled={startSaving || noteSaving || sessionActionBusy}
                 data-testid="popover-save-start"
               >
                 {startSaving ? '更新中…' : '更新起点'}
               </button>
-              <button className="ghost-btn contextual-action" onClick={() => void handleResume()} data-testid="popover-resume">
+              <button className="ghost-btn contextual-action" onClick={() => void handleResume()} disabled={noteSaving || sessionActionBusy} data-testid="popover-resume">
                 <Play size={14} aria-hidden /> 继续这段
               </button>
-              <button className="ghost-btn danger-btn" onClick={() => void handleWithdraw()} data-testid="withdraw-btn">
+              <button className="ghost-btn danger-btn" onClick={() => void handleWithdraw()} disabled={noteSaving || sessionActionBusy} data-testid="withdraw-btn">
                 <Undo2 size={14} aria-hidden /> 撤回
               </button>
             </div>
