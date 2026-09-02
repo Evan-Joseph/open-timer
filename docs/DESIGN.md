@@ -28,7 +28,7 @@ docs/     API、设计、审计、交接
 | 圆角 | `--radius-xs`3（微图形：时间轴片段/信标旗） `--radius-sm`6 `--radius`10 `--radius-lg`12 `--radius-xl`14；胶囊 999px | 控件 ≤ 卡片 ≤ 浮层 |
 | 间距 | `--space-1..7` = 4/8/12/16/24/32/48 | 4pt 底、8pt 节奏；gap/padding/margin 一律取此组（分段控件内 2px 微间距除外） |
 | 字级 | `--fs-xs..3xl` = 11/12/13/14/15/17/22/28；`--fs-mini`10 | 大数字不用此表，用 dvh clamp；10px 是注记字号下限，禁止更小 |
-| 动效 | `--ease-standard`(0.2,0,0,1) `--ease-expo`(0.16,1,0.3,1)；`--dur-press`0.1 `--dur-hover`0.15 `--dur-enter`0.25 `--dur-state`0.28 `--dur-shake`0.4 `--dur-wash`0.5 `--dur-glide`0.9(linear) `--dur-pulse`1.2 `--dur-breathe`2.4 `--dur-breathe-slow`2.8 `--dur-breathe-pill`3.2 | 全部过渡取此组；振荡呼吸动画用 ease-in-out（频率下限 2.4s，WCAG 2.3.1）；`--dur-wash`+`--ease-expo` 专属全视口洗色；`--dur-glide` 专属信标匀速漂移 |
+| 动效 | `--ease-standard`(0.2,0,0,1) `--ease-expo`(0.16,1,0.3,1)；`--dur-press`0.1 `--dur-hover`0.15 `--dur-enter`0.25 `--dur-state`0.28 `--dur-shake`0.4 `--dur-wash`0.5 `--dur-glide`0.9(linear) `--dur-pulse`1.2 `--dur-breathe`2.4 `--dur-breathe-slow`2.8 `--dur-breathe-pill`3.2 | 全部过渡取此组；振荡动画用 ease-in-out（频率下限 2.4s，WCAG 2.3.1）；`--dur-wash`+`--ease-expo`供局部状态转换；`--dur-glide`专属信标匀速漂移 |
 
 科目色：公开 `color_id` 保持 `copper|teal|blue|indigo|violet|cyan|coral`，CSS 映射为数学二铜/英语二青绿/数据结构钴蓝/计算机组成原理紫罗兰/操作系统橄榄/计算机网络橙/思想政治理论玫瑰，即 `[data-color]` → `--sc`/`--sc-bg`/`--sc-on` 的浅/深两套视觉 token。视觉色沿色环拉开，保留琥珀给休息提醒；身份一律由“Lucide 图标 + 中文名称 + 颜色”冗余编码。当天时间轴宽段从左侧显示图标，窄段与 7 天泳道保持纯色块，并由相邻图例提供图标与名称。
 
@@ -67,26 +67,23 @@ docs/     API、设计、审计、交接
 
 ## 5. 三态主题：专注 / 休息 / 逾期
 
-参考 Super Productivity focus-mode、Pomotroid 阶段切换、FocusTide 全视口状态层，与游戏 feel 的「氛围反馈 + 状态过渡」理论。实现集中在 `.clockface[data-away-level]` → `.app` 的 `--alert-wash` 机制：
+参考 Pomotroid 的阶段环、Super Productivity 的固定休息骨架和游戏 HUD 的固定提示位。提醒只由 `.away-slot > .away-line` 承担；顶栏、页面背景、时间轴、设置、回顾、详情与海螺表面不随休息等级改色：
 
 | 状态 | 触发 | 视觉 |
 |---|---|---|
 | 专注（running） | 运行中 | 中性底色 + `--success` 呼吸状态点；`data-away-level='0'`，不触发任何告警 |
-| 休息 L1（due-soon） | 暂停/结束后，休息达建议时长的 75% | 仅局部：`.away-line` 琥珀描边 + 胶囊轻呼吸 |
-| 休息 L2（due） | 达建议休息时长 100% | 温和琥珀洗色扩展到主区+时间轴+顶栏 |
-| 逾期 L3（overdue） | 达 150% 或 +2min 宽限 | 红色洗色覆盖全 app（统一氛围表达，无阻断弹窗） |
+| 休息 L1（due-soon） | 暂停/结束后，休息达建议时长的 75% | 固定休息状态条为琥珀描边与轻呼吸；无声音 |
+| 休息 L2（due） | 达建议休息时长 100% | 同一状态条升级为琥珀卡片、一次轻提示音与一次局部抬升 |
+| 逾期 L3（overdue） | 达 150% 或 +2min 宽限 | 同一状态条转红、一次 0.9s 内缘闪光与一次升级音；无全局染色或闪屏 |
 | 静默（quiet） | 午饭/午睡/晚饭/夜间窗口 | 继续计时但 `reminderLevel` 归 0，不升级提醒 |
 
-三态参数（2026-08-20 调研校准，来源见交接手册参考资料）：
-- 洗色过渡：全视口色彩变化用 `--dur-wash` 0.5s + `--ease-expo`（FocusTide 背景层参数），比组件级过渡慢，避免闪变。
-- L2 呼吸 3.2s / L3 呼吸 2.6s，opacity 0.75↔1（原 1.8s / 0.58↔1 过快过深，是焦虑感主源；WCAG 2.3.1 闪烁约束 + Super Productivity 呼吸基准）。
-- 深色主题 L3 洗色 mix 比例 12%（浅 15%）：深色下红感知更刺眼（FocusTide dark 降饱和思路）。
-- 逾期不使用阻断式全屏召回弹窗（2026-08-21 移除）：红色洗色 + away-line 文案已足够表达，恢复/开始下一段入口在常规控件（继续计时 / 空闲页开始）。避免打断式弹窗干扰沉浸。
-- 洗色只做 opacity 呼吸，不做 transform scale（大面缩放 = 整屏重绘 + 晃屏）。
+三态参数（2026-09-02，调研 Pomotroid / Super Productivity / Phaser Rex HUD 后收敛）：
+- L1 只允许 3.2s 局部呼吸；L2/L3 没有循环闪烁。等级上升只对状态条触发一次性 0.4s 抬升，L3 可追加 0.9s 内缘闪光。
+- L2 维持琥珀语义；红色只表示 L3 逾期，避免把“建议开始下一段”和危险状态混为一谈。
+- 逾期不使用阻断弹窗、全屏闪光或页面洗色。恢复/开始下一段入口仍是常规控件，提示不改变它们的语义色。
+- `prefers-reduced-motion` 或应用内关闭动画时，保留状态条的文字、图标与最终颜色，停止呼吸、抬升和闪光；声音独立遵守静默时段。
 
-约束：告警只作为背景氛围与边界强调，文字/科目色/片段色/时间 Flag 保持可读；呼吸动画只挂在一个全视口层，避免频率相位分裂；`prefers-reduced-motion` 或应用内关动画时保留静态告警色（wash 层 `animation: none`，全量终态）、停止呼吸。
-
-**动效与交互升级（2026-08-24，2026-08-25 收敛）**：在"不阻断"前提下补事件感——① 提醒级别**上升瞬间**一次性触发 away-line 敲击（0.4s）+ 全视口内缘闪光（L2 琥珀 / L3 红，0.9s）；② 召回仍只由洗色、敲击、升级音和既有开始/继续入口承担（重复的「回到专注」绿色按钮已移除）；③ 状态转换一次性 fx：开始点火（内缘光环 0.5s）/ 暂停帷幕（0.5s）/ 继续回升（0.5s）/ 结束卡标准 expo 入场 + 光晕绽放；④ 微交互：选科弹跳、海螺 hover 轻摆。所有循环 ≥2.4s、一次性 ≤0.9s，reduced-motion/关动画全量降级。详见 `docs/动效与交互升级-设计-2026-08-24.md`。
+**动效与交互升级**：开始、暂停、继续和结束反馈保留局部一次性反馈；提醒升级只在固定状态条发生。所有循环 ≥2.4s、一次性 ≤0.9s，动效可中断，不使用 `transition: all` 或大面积重绘。
 
 ## 6. 布局骨架与响应式
 
@@ -140,7 +137,7 @@ docs/     API、设计、审计、交接
 |---|---|---|
 | Super Productivity（21k★ MIT） | 专注模式固定骨架、状态切换不位移 | 任务系统、Electron 栈 |
 | Pomotroid | 页面禁滚动、时钟/标签/控件统一尺度 | 番茄节奏强制 |
-| FocusTide | 状态视觉作为全视口独立层 | 任务/设置层耦合 |
+| FocusTide | 状态/主题 token 分层 | 全视口状态层与任务/设置层耦合 |
 | Tomato | 窗口尺寸类别切换布局形态 | Android Compose 栈 |
 | Apple HIG / M3 / Refactoring UI | 语义色、圆角档位、8pt 节奏、类型层级 | 直接照搬平台视觉 |
 

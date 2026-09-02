@@ -5,7 +5,7 @@ import { motion, useMotionValue, useSpring, useReducedMotion } from 'motion/reac
 import { Pause, Play, Square, Undo2 } from 'lucide-react';
 import type { ClockStore } from '../lib/store.js';
 import type { SyncAnchor } from '../lib/clock.js';
-import { useMonotonicSeconds, useDualMonotonic, useWallSeconds, useBeijingTime, formatHms, formatHmsShort, formatDurationZh, formatBeijingTime, restPlanForFocus, restStageOf, restStageLabel } from '../lib/clock.js';
+import { useDualMonotonic, useWallSeconds, useBeijingTime, formatHms, formatHmsShort, formatDurationZh, formatBeijingTime, restPlanForFocus, restStageOf, restStageLabel } from '../lib/clock.js';
 import { useAnimationsEnabled, useSettings } from '../lib/settings.js';
 import { PREFS_APPLIED_EVT, schedulePrefsPush } from '../lib/prefs.js';
 import { consumeConchStartMark } from '../lib/conch-mark.js';
@@ -14,8 +14,8 @@ import { playFinishChime, playAwayReminder } from '../lib/sound.js';
 import { isQuietMinute } from '@clock/shared';
 import SubjectIcon from './SubjectIcon.js';
 
-/* 逾期（L3）不再使用阻断式全屏召回弹窗：统一由红色洗色氛围 + away-line 文案表达。
-   恢复/开始下一段的入口在常规控件里（继续计时 / 空闲页开始），无需独占弹窗。 */
+/* 逾期（L3）不使用阻断式召回或全局染色：固定的休息状态条承担提示，
+   恢复/开始下一段仍在常规控件里完成。 */
 
 function M({ children, ...props }: any) {
   const animationsEnabled = useAnimationsEnabled();
@@ -74,6 +74,17 @@ function DurationTicker({ seconds }: { seconds: number }) {
   return <>{formatDurationZh(display)}</>;
 }
 
+function restAnchorFrom(focusEndedAtMs: number, confirmedAtMs: number): SyncAnchor | null {
+  if (!Number.isFinite(focusEndedAtMs) || !Number.isFinite(confirmedAtMs)) return null;
+  const serverNowMs = Math.max(focusEndedAtMs, confirmedAtMs);
+  return {
+    confirmedSeconds: Math.max(0, Math.floor((serverNowMs - focusEndedAtMs) / 1000)),
+    running: true,
+    anchorPerfMs: performance.now(),
+    serverNowMs,
+  };
+}
+
 /** 结束卡「本端已关闭不再提示」标记：`[sessionId, 本端stop时刻]`。
  *  本端 stop 时刻与服务端 ended_at 有 RTT 级偏差，水合匹配用 ±10s 容差。 */
 const FINISH_DISMISS_KEY = 'clock-finish-dismissed';
@@ -106,7 +117,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   /** 只读监督态：所有计时操作封死，仅展示（写端点本就要求 owner，这里是 UI 对齐） */
   const readOnly = store.phase === 'readonly';
 
-  const seconds = useMonotonicSeconds(anchor);
   // 本段活跃秒（running 增长 / paused 冻结）：与总累计用同一 tick 同源计算，杜绝抢秒抖动
   const { total: totalSecs, seg: segmentSecs, prev: prevSecs } = useDualMonotonic(anchor, store.segmentAnchor, 1000);
   const beijing = useBeijingTime(serverNowAnchor);
@@ -123,7 +133,10 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     longestContinuousSeconds: number;
     focusSeconds: number;
     focusEndedAtMs: number;
+    restAnchor: SyncAnchor;
   } | null>(null);
+  /** stop 请求在途时只呈现「记录中」，避免把本地 tick 猜测展示成最终指标。 */
+  const [stoppingSession, setStoppingSession] = useState<{ sessionId: string; subjectId: string } | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
   /** 会话开始时的计划只作结束页上下文，绝不自动写成已完成备注。 */
   const [startPlan, setStartPlan] = useState<string | null>(null);
@@ -164,12 +177,13 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   /* ---------- 离开（暂停 / 科目结束后）渐进提醒 ---------- */
   const awayChimePlayedRef = useRef(false);                   // L2 提示音只播一次
   const overdueChimePlayedRef = useRef(false);                // L3 逾期升级音只播一次
-  const [awayAnchorOverride, setAwayAnchorOverride] = useState<SyncAnchor | null>(null); // 结束态离开锚点
   const paused = active?.status === 'paused';
   /** 离开中 = 暂停中断 或 科目结束后（本质都是"人不在学习"） */
-  const awayActive = paused || (!active && (lastStopped !== null || recentRestAnchor !== null));
-  /** 离开计时锚点：暂停用服务端 paused_at；结束态用本组件在 stop 时记录的墙钟锚点 */
-  const awayAnchor = awayActive ? (store.awayAnchor ?? awayAnchorOverride ?? recentRestAnchor) : null;
+  const awayActive = paused || (!active && !stoppingSession && (lastStopped !== null || recentRestAnchor !== null));
+  /** 暂停用服务端 paused_at；结束反馈持有该会话自己的稳定锚点，绝不回退到旧会话。 */
+  const awayAnchor = paused
+    ? store.awayAnchor
+    : lastStopped?.restAnchor ?? (!stoppingSession ? recentRestAnchor : null);
   const awaySeconds = useWallSeconds(awayAnchor, 1000);
   // 暂停和结束都只按刚结束的单段专注计算休息预算。
   const focusForRest = paused
@@ -187,7 +201,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     if (!awayActive) {
       awayChimePlayedRef.current = false;
       overdueChimePlayedRef.current = false;
-      setAwayAnchorOverride(null);
     }
   }, [awayActive]);
   // 达到建议休息时长后单次轻音；浏览器需已交互，计时本身已满足 autoplay 前提。
@@ -215,9 +228,13 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   /* ---------- 动效升级（2026-08-24）：提醒级别跳变事件感 + 状态转换一次性 fx ---------- */
 
   const prevLevelRef = useRef(reminderLevel);
-  const [levelPulseKey, setLevelPulseKey] = useState(0);
+  const [levelPulse, setLevelPulse] = useState<{ key: number; level: number } | null>(null);
   useEffect(() => {
-    if (reminderLevel > prevLevelRef.current) setLevelPulseKey((k) => k + 1);
+    if (reminderLevel >= 2 && reminderLevel > prevLevelRef.current) {
+      setLevelPulse((current) => ({ key: (current?.key ?? 0) + 1, level: reminderLevel }));
+    } else if (reminderLevel === 0) {
+      setLevelPulse(null);
+    }
     prevLevelRef.current = reminderLevel;
   }, [reminderLevel]);
 
@@ -239,16 +256,10 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     if (kind) setFx((f) => ({ kind, key: (f?.key ?? 0) + 1 }));
   }, [phaseNow]);
 
-  // 级别上升一次性注意力动效：away-line 敲击 + 全视口内缘闪光（降级时 CSS 隐藏）
-  const awayLineCls = `away-line${reminderLevel >= 2 ? ' strong' : reminderLevel >= 1 ? ' urgent' : ''}${reminderLevel > 0 && levelPulseKey > 0 ? ' knock' : ''}`;
-  const edgeFlash =
-    reminderLevel >= 2 && levelPulseKey > 0 ? (
-      <div
-        key={`ef-${levelPulseKey}`}
-        className={`edge-flash ${reminderLevel >= 3 ? 'edge-flash-l3' : 'edge-flash-l2'}`}
-        aria-hidden
-      />
-    ) : null;
+  // 级别上升只触发本地状态条的一次性反馈；L2 用琥珀，L3 才进入红色语义。
+  const levelPulseKey = levelPulse?.key ?? 0;
+  const isPulsingLevel = levelPulse?.level === reminderLevel;
+  const awayLineCls = `away-line away-alert${reminderLevel >= 3 ? ' overdue' : reminderLevel >= 2 ? ' due' : reminderLevel >= 1 ? ' urgent' : ''}${isPulsingLevel ? ' knock' : ''}`;
 
   /* 跨端结束卡：任一端结束会话未填结束备注时，其他端在 5 分钟窗口内
      也呈现同一张结束卡可补备注（确认后 end_note 落库，各端卡片随之消失）。
@@ -259,6 +270,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       remoteStopSeenRef.current.add(lastStopped.sessionId);
       return;
     }
+    if (stoppingSession) return;
     if (!store.isOwner) return; // 只读监督端只看时钟/休息，不伪装成可编辑的结束卡
     if (store.state?.active_session) return; // 运行/暂停中不水合旧结束卡，避免污染休息锚点
     const nowMs = store.state?.server_now_ms ?? Date.now();
@@ -275,7 +287,8 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       .sort((a, b) => Date.parse(b.ended_at!) - Date.parse(a.ended_at!))[0];
     if (!cand) return;
     remoteStopSeenRef.current.add(cand.session_id);
-    const endedMs = Date.parse(cand.last_continuous_ended_at ?? cand.ended_at!);
+    const parsedEndedMs = Date.parse(cand.last_continuous_ended_at ?? cand.ended_at!);
+    const endedMs = Number.isFinite(parsedEndedMs) ? parsedEndedMs : nowMs;
     setLastStopped({
       sessionId: cand.session_id,
       subjectId: cand.subject_id,
@@ -284,15 +297,15 @@ export default function ClockFace({ store }: { store: ClockStore }) {
       longestContinuousSeconds: cand.longest_continuous_seconds,
       focusSeconds: cand.last_continuous_seconds,
       focusEndedAtMs: endedMs,
+      restAnchor: restAnchorFrom(endedMs, nowMs) ?? {
+        confirmedSeconds: 0,
+        running: true,
+        anchorPerfMs: performance.now(),
+        serverNowMs: nowMs,
+      },
     });
     setStartPlan(cand.intent_note ?? null);
-    setAwayAnchorOverride({
-      confirmedSeconds: Math.max(0, (nowMs - endedMs) / 1000),
-      running: true,
-      anchorPerfMs: performance.now(),
-      serverNowMs: nowMs,
-    });
-  }, [store.sessions, store.state?.server_now_ms, store.isOwner, lastStopped]);
+  }, [store.sessions, store.state?.server_now_ms, store.isOwner, lastStopped, stoppingSession]);
 
   // 跨端收回：本端正在展示结束卡时，另一端可能已经补完备注或撤回。
   // 一旦最新 sessions 快照确认 end_note / voided，立即收卡回主页。
@@ -304,7 +317,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     setLastStopped(null);
     setNoteDraft('');
     setStartPlan(null);
-    setAwayAnchorOverride(null);
   }, [lastStopped, store.sessions]);
 
   // 空闲态的全局轮询是 120s，但「等待补备注」是短暂协作状态。
@@ -334,7 +346,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     const ok = await store.withdraw(lastStopped.sessionId, '误记');
     if (!ok) return;
     setLastStopped(null);
-    setAwayAnchorOverride(null);
     setNoteDraft('');
     setStartPlan(null);
   };
@@ -402,47 +413,40 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const selectedSubjectDef = subjectOf(selectedSubject);
 
   const handleStop = async () => {
-    const pausedAtMs = active?.paused_at ? Date.parse(active.paused_at) : Number.NaN;
-    const focusEndedAtMs = paused && Number.isFinite(pausedAtMs) ? pausedAtMs : readServerNowMs();
     const snapshot = active ? {
       sessionId: active.session_id,
       subjectId: active.subject_id,
-      seconds,
-      longestContinuousSeconds: segmentSecs,
-      focusSeconds: segmentSecs,
-      focusEndedAtMs,
     } : null;
     if (snapshot) {
       if (settings.finishSound) playFinishChime();
-      setLastStopped(snapshot); // 立即呈现结束反馈（store.stop 内部乐观清空活动会话）
+      setStoppingSession(snapshot);
       // 推荐或手动填写的开始计划都只作上下文展示，不预填/伪造结束后的事实备注。
       const conchMark = consumeConchStartMark(snapshot.sessionId);
       setStartPlan(conchMark?.intentNote ?? active?.intent_note ?? null);
       setNoteDraft('');
-      // 从运行态结束时休息从 0 开始；从暂停态结束时沿用已经发生的休息。
-      // 锚点用服务端校准时钟（与暂停态口径一致），不用本机 Date.now()——
-      // 设备时钟偏移不得导致两种空闲态的休息计时快慢不同。
-      setAwayAnchorOverride({
-        confirmedSeconds: paused ? awaySeconds : 0,
-        running: true,
-        anchorPerfMs: performance.now(),
-        serverNowMs: readServerNowMs(),
-      });
     }
-    const metrics = await store.stop(null);
-    if (snapshot && metrics) {
-      setLastStopped((current) => {
-        if (!current || current.sessionId !== snapshot.sessionId) return current;
-        const serverEndedAtMs = Date.parse(metrics.last_continuous_ended_at ?? metrics.ended_at ?? '');
-        return {
-          ...current,
-          seconds: metrics.session_active_seconds,
-          longestContinuousSeconds: metrics.longest_continuous_seconds,
-          focusSeconds: metrics.last_continuous_seconds,
-          // 从暂停结束时仍沿用已开始的休息锚点；运行态则以服务端最后连续段为准。
-          focusEndedAtMs: paused || !Number.isFinite(serverEndedAtMs) ? current.focusEndedAtMs : serverEndedAtMs,
-        };
-      });
+    try {
+      const metrics = await store.stop(null);
+      if (snapshot && metrics) {
+        const focusEndedAtMs = Date.parse(metrics.last_continuous_ended_at ?? metrics.ended_at ?? '');
+        const stoppedAtMs = Date.parse(metrics.ended_at ?? '');
+        const serverNowMs = Number.isFinite(stoppedAtMs) ? stoppedAtMs : readServerNowMs();
+        const confirmedFocusEndedAtMs = Number.isFinite(focusEndedAtMs) ? focusEndedAtMs : serverNowMs;
+        const restAnchor = restAnchorFrom(confirmedFocusEndedAtMs, serverNowMs);
+        if (restAnchor) {
+          setLastStopped({
+            sessionId: snapshot.sessionId,
+            subjectId: snapshot.subjectId,
+            seconds: metrics.session_active_seconds,
+            longestContinuousSeconds: metrics.longest_continuous_seconds,
+            focusSeconds: metrics.last_continuous_seconds,
+            focusEndedAtMs: confirmedFocusEndedAtMs,
+            restAnchor,
+          });
+        }
+      }
+    } finally {
+      setStoppingSession(null);
     }
   };
 
@@ -488,6 +492,25 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   }, [active, lastStopped, selectedSubject, intentDraft, store, readOnly, commitFinish]);
 
   /* ---------- 结束反馈态 ---------- */
+  if (stoppingSession && !active) {
+    const subj = subjectOf(stoppingSession.subjectId);
+    return (
+      <section className="clockface" data-away-level="0" data-color={subj?.color_id} aria-live="polite">
+        <M className="finish-card finish-recording-card">
+          <div className="subject-pill" data-color={subj?.color_id}>
+            <SubjectIcon subjectId={stoppingSession.subjectId} size={16} />
+            {subj?.display_name ?? stoppingSession.subjectId}
+          </div>
+          <div className="finish-recording" data-testid="finish-recording" role="status">
+            <span className="finish-recording-indicator" aria-hidden />
+            正在记录本次专注…
+          </div>
+          <p className="finish-context">正在以服务端时间校准本次总专注和最长连续专注。</p>
+        </M>
+      </section>
+    );
+  }
+
   if (lastStopped && !active) {
     const subj = subjectOf(lastStopped.subjectId);
     // 误触感知（参照 Clockify 阈值思路）：短于 10 秒的会话提示「是误触吗？」，
@@ -495,7 +518,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     const isMisfire = lastStopped.seconds < 10;
     return (
       <section className="clockface" data-away-level={reminderLevel} data-color={subj?.color_id} aria-live="polite">
-        {edgeFlash}
         <M className="finish-card">
           <div className="finish-glow" aria-hidden />
           <div className="subject-pill" data-color={subj?.color_id}>
@@ -521,13 +543,15 @@ export default function ClockFace({ store }: { store: ClockStore }) {
                 </div>
                 <div>
                   <span>最长连续专注</span>
-                  <strong data-testid="finish-longest-continuous">{formatDurationZh(lastStopped.longestContinuousSeconds)}</strong>
+                  <strong className="finish-big" data-testid="finish-longest-continuous">
+                    <DurationTicker seconds={lastStopped.longestContinuousSeconds} />
+                  </strong>
                 </div>
               </div>
               <p className="finish-context">今天累计 {formatDurationZh(state?.today_active_seconds ?? lastStopped.seconds)}</p>
             </>
           )}
-          {/* 离开时长：科目结束后同样进入"已离开"渐进提醒（L1 琥珀 / L2 洗色 / L3 红色氛围） */}
+          {/* 科目结束后同样进入渐进提醒，始终只作用于该固定状态条。 */}
           <div className="away-slot" aria-live="off">
             <div
               key={`al-${levelPulseKey}`}
@@ -594,7 +618,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     const subj = subjectOf(active.subject_id);
     return (
       <section className={`clockface ${paused ? 'is-paused' : 'is-running'}`} data-away-level={reminderLevel} data-color={subj?.color_id}>
-      {edgeFlash}
       {/* 状态转换一次性 fx：点火（开始）/帷幕（暂停）/回升（继续），key 重触发 */}
       {fx && ((fx.kind === 'settle' && paused) || (fx.kind !== 'settle' && !paused)) && (
         <span key={fx.key} className={`clock-fx fx-${fx.kind}`} aria-hidden />
@@ -622,7 +645,7 @@ export default function ClockFace({ store }: { store: ClockStore }) {
         {active.intent_note && <div className="intent-line">「{active.intent_note}」</div>}
 
         {/* 离开时长：常驻占位（running 时空行），暂停/恢复瞬间不引起布局位移。
-            渐进提醒：L1 琥珀描边 / L2 洗色 / L3 红色氛围（统一氛围表达，无阻断弹窗）。 */}
+            渐进提醒只作用于固定状态条：L1/L2 琥珀，L3 红色，无阻断弹窗。 */}
         <div className="away-slot" aria-live="off">
           {paused && (
             <div
@@ -691,7 +714,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
 
   return (
     <section className="clockface idle" data-away-level={reminderLevel} data-color={selectedSubjectDef?.color_id}>
-      {edgeFlash}
       <div className="idle-clock" data-testid="idle-clock" key={idleTime}>
         {idleTime}
       </div>

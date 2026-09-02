@@ -4,7 +4,6 @@
  */
 
 import { test, expect, type Page } from '@playwright/test';
-import { rmSync } from 'node:fs';
 import { shanghaiDayRangeUtc, shanghaiToday } from '@clock/shared';
 
 const PASSWORD = '123456';
@@ -18,13 +17,17 @@ async function timerTotalSeconds(page: Page): Promise<number> {
   return Number(m![1]) * 3600 + Number(m![2]) * 60 + Number(m![3]);
 }
 
-test.beforeAll(() => {
-  rmSync('/tmp/clock-e2e-data', { recursive: true, force: true });
-});
-
 function beijingTodayAt(hour: number, minute = 0): Date {
   const { startMs } = shanghaiDayRangeUtc(shanghaiToday(Date.now()));
   return new Date(startMs + (hour * 60 + minute) * 60_000);
+}
+
+function formatDurationZh(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h} 小时 ${m} 分`;
+  if (m > 0) return `${m} 分钟`;
+  return `${seconds} 秒`;
 }
 
 async function doSetup(page: Page) {
@@ -51,14 +54,9 @@ async function doSetup(page: Page) {
   const stopBtn = page.getByRole('button', { name: '结束并保存' });
   if ((await stopBtn.count()) > 0) {
     await stopBtn.click();
-    // 结束反馈卡：先撤回本条（不污染用例数据），若已消失则点「好，继续」
-    const withdrawBtn = page.getByTestId('finish-withdraw-btn');
-    if ((await withdrawBtn.count()) > 0) {
-      await withdrawBtn.click();
-    } else {
-      const continueBtn = page.getByRole('button', { name: '好，继续' });
-      if ((await continueBtn.count()) > 0) await continueBtn.click();
-    }
+    // stop 先等待服务端指标，结束卡出现后再撤回本条，避免删除在途 SQLite 事实。
+    await expect(page.getByTestId('finish-duration')).toBeVisible();
+    await page.getByTestId('finish-withdraw-btn').click();
   }
   // 跨端结束卡水合（2026-08-25 新功能）：多条「未备注刚结束」可能排队水合，循环排空并填备注断污染
   for (let i = 0; i < 6; i++) {
@@ -1122,6 +1120,42 @@ test.describe('多端偏好同步', () => {
     await ctxB.close();
   });
 
+  test('结束反馈等待服务端指标，并让两项指标使用同一数字动效', async ({ page }) => {
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数学二' }).click();
+    await page.getByTestId('start-btn').click();
+    await expect(page.getByText('· 进行中')).toBeVisible();
+    // 结束卡 <10s 会切到误触恢复分支；这里明确进入双指标卡。
+    await page.waitForTimeout(10_200);
+
+    let releaseStop!: () => void;
+    const stopReleased = new Promise<void>((resolve) => { releaseStop = resolve; });
+    let stopRequested!: () => void;
+    const stopRequestStarted = new Promise<void>((resolve) => { stopRequested = resolve; });
+    await page.route('**/api/v1/sessions/*/stop', async (route) => {
+      stopRequested();
+      await stopReleased;
+      await route.continue();
+    });
+
+    const stopResponse = page.waitForResponse((response) => (
+      response.request().method() === 'POST' && /\/api\/v1\/sessions\/[^/]+\/stop$/.test(response.url())
+    ));
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await stopRequestStarted;
+    await expect(page.getByTestId('finish-recording')).toBeVisible();
+    await expect(page.getByTestId('finish-duration')).toHaveCount(0);
+
+    releaseStop();
+    const expected = await (await stopResponse).json();
+    await expect(page.getByTestId('finish-duration')).toBeVisible();
+    await expect.poll(() => page.getByTestId('finish-duration').textContent()).toBe(formatDurationZh(expected.session_active_seconds));
+    await expect.poll(() => page.getByTestId('finish-longest-continuous').textContent()).toBe(formatDurationZh(expected.longest_continuous_seconds));
+    await expect(page.getByTestId('finish-longest-continuous')).toHaveClass(/finish-big/);
+    await page.getByTestId('finish-withdraw-btn').click();
+    await expect(page.getByTestId('idle-clock')).toBeVisible();
+  });
+
   test('海螺计划只写入开始意图；结束卡 Enter 仅保存用户填写的实际记录', async ({ page }) => {
     await doSetup(page);
     await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v5'));
@@ -1463,12 +1497,8 @@ test.describe('多端偏好同步', () => {
 
     // 自我清理
     await page.getByRole('button', { name: '结束并保存' }).click();
-    const withdrawBtn = page.getByTestId('finish-withdraw-btn');
-    if (await withdrawBtn.count()) await withdrawBtn.click();
-    else {
-      const cont = page.getByRole('button', { name: '好，继续' });
-      if (await cont.count()) await cont.click();
-    }
+    await expect(page.getByTestId('finish-duration')).toBeVisible();
+    await page.getByTestId('finish-withdraw-btn').click();
     await expect(page.getByTestId('idle-clock')).toBeVisible();
   });
 });
@@ -1763,12 +1793,76 @@ test.describe('首页休息状态', () => {
       const res = await page.request.get('/api/v1/state');
       return ((await res.json()).active_session as { status?: string } | null)?.status;
     }, { timeout: 5_000 }).toBe('paused');
-    await page.clock.fastForward(3 * 60 * 1000);
-    await expect(page.getByTestId('away-line')).toContainText('已休息 00:03');
-
+    // `/stop` 的服务端最后连续段端点是休息事实来源；模拟暂停已持续 3 分钟。
+    await page.route('**/api/v1/sessions/*/stop', async (route) => {
+      const response = await route.fetch();
+      const metrics = await response.json();
+      const stoppedAtMs = Date.parse(metrics.ended_at);
+      metrics.last_continuous_ended_at = new Date(stoppedAtMs - 3 * 60_000).toISOString();
+      await route.fulfill({ status: response.status(), contentType: 'application/json', body: JSON.stringify(metrics) });
+    });
     await page.getByRole('button', { name: '结束并保存' }).click();
     await expect(page.getByTestId('finish-duration')).toBeVisible();
     await expect(page.getByTestId('away-line')).toContainText('已休息 00:03');
+  });
+
+  test('结束新会话不会回退到旧会话的逾期休息锚点', async ({ page }) => {
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数据结构' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1_100);
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await page.getByRole('button', { name: '好，继续' }).click();
+
+    let emulateOldOverdue = false;
+    await page.route('**/api/v1/snapshot', async (route) => {
+      const response = await route.fetch();
+      const snapshot = await response.json();
+      if (emulateOldOverdue && !snapshot.state.active_session) {
+        const fakeNow = beijingTodayAt(10).getTime();
+        const fakeEndedAt = new Date(fakeNow - 9 * 60_000).toISOString();
+        const stopped = snapshot.sessions.filter((session: { status: string; ended_at: string | null }) => (
+          session.status === 'stopped' && session.ended_at
+        ));
+        if (stopped.length) {
+          for (const session of stopped) {
+            session.ended_at = fakeEndedAt;
+            session.last_continuous_ended_at = fakeEndedAt;
+            if (session.segments.length) session.segments[session.segments.length - 1].ended_at = fakeEndedAt;
+          }
+          snapshot.state.server_now_ms = fakeNow;
+        }
+      }
+      await route.fulfill({ status: response.status(), contentType: 'application/json', body: JSON.stringify(snapshot) });
+    });
+
+    emulateOldOverdue = true;
+    await page.reload();
+    await expect(page.locator('.clockface.idle')).toHaveAttribute('data-away-level', '3');
+
+    await page.getByTestId('start-btn').click();
+    await expect(page.getByText('· 进行中')).toBeVisible();
+    let releaseStop!: () => void;
+    const stopReleased = new Promise<void>((resolve) => { releaseStop = resolve; });
+    let stopRequested!: () => void;
+    const stopRequestStarted = new Promise<void>((resolve) => { stopRequested = resolve; });
+    await page.route('**/api/v1/sessions/*/stop', async (route) => {
+      stopRequested();
+      await stopReleased;
+      await route.continue();
+    });
+
+    await page.getByRole('button', { name: '结束并保存' }).click();
+    await stopRequestStarted;
+    await expect(page.getByTestId('finish-recording')).toBeVisible();
+    releaseStop();
+    await expect(page.getByTestId('finish-duration')).toBeVisible();
+    await expect(page.locator('.clockface')).toHaveAttribute('data-away-level', '0');
+    await expect(page.getByTestId('away-line')).not.toContainText('休息已超时');
+
+    await page.unroute('**/api/v1/snapshot');
+    await page.getByTestId('finish-withdraw-btn').click();
+    await expect(page.getByTestId('idle-clock')).toBeVisible();
   });
 });
 
@@ -1822,8 +1916,8 @@ test.describe('离开渐进提醒', () => {
     await page.unroute('**/api/v1/snapshot');
     await page.getByRole('button', { name: '继续计时' }).click();
     await page.getByRole('button', { name: '结束并保存' }).click();
-    const continueBtn = page.getByRole('button', { name: '好，继续' });
-    if ((await continueBtn.count()) > 0) await continueBtn.click();
+    await expect(page.getByTestId('finish-duration')).toBeVisible();
+    await page.getByRole('button', { name: '好，继续' }).click();
   });
 
   test('按上一段专注时长计算休息窗口，并在临近/到期/超时提醒', async ({ page }) => {
@@ -1855,11 +1949,11 @@ test.describe('离开渐进提醒', () => {
       });
     });
 
-    // 约 1 秒专注给 2 分钟统一休息窗口；恢复 6 分钟暂停快照后进入到期提醒。
+    // 约 1 秒专注给 2 分钟统一休息窗口；恢复 6 分钟暂停快照后进入琥珀到期提醒。
     await page.reload();
-    await expect(page.getByTestId('away-line')).toHaveClass(/strong/);
+    await expect(page.getByTestId('away-line')).toHaveClass(/due/);
 
-    // 恢复 9 分钟暂停快照后进入逾期：统一由红色洗色氛围 + away-line 表达，无阻断弹窗。
+    // 恢复 9 分钟暂停快照后进入逾期：只升级固定休息状态条，无阻断弹窗。
     pausedAgeMs = 9 * 60 * 1000;
     await page.reload();
     await expect(page.locator('.clockface.is-paused')).toHaveAttribute('data-away-level', '3');
@@ -1874,8 +1968,8 @@ test.describe('离开渐进提醒', () => {
 
     // 自我清理：结束会话回到空闲态（避免串行污染后续依赖空闲态的测试）
     await page.getByRole('button', { name: '结束并保存' }).click();
-    const continueBtn = page.getByRole('button', { name: '好，继续' });
-    if ((await continueBtn.count()) > 0) await continueBtn.click();
+    await expect(page.getByTestId('finish-duration')).toBeVisible();
+    await page.getByRole('button', { name: '好，继续' }).click();
     await expect(page.getByTestId('idle-clock')).toBeVisible();
   });
 });
@@ -1896,21 +1990,35 @@ test.describe('科目结束后的离开提醒', () => {
     await expect(page.getByTestId('away-line')).toContainText('休息中');
     await expect(page.getByTestId('away-line')).toContainText('建议 2 分钟');
 
-    // 约 1 秒专注给 2 分钟统一休息窗口；达到建议休息时长 → 红（strong）
+    // 约 1 秒专注给 2 分钟统一休息窗口；达到建议休息时长 → 琥珀到期提醒。
     await page.clock.fastForward(6 * 60 * 1000);
-    await expect(page.getByTestId('away-line')).toHaveClass(/strong/);
+    await expect(page.getByTestId('away-line')).toHaveClass(/due/);
 
-    // 逾期宽限后：红色洗色氛围 + away-line 表达（无阻断弹窗）；开始下一段回到空闲页
+    // 逾期宽限后：红色状态条表达提醒（无阻断弹窗）；开始下一段回到空闲页。
     await page.clock.fastForward(3 * 60 * 1000);
     await expect(page.locator('.clockface')).toHaveAttribute('data-away-level', '3');
     await expect(page.getByTestId('away-line')).toContainText('休息已超时');
     await expect(page.getByRole('dialog', { name: '离开提醒' })).toHaveCount(0);
 
-    // 开始下一段：回到空闲页并开始新会话
+    // 关闭后重读服务端快照：空闲页仍应保留同一局部逾期状态，直到开始下一段。
     await page.getByRole('button', { name: '好，继续' }).click();
     await expect(page.getByTestId('idle-clock')).toBeVisible();
-    // 关掉结束卡后的空闲态与暂停态氛围一致：逾期洗色持续，直到开始下一段
+    await page.route('**/api/v1/snapshot', async (route) => {
+      const response = await route.fetch();
+      const snapshot = await response.json();
+      const fakeNow = beijingTodayAt(10).getTime();
+      const fakeEndedAt = new Date(fakeNow - 9 * 60_000).toISOString();
+      for (const session of snapshot.sessions.filter((item: { status: string }) => item.status === 'stopped')) {
+        session.ended_at = fakeEndedAt;
+        session.last_continuous_ended_at = fakeEndedAt;
+        if (session.segments.length) session.segments[session.segments.length - 1].ended_at = fakeEndedAt;
+      }
+      snapshot.state.server_now_ms = fakeNow;
+      await route.fulfill({ status: response.status(), contentType: 'application/json', body: JSON.stringify(snapshot) });
+    });
+    await page.reload();
     await expect(page.locator('.clockface.idle')).toHaveAttribute('data-away-level', '3');
+    await page.unroute('**/api/v1/snapshot');
     await page.getByTestId('start-btn').click();
     await expect(page.getByText('· 进行中')).toBeVisible();
     // 运行态不再显示离开行（提醒已复位）
@@ -1919,8 +2027,8 @@ test.describe('科目结束后的离开提醒', () => {
 
     // 自我清理
     await page.getByRole('button', { name: '结束并保存' }).click();
-    const continueBtn = page.getByRole('button', { name: '好，继续' });
-    if ((await continueBtn.count()) > 0) await continueBtn.click();
+    await expect(page.getByTestId('finish-duration')).toBeVisible();
+    await page.getByRole('button', { name: '好，继续' }).click();
     await expect(page.getByTestId('idle-clock')).toBeVisible();
   });
 });
@@ -1953,8 +2061,8 @@ test.describe('计时防抖', () => {
 
     // 自我清理：结束会话回到空闲态
     await page.getByRole('button', { name: '结束并保存' }).click();
-    const continueBtn = page.getByRole('button', { name: '好，继续' });
-    if ((await continueBtn.count()) > 0) await continueBtn.click();
+    await expect(page.getByTestId('finish-duration')).toBeVisible();
+    await page.getByRole('button', { name: '好，继续' }).click();
     await expect(page.getByTestId('idle-clock')).toBeVisible();
   });
 });

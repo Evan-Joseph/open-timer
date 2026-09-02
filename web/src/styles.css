@@ -93,7 +93,7 @@
   --dur-breathe: 2.4s;
   --dur-breathe-slow: 2.8s;
   --dur-breathe-pill: 3.2s;
-  /* 全视口状态洗色：大面色彩变化更慢 + expo 收尾（参考 FocusTide 背景层） */
+  /* 局部状态转换：点火、回升与一次性反馈共用 expo 收尾。 */
   --dur-wash: 0.5s;
   --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
 
@@ -402,19 +402,7 @@ button:focus-visible, input:focus-visible {
   --timeline-track-height: 96px;
   --main-pad-block: clamp(18px, 4dvh, 48px);
   --clock-gap: clamp(10px, 1.8dvh, 16px);
-  --alert-wash: transparent;
-  --alert-border: var(--border);
-  /* 告警状态不仅是背景洗色：中性控件共享一组低饱和表面 token。
-     主要动作继续使用科目 action 色，危险动作继续使用 danger，避免把“回到专注”
-     与“撤回”都误读成告警本身。 */
-  --alert-control-surface: var(--surface-1);
-  --alert-control-hover: var(--surface-2);
-  --alert-control-selected: var(--surface-1);
-  --alert-control-border: var(--border);
-  --alert-control-text: var(--text-2);
-  --alert-duration: 3.2s;
   position: relative;
-  isolation: isolate;
   width: 100%;
   height: 100dvh;
   min-height: 0;
@@ -422,155 +410,6 @@ button:focus-visible, input:focus-visible {
   grid-template-rows: var(--topbar-height) minmax(0, 1fr) auto;
   overflow: hidden;
   background: var(--bg);
-}
-.app:has(.clockface[data-away-level='2']) {
-  --alert-wash: color-mix(in srgb, var(--amber) 10%, var(--bg));
-  --alert-border: color-mix(in srgb, var(--amber) 30%, var(--border));
-  --alert-control-surface: color-mix(in srgb, var(--amber) 8%, var(--surface-1));
-  --alert-control-hover: color-mix(in srgb, var(--amber) 14%, var(--surface-1));
-  --alert-control-selected: color-mix(in srgb, var(--amber) 16%, var(--surface-1));
-  --alert-control-border: color-mix(in srgb, var(--amber) 44%, var(--border));
-  --alert-control-text: color-mix(in srgb, var(--amber) 45%, var(--text-1));
-}
-.app:has(.clockface[data-away-level='3']) {
-  --alert-wash: color-mix(in srgb, var(--danger) 15%, var(--bg));
-  --alert-border: color-mix(in srgb, var(--danger) 38%, var(--border));
-  --alert-control-surface: color-mix(in srgb, var(--danger) 10%, var(--surface-1));
-  --alert-control-hover: color-mix(in srgb, var(--danger) 17%, var(--surface-1));
-  --alert-control-selected: color-mix(in srgb, var(--danger) 20%, var(--surface-1));
-  --alert-control-border: color-mix(in srgb, var(--danger) 52%, var(--border));
-  --alert-control-text: color-mix(in srgb, var(--danger) 45%, var(--text-1));
-  --alert-duration: 2.6s;
-}
-/* 深色主题下红色感知更刺眼，L3 洗色比例降到 12%（FocusTide dark 降饱和思路） */
-[data-theme='dark'] .app:has(.clockface[data-away-level='3']) {
-  --alert-wash: color-mix(in srgb, var(--danger) 12%, var(--bg));
-}
-.app::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background-color: var(--alert-wash);
-  transition: background-color var(--dur-wash) var(--ease-expo);
-}
-.app:has(.clockface[data-away-level='2'])::before,
-.app:has(.clockface[data-away-level='3'])::before {
-  animation: app-alert-breathe var(--alert-duration) ease-in-out infinite;
-}
-
-/* L2/L3 让工具性控件和输入表面加入同一告警语境。这里刻意排除 contextual
-   primary/resume 与 danger：它们表达“做什么”，背景/描边表达“现在处于什么状态”。 */
-.app:has(.clockface[data-away-level='2']) :is(
-  .icon-btn,
-  .text-btn:not(.withdraw-btn),
-  .ghost-btn:not(.contextual-action, .danger-btn),
-  .switch-btn,
-  .fs-control-btn,
-  .conch-alt-btn,
-  .conch-alt-shuffle
-),
-.app:has(.clockface[data-away-level='3']) :is(
-  .icon-btn,
-  .text-btn:not(.withdraw-btn),
-  .ghost-btn:not(.contextual-action, .danger-btn),
-  .switch-btn,
-  .fs-control-btn,
-  .conch-alt-btn,
-  .conch-alt-shuffle
-) {
-  background: var(--alert-control-surface);
-  border-color: var(--alert-control-border);
-  color: var(--alert-control-text);
-}
-.app:has(.clockface[data-away-level='2']) :is(
-  .icon-btn:hover:not(:disabled),
-  .text-btn:not(.withdraw-btn):hover:not(:disabled),
-  .ghost-btn:not(.contextual-action, .danger-btn):hover:not(:disabled),
-  .switch-btn:hover:not(:disabled),
-  .fs-control-btn:hover:not(:disabled),
-  .conch-alt-btn:hover:not(:disabled),
-  .conch-alt-shuffle:hover:not(:disabled)
-),
-.app:has(.clockface[data-away-level='3']) :is(
-  .icon-btn:hover:not(:disabled),
-  .text-btn:not(.withdraw-btn):hover:not(:disabled),
-  .ghost-btn:not(.contextual-action, .danger-btn):hover:not(:disabled),
-  .switch-btn:hover:not(:disabled),
-  .fs-control-btn:hover:not(:disabled),
-  .conch-alt-btn:hover:not(:disabled),
-  .conch-alt-shuffle:hover:not(:disabled)
-) {
-  background: var(--alert-control-hover);
-  color: var(--text-1);
-}
-.app:has(.clockface[data-away-level='2']) :is(.timeline-scale, .seg-control, .ambient-list),
-.app:has(.clockface[data-away-level='3']) :is(.timeline-scale, .seg-control, .ambient-list) {
-  background: var(--alert-control-surface);
-  border-color: var(--alert-control-border);
-}
-.app:has(.clockface[data-away-level='2']) :is(.timeline-scale button, .seg-item, .ambient-item),
-.app:has(.clockface[data-away-level='3']) :is(.timeline-scale button, .seg-item, .ambient-item) {
-  color: var(--alert-control-text);
-}
-.app:has(.clockface[data-away-level='2']) :is(.timeline-scale button.selected, .seg-item.active, .ambient-item.active),
-.app:has(.clockface[data-away-level='3']) :is(.timeline-scale button.selected, .seg-item.active, .ambient-item.active) {
-  background: var(--alert-control-selected);
-  color: var(--text-1);
-}
-.app:has(.clockface[data-away-level='2']) :is(.intent-input, .finish-note, .popover-time-input, .popover-note-input),
-.app:has(.clockface[data-away-level='3']) :is(.intent-input, .finish-note, .popover-time-input, .popover-note-input) {
-  background: var(--alert-control-surface);
-  border-color: var(--alert-control-border);
-}
-.app:has(.clockface[data-away-level='2']) :is(
-  .icon-btn,
-  .text-btn:not(.withdraw-btn),
-  .ghost-btn:not(.contextual-action, .danger-btn),
-  .switch-btn,
-  .fs-control-btn,
-  .conch-alt-btn,
-  .conch-alt-shuffle,
-  .timeline-scale button,
-  .seg-item,
-  .ambient-item
-):disabled,
-.app:has(.clockface[data-away-level='3']) :is(
-  .icon-btn,
-  .text-btn:not(.withdraw-btn),
-  .ghost-btn:not(.contextual-action, .danger-btn),
-  .switch-btn,
-  .fs-control-btn,
-  .conch-alt-btn,
-  .conch-alt-shuffle,
-  .timeline-scale button,
-  .seg-item,
-  .ambient-item
-):disabled {
-  color: var(--disabled-text);
-  border-color: var(--disabled-border);
-  background: var(--disabled-surface);
-  box-shadow: none;
-}
-.app:has(.clockface[data-away-level='2']) :is(.timeline-scale button, .seg-item, .ambient-item):disabled,
-.app:has(.clockface[data-away-level='3']) :is(.timeline-scale button, .seg-item, .ambient-item):disabled {
-  box-shadow: inset 0 0 0 1px var(--disabled-border);
-}
-.app:has(.clockface[data-away-level='2']) :is(.intent-input, .finish-note, .popover-time-input, .popover-note-input):disabled,
-.app:has(.clockface[data-away-level='3']) :is(.intent-input, .finish-note, .popover-time-input, .popover-note-input):disabled {
-  color: var(--disabled-text);
-  border-color: var(--disabled-border);
-  background: var(--disabled-surface);
-}
-.app:has(.clockface[data-away-level='2']) .finish-card,
-.app:has(.clockface[data-away-level='3']) .finish-card {
-  background: color-mix(in srgb, var(--alert-control-surface) 86%, var(--surface-1));
-  border-color: var(--alert-control-border);
-}
-@keyframes app-alert-breathe {
-  0%, 100% { opacity: 0.75; }
-  50% { opacity: 1; }
 }
 
 .topbar {
@@ -727,58 +566,50 @@ button:focus-visible, input:focus-visible {
 }
 .switch-btn:hover { border-color: var(--sc); background: var(--sc-bg); }
 
-/* 离开（暂停）时长提示：常驻占位容器，暂停/恢复瞬间不引起布局位移 */
+/* 离开（暂停）时长提示：常驻占位容器，暂停/恢复瞬间不引起布局位移。
+   参照 Pomotroid 的阶段环与游戏 HUD 的固定提示位，提醒只在这里升级。 */
 .away-slot {
-  min-height: 34px;
+  min-height: 38px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-2);
 }
 .away-line {
   display: inline-flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; justify-content: center;
-  padding: var(--space-2) var(--space-3); border-radius: 999px;
-  background: var(--surface-2); color: var(--text-1);
+  min-height: 38px; padding: var(--space-2) var(--space-3); border: 1px solid transparent; border-radius: 999px;
+  background: var(--surface-2); color: var(--text-1); box-shadow: inset 0 0 0 1px var(--border);
   font-family: var(--font-num); font-size: var(--fs-base); font-variant-numeric: tabular-nums;
-  transition: background var(--dur-state) var(--ease-standard), color var(--dur-state) var(--ease-standard), box-shadow var(--dur-state) var(--ease-standard);
+  transition-property: background-color, border-color, color, box-shadow, transform;
+  transition-duration: var(--dur-state);
+  transition-timing-function: var(--ease-standard);
 }
 .away-note { color: var(--text-3); font-size: var(--fs-sm); }
-/* L1：建议休息即将结束，强调但非警示 */
+/* L1：建议休息即将结束，轻提示而不打断。 */
 .away-line.urgent {
-  background: color-mix(in srgb, var(--amber) 14%, var(--surface-1));
+  background: color-mix(in srgb, var(--amber) 12%, var(--surface-1));
+  border-color: color-mix(in srgb, var(--amber) 34%, var(--border));
   color: var(--amber);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 40%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 18%, transparent);
 }
 .away-line.urgent .away-note { color: color-mix(in srgb, var(--amber) 70%, var(--text-3)); }
-/* L2：建议休息已到，提醒回到下一段 */
-.away-line.strong {
-  background: color-mix(in srgb, var(--danger) 10%, var(--surface-1));
+/* L2：建议时间已到，仍是琥珀语义；L3 才升级为危险红。 */
+.away-line.due {
+  background: color-mix(in srgb, var(--amber) 18%, var(--surface-1));
+  border-color: color-mix(in srgb, var(--amber) 56%, var(--border));
+  color: color-mix(in srgb, var(--amber) 84%, var(--text-1));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 26%, transparent), var(--shadow-sm);
+}
+.away-line.due .away-note { color: color-mix(in srgb, var(--amber) 72%, var(--text-3)); }
+.away-line.overdue {
+  background: color-mix(in srgb, var(--danger) 13%, var(--surface-1));
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--border));
   color: var(--danger);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 28%, transparent), var(--shadow-sm);
 }
-.away-line.strong .away-note { color: color-mix(in srgb, var(--danger) 70%, var(--text-3)); }
-
-/* 分级脉动：L1 缓呼吸，L2 快呼吸（尊重全局 animations-off / reduced-motion 归零） */
-@keyframes pill-breathe {
-  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--amber) 0%, transparent); }
-  50% { transform: scale(1.035); box-shadow: 0 0 0 6px color-mix(in srgb, var(--amber) 12%, transparent); }
+.away-line.overdue .away-note { color: color-mix(in srgb, var(--danger) 72%, var(--text-3)); }
+.away-line.urgent:not(.knock) { animation: away-breathe var(--dur-breathe-pill) ease-in-out infinite; }
+@keyframes away-breathe {
+  0%, 100% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 18%, transparent); }
+  50% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 36%, transparent), 0 0 0 4px color-mix(in srgb, var(--amber) 7%, transparent); }
 }
-.clockface[data-away-level='1'] .subject-pill {
-  animation: pill-breathe var(--dur-breathe-pill) ease-in-out infinite;
-  will-change: transform;
-}
-.clockface[data-away-level='2'] .subject-pill,
-.clockface[data-away-level='3'] .subject-pill {
-  animation: pill-breathe var(--dur-breathe) ease-in-out infinite;
-  will-change: transform;
-}
-.clockface[data-away-level='2'],
-.clockface[data-away-level='3'] {
-  isolation: isolate;
-}
-.clockface[data-away-level='2']::before,
-.clockface[data-away-level='3']::before {
-  content: none;
-}
-
-/* 逾期（L3）统一由红色洗色氛围 + away-line 表达，已移除阻断式全屏召回弹窗。 */
 
 /* 结束反馈 */
 .finish-card {
@@ -788,6 +619,19 @@ button:focus-visible, input:focus-visible {
   background: var(--surface-1); border: 1px solid var(--border);
   border-radius: var(--radius-lg); box-shadow: var(--shadow);
   animation: card-in var(--dur-state) var(--ease-expo);
+}
+.finish-recording-card { min-height: 184px; justify-content: center; }
+.finish-recording {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  color: var(--text-1); font-size: var(--fs-lg); font-weight: 600;
+}
+.finish-recording-indicator {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none;
+  animation: finish-recording-breathe var(--dur-breathe) ease-in-out infinite;
+}
+@keyframes finish-recording-breathe {
+  0%, 100% { opacity: 0.45; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1); }
 }
 .finish-glow {
   position: absolute; inset: -40% -20% auto; height: 60%;
@@ -856,24 +700,6 @@ button:focus-visible, input:focus-visible {
   background: var(--bg-elevated);
   padding: 14px 16px 10px;
 }
-.main,
-.topbar,
-.timeline {
-  /* 告警状态过渡只动颜色类属性（洗色/描边），不动布局属性（transform/padding 会引发布局抖动） */
-  transition-property: background-color, border-color, box-shadow, opacity;
-  transition-duration: var(--dur-state);
-  transition-timing-function: var(--ease-standard);
-}
-.app:has(.clockface[data-away-level='2']) .topbar,
-.app:has(.clockface[data-away-level='3']) .topbar {
-  background: color-mix(in srgb, var(--alert-wash) 64%, var(--material));
-  border-color: var(--alert-border);
-}
-.app:has(.clockface[data-away-level='2']) .timeline,
-.app:has(.clockface[data-away-level='3']) .timeline {
-  background: color-mix(in srgb, var(--alert-wash) 72%, var(--bg-elevated));
-  border-color: var(--alert-border);
-}
 .timeline-head {
   display: flex; align-items: center; justify-content: space-between;
   max-width: 960px; margin: 0 auto 8px;
@@ -916,115 +742,6 @@ button:focus-visible, input:focus-visible {
   -webkit-backdrop-filter: blur(32px) saturate(1.3);
   box-shadow: var(--shadow);
   display: flex; flex-direction: column; gap: var(--space-3);
-}
-/* 逾期语境不能在浮层边界被截断：设置由 Portal 挂到 body，故从 body:has() 统一取状态。 */
-body:has(.app .clockface[data-away-level='2']) .history-overlay-panel,
-body:has(.app .clockface[data-away-level='2']) .dialog-content,
-body:has(.app .clockface[data-away-level='2']) .seg-preview,
-body:has(.app .clockface[data-away-level='2']) .seg-popover {
-  background: color-mix(in srgb, var(--amber) 9%, var(--popover-surface));
-  border-color: color-mix(in srgb, var(--amber) 42%, var(--border));
-}
-body:has(.app .clockface[data-away-level='3']) .history-overlay-panel,
-body:has(.app .clockface[data-away-level='3']) .dialog-content,
-body:has(.app .clockface[data-away-level='3']) .seg-preview,
-body:has(.app .clockface[data-away-level='3']) .seg-popover {
-  background: color-mix(in srgb, var(--danger) 11%, var(--popover-surface));
-  border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
-}
-/* 设置由 Portal 挂在 body：为其内部的中性控件单独继承同一状态表面，
-   使弹层不会在 L2/L3 里像一块脱离上下文的白板。 */
-body:has(.app .clockface[data-away-level='2']) .dialog-content {
-  --alert-modal-tone: var(--amber);
-}
-body:has(.app .clockface[data-away-level='3']) .dialog-content {
-  --alert-modal-tone: var(--danger);
-}
-body:has(.app .clockface[data-away-level='2']) .dialog-content :is(
-  .icon-btn,
-  .ghost-btn:not(.contextual-action, .danger-btn),
-  .seg-control,
-  .ambient-list,
-  .seg-item,
-  .ambient-item
-),
-body:has(.app .clockface[data-away-level='3']) .dialog-content :is(
-  .icon-btn,
-  .ghost-btn:not(.contextual-action, .danger-btn),
-  .seg-control,
-  .ambient-list,
-  .seg-item,
-  .ambient-item
-) {
-  background: color-mix(in srgb, var(--alert-modal-tone) 9%, var(--surface-1));
-  border-color: color-mix(in srgb, var(--alert-modal-tone) 44%, var(--border));
-  color: color-mix(in srgb, var(--alert-modal-tone) 45%, var(--text-1));
-}
-body:has(.app .clockface[data-away-level='2']) .dialog-content :is(.seg-item.active, .ambient-item.active),
-body:has(.app .clockface[data-away-level='3']) .dialog-content :is(.seg-item.active, .ambient-item.active) {
-  background: color-mix(in srgb, var(--alert-modal-tone) 18%, var(--surface-1));
-  color: var(--text-1);
-}
-body:has(.app .clockface[data-away-level='2']) .dialog-content :is(
-  .icon-btn,
-  .ghost-btn:not(.contextual-action, .danger-btn)
-):hover:not(:disabled),
-body:has(.app .clockface[data-away-level='3']) .dialog-content :is(
-  .icon-btn,
-  .ghost-btn:not(.contextual-action, .danger-btn)
-):hover:not(:disabled),
-body:has(.app .clockface[data-away-level='2']) .dialog-content :is(.seg-item, .ambient-item):hover:not(:disabled):not(.active),
-body:has(.app .clockface[data-away-level='3']) .dialog-content :is(.seg-item, .ambient-item):hover:not(:disabled):not(.active) {
-  background: color-mix(in srgb, var(--alert-modal-tone) 15%, var(--surface-1));
-  color: var(--text-1);
-}
-body:has(.app .clockface[data-away-level='2']) .dialog-content :is(
-  .icon-btn,
-  .ghost-btn:not(.contextual-action, .danger-btn),
-  .seg-item,
-  .ambient-item
-):disabled,
-body:has(.app .clockface[data-away-level='3']) .dialog-content :is(
-  .icon-btn,
-  .ghost-btn:not(.contextual-action, .danger-btn),
-  .seg-item,
-  .ambient-item
-):disabled {
-  color: var(--disabled-text);
-  border-color: var(--disabled-border);
-  background: var(--disabled-surface);
-  box-shadow: none;
-}
-body:has(.app .clockface[data-away-level='2']) .dialog-content :is(.seg-item, .ambient-item):disabled,
-body:has(.app .clockface[data-away-level='3']) .dialog-content :is(.seg-item, .ambient-item):disabled {
-  box-shadow: inset 0 0 0 1px var(--disabled-border);
-}
-body:has(.app .clockface[data-away-level='2']) .conch-panel {
-  --alert-modal-tone: var(--amber);
-}
-body:has(.app .clockface[data-away-level='3']) .conch-panel {
-  --alert-modal-tone: var(--danger);
-}
-body:has(.app .clockface[data-away-level='2']) .conch-panel .conch-card,
-body:has(.app .clockface[data-away-level='3']) .conch-panel .conch-card {
-  background: color-mix(in srgb, var(--alert-modal-tone) 7%, var(--surface-1));
-  border-color: color-mix(in srgb, var(--alert-modal-tone) 36%, var(--border));
-}
-body:has(.app .clockface[data-away-level='2']) .conch-panel :is(.conch-alt-btn, .conch-alt-shuffle),
-body:has(.app .clockface[data-away-level='3']) .conch-panel :is(.conch-alt-btn, .conch-alt-shuffle) {
-  background: color-mix(in srgb, var(--alert-modal-tone) 9%, var(--surface-1));
-  color: color-mix(in srgb, var(--alert-modal-tone) 45%, var(--text-1));
-}
-body:has(.app .clockface[data-away-level='2']) .conch-panel :is(.conch-alt-btn, .conch-alt-shuffle):hover:not(:disabled),
-body:has(.app .clockface[data-away-level='3']) .conch-panel :is(.conch-alt-btn, .conch-alt-shuffle):hover:not(:disabled) {
-  background: color-mix(in srgb, var(--alert-modal-tone) 15%, var(--surface-1));
-  color: var(--text-1);
-}
-body:has(.app .clockface[data-away-level='2']) .conch-panel :is(.conch-alt-btn, .conch-alt-shuffle):disabled,
-body:has(.app .clockface[data-away-level='3']) .conch-panel :is(.conch-alt-btn, .conch-alt-shuffle):disabled {
-  color: var(--disabled-text);
-  background: var(--disabled-surface);
-  box-shadow: inset 0 0 0 1px var(--disabled-border);
 }
 .history-overlay-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .history-overlay-title { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
@@ -1199,14 +916,6 @@ body:has(.app .clockface[data-away-level='3']) .conch-panel :is(.conch-alt-btn, 
   transition: background var(--dur-hover) var(--ease-standard), color var(--dur-hover) var(--ease-standard);
 }
 .timeline-list-row:hover { background: var(--surface-2); }
-.app:has(.clockface[data-away-level='2']) .timeline-list-row,
-.app:has(.clockface[data-away-level='3']) .timeline-list-row {
-  background: var(--alert-control-surface);
-}
-.app:has(.clockface[data-away-level='2']) .timeline-list-row:hover,
-.app:has(.clockface[data-away-level='3']) .timeline-list-row:hover {
-  background: var(--alert-control-hover);
-}
 .list-subject { font-weight: 500; }
 .list-time { color: var(--text-2); }
 .list-duration { color: var(--text-1); font-weight: 600; }
@@ -1730,20 +1439,19 @@ html.animations-off .conch-spin { animation: none; }
   to { opacity: 0; box-shadow: inset 0 0 140px transparent; }
 }
 
-/* A1. 提醒级别跳变事件感：away-line 敲击 + 全视口内缘闪光（L2 琥珀 / L3 红） */
-.away-line.knock { animation: level-knock var(--dur-shake) var(--ease-standard); }
-@keyframes level-knock {
-  0% { transform: translateX(0); } 20% { transform: translateX(-4px); }
-  40% { transform: translateX(3px); } 60% { transform: translateX(-2px); }
-  80% { transform: translateX(1px); } 100% { transform: translateX(0); }
+/* A1. 提醒级别跳变事件感：只让固定的休息状态条反馈一次。 */
+.away-line.knock { animation: away-knock var(--dur-shake) var(--ease-standard); }
+@keyframes away-knock {
+  0% { transform: translateY(0); }
+  35% { transform: translateY(-2px); }
+  65% { transform: translateY(1px); }
+  100% { transform: translateY(0); }
 }
-.edge-flash { position: fixed; inset: 0; z-index: 35; pointer-events: none; animation: edge-flash 0.9s var(--ease-expo) both; }
-.edge-flash-l2 { --edge-c: var(--amber); }
-.edge-flash-l3 { --edge-c: var(--danger); }
-@keyframes edge-flash {
-  0% { opacity: 0; box-shadow: inset 0 0 0 3px transparent; }
-  25% { opacity: 1; box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--edge-c) 55%, transparent), inset 0 0 60px color-mix(in srgb, var(--edge-c) 14%, transparent); }
-  100% { opacity: 0; box-shadow: inset 0 0 0 3px transparent; }
+.away-line.overdue.knock { animation: away-overdue-flash 0.9s var(--ease-expo) both; }
+@keyframes away-overdue-flash {
+  0% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 28%, transparent), var(--shadow-sm); }
+  30% { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--danger) 78%, transparent), 0 0 0 5px color-mix(in srgb, var(--danger) 12%, transparent), var(--shadow-sm); }
+  100% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 28%, transparent), var(--shadow-sm); }
 }
 
 /* B4. 结束卡光晕：呼吸 → 一次性绽放 */
@@ -1764,16 +1472,16 @@ html.animations-off .conch-spin { animation: none; }
 
 /* D. 降级：reduced-motion / 应用内关动画 → 一次性动效隐藏、循环动效静止 */
 @media (prefers-reduced-motion: reduce) {
-  .clock-fx, .edge-flash, .away-line.knock, .subject-chip.selected, [data-testid='conch-toggle']:hover svg { animation: none; }
-  .clock-fx, .edge-flash { opacity: 0; }
+  .clock-fx, .away-line.knock, .away-line.urgent, .finish-recording-indicator, .subject-chip.selected, [data-testid='conch-toggle']:hover svg { animation: none; }
+  .clock-fx { opacity: 0; }
 }
 html.animations-off .clock-fx,
-html.animations-off .edge-flash,
 html.animations-off .away-line.knock,
+html.animations-off .away-line.urgent,
+html.animations-off .finish-recording-indicator,
 html.animations-off .subject-chip.selected,
 html.animations-off [data-testid='conch-toggle']:hover svg { animation: none; }
-html.animations-off .clock-fx,
-html.animations-off .edge-flash { opacity: 0; }
+html.animations-off .clock-fx { opacity: 0; }
 
 /* ---------- 复刻：同类项目技法落地（2026-08-24，出处见 docs/调研笔记-同类项目与动效库-2026-08-24.md） ---------- */
 

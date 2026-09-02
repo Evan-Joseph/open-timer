@@ -219,7 +219,7 @@ test('七科色板在浅深主题均可区分，宽时间轴片段显示身份�
   await expect(fill.locator('.seg-subject-icon')).toBeVisible();
 });
 
-test('全屏与窗口模式共用同一布局，逾期告警状态一致', async ({ page }) => {
+test('全屏与窗口模式共用同一布局，逾期只强调局部提醒', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await enterReadyState(page);
   await recordRecentSession(page, '数学二');
@@ -234,20 +234,29 @@ test('全屏与窗口模式共用同一布局，逾期告警状态一致', async
   await expect(page.locator('.fs-controls')).toHaveCount(0);
   await expect(page.locator('.timeline-drawer')).toHaveCount(0);
 
-  // 告警状态沿用窗口模式的同一套 CSS 变量
-  await page.locator('.clockface').evaluate((element) => element.setAttribute('data-away-level', '3'));
-  const state = await page.locator('.app').evaluate((element) => {
-    const app = getComputedStyle(element);
-    return {
-      level: document.querySelector('.clockface')?.getAttribute('data-away-level'),
-      wash: app.getPropertyValue('--alert-wash').trim(),
-      timelineBackground: getComputedStyle(document.querySelector('.timeline')!).backgroundColor,
+  const before = await page.evaluate(() => {
+    const surface = (selector: string) => {
+      const style = getComputedStyle(document.querySelector(selector)!);
+      return { background: style.backgroundColor, border: style.borderColor, color: style.color };
     };
+    return { app: surface('.app'), topbar: surface('.topbar'), timeline: surface('.timeline'), alert: surface('[data-testid="idle-rest-line"]') };
   });
-  expect(state.level).toBe('3');
-  expect(state.wash).not.toBe('');
-  expect(state.wash).not.toBe('transparent');
-  expect(state.timelineBackground).not.toBe('rgb(255, 255, 255)');
+
+  // L3 只改变固定位置的休息提示，不应把顶栏、时间轴或全页染色。
+  await page.locator('.clockface').evaluate((element) => element.setAttribute('data-away-level', '3'));
+  await page.getByTestId('idle-rest-line').evaluate((element) => element.classList.add('overdue'));
+  const after = await page.evaluate(() => {
+    const surface = (selector: string) => {
+      const style = getComputedStyle(document.querySelector(selector)!);
+      return { background: style.backgroundColor, border: style.borderColor, color: style.color };
+    };
+    return { app: surface('.app'), topbar: surface('.topbar'), timeline: surface('.timeline'), alert: surface('[data-testid="idle-rest-line"]') };
+  });
+  await expect(page.locator('.clockface')).toHaveAttribute('data-away-level', '3');
+  expect(after.app).toEqual(before.app);
+  expect(after.topbar).toEqual(before.topbar);
+  expect(after.timeline).toEqual(before.timeline);
+  expect(after.alert).not.toEqual(before.alert);
 
   // 一屏容纳，无文档滚动
   await expectDocumentFits(page);
@@ -258,9 +267,10 @@ test('全屏与窗口模式共用同一布局，逾期告警状态一致', async
   await page.waitForTimeout(400);
 });
 
-test('休息逾期会联动中性控件，但不篡改主要动作语义色', async ({ page }) => {
+test('休息逾期保持其他控件与局部提醒之外的表面不变', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await enterReadyState(page);
+  await recordRecentSession(page, '数学二');
 
   const readControls = async () => page.evaluate(() => {
     const read = (selector: string) => {
@@ -272,46 +282,46 @@ test('休息逾期会联动中性控件，但不篡改主要动作语义色', as
       timelineScale: read('.timeline-scale'),
       intent: read('.intent-input'),
       start: read('.start-btn'),
+      alert: read('[data-testid="idle-rest-line"]'),
     };
   });
 
   const base = await readControls();
   await page.locator('.clockface').evaluate((element) => element.setAttribute('data-away-level', '3'));
+  await page.getByTestId('idle-rest-line').evaluate((element) => element.classList.add('overdue'));
   await page.waitForTimeout(600);
   await page.screenshot({ path: 'e2e/screens/overdue-controls-light.png', fullPage: true });
   const overdue = await readControls();
 
-  expect(overdue.toolbarIcon).not.toEqual(base.toolbarIcon);
-  expect(overdue.timelineScale).not.toEqual(base.timelineScale);
-  expect(overdue.intent).not.toEqual(base.intent);
-  // 开始仍保持当前科目 action 色；告警通过表面/描边而非误导动作语义。
+  expect(overdue.toolbarIcon).toEqual(base.toolbarIcon);
+  expect(overdue.timelineScale).toEqual(base.timelineScale);
+  expect(overdue.intent).toEqual(base.intent);
   expect(overdue.start.background).toBe(base.start.background);
+  expect(overdue.alert).not.toEqual(base.alert);
 });
 
-test('L3 逾期告警延续到设置、回顾与海螺浮层', async ({ page }) => {
+test('L3 逾期不染色时间轴与 Portal 表面', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await enterReadyState(page);
+  await recordRecentSession(page, '数学二', 1_050);
+  await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v5'));
   await page.route('**/api/v1/conch/ask', async (route) => {
     const state = await (await page.request.get('/api/v1/state')).json();
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
-        window: 'all',
-        generated_at: new Date().toISOString(),
-        cache_valid_until: new Date(Date.now() + 86_400_000).toISOString(),
-        revision: state.revision,
-        conch_revision: state.conch_revision,
-        model: 'e2e-stub',
-        subjects: [],
-        skipped: [],
+        window: 'all', generated_at: new Date().toISOString(), cache_valid_until: new Date(Date.now() + 86_400_000).toISOString(),
+        revision: state.revision, conch_revision: state.conch_revision, model: 'e2e-stub', subjects: [], skipped: [],
       }),
     });
   });
 
   const surface = async (selector: string) => page.locator(selector).first().evaluate((element) => {
     const style = getComputedStyle(element);
-    return { background: style.backgroundColor, border: style.borderColor };
+    return { background: style.backgroundColor, border: style.borderColor, color: style.color };
   });
+
+  const timelineBase = await surface('.timeline');
 
   await page.getByTestId('history-toggle').click();
   const historyBase = await surface('.history-overlay-panel');
@@ -325,105 +335,17 @@ test('L3 逾期告警延续到设置、回顾与海螺浮层', async ({ page }) 
   await page.keyboard.press('Escape');
 
   await page.locator('.clockface').evaluate((element) => element.setAttribute('data-away-level', '3'));
+  await page.getByTestId('idle-rest-line').evaluate((element) => element.classList.add('overdue'));
+  expect(await surface('.timeline')).toEqual(timelineBase);
+
   await page.getByTestId('history-toggle').click();
-  const historyAlert = await surface('.history-overlay-panel');
+  expect(await surface('.history-overlay-panel')).toEqual(historyBase);
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '设置' }).click();
-  const settingsAlert = await surface('.dialog-content');
+  expect(await surface('.dialog-content')).toEqual(settingsBase);
   await page.keyboard.press('Escape');
   await page.getByTestId('conch-toggle').click();
   await expect(page.locator('.conch-empty')).toBeVisible();
-  const conchAlert = await surface('.conch-panel');
-
-  expect(historyAlert).not.toEqual(historyBase);
-  expect(settingsAlert).not.toEqual(settingsBase);
-  expect(conchAlert).not.toEqual(conchBase);
-});
-
-// 这里只隔离 CSS 状态矩阵；真实休息策略进入 L3 的路径由 flow.spec.ts 的
-// 「按上一段专注时长…」和「结束后同样进入…」两条流程用例覆盖。
-test('L3 逾期状态覆盖嵌套卡片、流水账、Portal hover 与禁用控件', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 720 });
-  await enterReadyState(page);
-  await page.evaluate(() => localStorage.removeItem('clock-conch-cache-v5'));
-  await page.route('**/api/v1/conch/ask', async (route) => {
-    const state = await (await page.request.get('/api/v1/state')).json();
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        window: 'all', generated_at: new Date().toISOString(), cache_valid_until: new Date(Date.now() + 86_400_000).toISOString(),
-        revision: state.revision, conch_revision: state.conch_revision, model: 'e2e-stub', skipped: [],
-        subjects: [{
-          subject_id: 'math', display_name: '数学二', running_now: false, last_active_date: state.today_date,
-          action_kind: 'problems', next_action: '完成一组极限题', rationale: null, pattern: null,
-          alternatives: ['整理本节错题', '复盘例题推导'], confidence: 'high',
-        }],
-      }),
-    });
-  });
-
-  const surface = async (selector: string) => page.locator(selector).first().evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { background: style.backgroundColor, border: style.borderColor, color: style.color };
-  });
-
-  await recordRecentSession(page, '数学二', 1_050);
-  await page.getByTestId('timeline-mode-btn').click();
-  await expect(page.locator('.timeline-list-row').first()).toBeVisible();
-  const listBase = await surface('.timeline-list-row');
-
-  await page.getByRole('button', { name: '设置' }).click();
-  const fullscreenBase = await surface('[data-testid="settings-fullscreen-btn"]');
+  expect(await surface('.conch-panel')).toEqual(conchBase);
   await page.keyboard.press('Escape');
-
-  await page.getByTestId('conch-toggle').click();
-  await expect(page.locator('.conch-card')).toBeVisible();
-  const conchCardBase = await surface('.conch-card');
-  await page.keyboard.press('Escape');
-
-  await page.locator('.clockface').evaluate((element) => element.setAttribute('data-away-level', '3'));
-  const listAlert = await surface('.timeline-list-row');
-  await page.locator('.timeline-list-row').first().hover();
-  const listHover = await surface('.timeline-list-row');
-  expect(listAlert).not.toEqual(listBase);
-  expect(listHover).not.toEqual(listAlert);
-
-  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
-  const darkListAlert = await surface('.timeline-list-row');
-  expect(darkListAlert.background).not.toBe(listAlert.background);
-  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
-
-  await page.getByRole('button', { name: '设置' }).click();
-  const fullscreenAlert = await surface('[data-testid="settings-fullscreen-btn"]');
-  await page.getByTestId('settings-fullscreen-btn').hover();
-  const fullscreenHover = await surface('[data-testid="settings-fullscreen-btn"]');
-  expect(fullscreenAlert).not.toEqual(fullscreenBase);
-  expect(fullscreenHover).not.toEqual(fullscreenAlert);
-
-  const animationItem = page.locator('[aria-label="动画"] .seg-item').first();
-  const beforeDisabled = await animationItem.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { background: style.backgroundColor, border: style.borderColor, color: style.color };
-  });
-  const afterDisabled = await animationItem.evaluate((element) => {
-    (element as HTMLButtonElement).disabled = true;
-    const style = getComputedStyle(element);
-    return { background: style.backgroundColor, border: style.borderColor, color: style.color };
-  });
-  expect(afterDisabled).not.toEqual(beforeDisabled);
-  await page.keyboard.press('Escape');
-
-  await page.getByTestId('conch-toggle').click();
-  await expect(page.locator('.conch-card')).toBeVisible();
-  const conchCardAlert = await surface('.conch-card');
-  const swapStyle = await surface('[data-testid="conch-alt-shuffle-math"]');
-  const textButtonStyle = await surface('[data-testid="scroll-now-btn"]');
-  expect(conchCardAlert).not.toEqual(conchCardBase);
-  expect(swapStyle.border).toBe(textButtonStyle.border);
-  expect(await page.getByTestId('conch-alt-shuffle-math').evaluate((element) => getComputedStyle(element).borderRadius)).toBe(
-    await page.getByTestId('scroll-now-btn').evaluate((element) => getComputedStyle(element).borderRadius),
-  );
-  expect(await page.getByTestId('conch-alt-shuffle-math').evaluate((element) => getComputedStyle(element).height)).toBe(
-    await page.getByTestId('scroll-now-btn').evaluate((element) => getComputedStyle(element).height),
-  );
 });
