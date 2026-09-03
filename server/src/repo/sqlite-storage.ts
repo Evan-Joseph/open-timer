@@ -323,12 +323,12 @@ export class SqliteStorage implements Storage {
       .prepare('SELECT * FROM active_segment WHERE session_id = ? ORDER BY started_at_ms, id LIMIT 1')
       .get(sessionId) as Record<string, unknown> | undefined;
     if (!first || first.ended_at_ms == null || startedAtMs >= Number(first.ended_at_ms)) throw new Error('INVALID_START');
-    const deltaSeconds = Math.round((Number(first.started_at_ms) - startedAtMs) / 1000);
-    const activeSeconds = session.activeSeconds + deltaSeconds;
-    if (activeSeconds < 0) throw new Error('INVALID_START');
     const tx = this.db.transaction(() => {
-      this.db.prepare('UPDATE session SET started_at_ms = ?, active_seconds = ? WHERE id = ?').run(startedAtMs, activeSeconds, sessionId);
+      // 先改首段，再按所有段的毫秒总和重算快照；用旧的 floor 秒数加 delta
+      // 会在多段或跨阈值修正时产生 ±1 秒甚至误差更大。
+      this.db.prepare('UPDATE session SET started_at_ms = ? WHERE id = ?').run(startedAtMs, sessionId);
       this.db.prepare('UPDATE active_segment SET started_at_ms = ? WHERE id = ?').run(startedAtMs, Number(first.id));
+      this.recomputeActiveSeconds(sessionId);
       this.db
         .prepare('INSERT INTO manual_adjustment (session_id, kind, before_json, after_json, reason, created_at_ms) VALUES (?, ?, ?, ?, ?, ?)')
         .run(sessionId, 'retime', JSON.stringify({ started_at_ms: session.startedAtMs }), JSON.stringify({ started_at_ms: startedAtMs }), reason, nowMs);

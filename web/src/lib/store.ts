@@ -28,7 +28,7 @@ export interface ClockStore {
   error: string | null;
   /** 一次性轻提示（成功/撤销等），自动消失 */
   toast: string | null;
-  refresh: () => Promise<void>;
+  refresh: (allowDuringWrite?: boolean) => Promise<boolean>;
   /** owner-only 请求返回 401 时，立刻退出过期的可写态并显示解锁入口。 */
   expireOwnerSession: () => void;
   setupPassword: (p: string) => Promise<boolean>;
@@ -68,8 +68,6 @@ export function useClockStore(): ClockStore {
   const toastTimerRef = useRef<number | null>(null);
   /** 每次收到 state 响应时记录单调时刻，供锚点使用 */
   const perfAtStateRef = useRef<number>(0);
-  /** refresh 发出时刻（performance.now），用于 RTT 半程锚点修正 */
-  const sendPerfRef = useRef<number>(0);
   /** RTT 样本窗口（最近 8 次）：中点锚定的误差界是 ±RTT/2，
    *  弱网 RTT 突增的样本会把锚点污染 1s+ 又被迟滞锁住。
    *  重锚时拒绝显著高延迟样本（NTP 最小延迟择优 / Live Share improveAccuracy 思想）。 */
@@ -88,9 +86,13 @@ export function useClockStore(): ClockStore {
   /** 写操作进行中：期间轮询响应不得覆盖乐观状态（防止"结束反馈反复横跳"） */
   const writeLockedRef = useRef(false);
   /** 锚点纪律：保留上一个锚点，偏差小时不重锚（防计时抖动） */
-  const anchorRef = useRef<SyncAnchor | null>(null);
-  const segmentAnchorRef = useRef<SyncAnchor | null>(null);
-  const awayAnchorRef = useRef<SyncAnchor | null>(null);
+  const anchorRef = useRef<{ sessionId: string; anchor: SyncAnchor } | null>(null);
+  const segmentAnchorRef = useRef<{ sessionId: string; segmentKey: string; anchor: SyncAnchor } | null>(null);
+  /**
+   * 暂离锚点必须同时绑定具体的 paused_at。仅按 running 状态复用会让一次
+   * 「恢复后立即再暂停」在 React 合并渲染或 Safari 延迟快照下继承上一轮休息时长。
+   */
+  const awayAnchorRef = useRef<{ anchor: SyncAnchor; pausedAtMs: number } | null>(null);
   /** 最新已应用的 state（用于丢弃滞后轮询响应） */
   const stateRef = useRef<StateApi | null>(null);
   /** 鉴权探测版本：StrictMode 或慢网络下的旧 /auth/me 不得覆盖后续登录/过期状态。 */
@@ -108,9 +110,9 @@ export function useClockStore(): ClockStore {
 
   const todayDate = state?.today_date ?? shanghaiTodayLocal();
 
-  const applyState = useCallback((s: StateApi, epoch: number) => {
+  const applyState = useCallback((s: StateApi, epoch: number, sentAtPerfMs: number, allowDuringWrite = false): boolean => {
     // 写操作进行中：服务端返回的可能是写完成前的旧状态，不得覆盖乐观 UI
-    if (writeLockedRef.current || epoch !== syncEpochRef.current) return;
+    if ((!allowDuringWrite && writeLockedRef.current) || epoch !== syncEpochRef.current) return false;
     // 丢弃滞后的轮询响应（以服务端时间戳为主），防止旧状态回跳。
     // 但同一毫秒内的写后快照可能携带更高 revision / conch_revision；
     // 不能因时间相等而吞掉它，否则刚完成一段后海螺仍会拿旧缓存。
@@ -118,17 +120,17 @@ export function useClockStore(): ClockStore {
       const current = stateRef.current;
       const nextConchRevision = s.conch_revision ?? 0;
       const currentConchRevision = current.conch_revision ?? 0;
-      if (s.server_now_ms < current.server_now_ms) return;
+      if (s.server_now_ms < current.server_now_ms) return false;
       if (
         s.server_now_ms === current.server_now_ms &&
         s.revision <= current.revision &&
         nextConchRevision <= currentConchRevision
       ) {
-        return;
+        return false;
       }
     }
     // RTT 采样：中点锚定要求样本延迟正常，高延迟样本不参与重锚决策
-    const rttMs = sendPerfRef.current > 0 ? performance.now() - sendPerfRef.current : 0;
+    const rttMs = sentAtPerfMs > 0 ? performance.now() - sentAtPerfMs : 0;
     lastRttMsRef.current = rttMs;
     const win = rttWindowRef.current;
     win.push(rttMs);
@@ -136,13 +138,14 @@ export function useClockStore(): ClockStore {
     // RTT 半程锚点：把服务端 server_now_ms 配到「请求-响应中点」而非响应到达时刻，
     // 消除系统性 RTT/2 偏差（公网 RTT 200-300ms → 原多算 100-150ms）。
     perfAtStateRef.current =
-      sendPerfRef.current > 0 ? (sendPerfRef.current + performance.now()) / 2 : performance.now();
+      sentAtPerfMs > 0 ? (sentAtPerfMs + performance.now()) / 2 : performance.now();
     stateRef.current = s;
     setState(s);
+    return true;
   }, []);
 
-  const applySessions = useCallback((list: SessionApi[], epoch: number, sequence: number) => {
-    if (writeLockedRef.current || epoch !== syncEpochRef.current) return;
+  const applySessions = useCallback((list: SessionApi[], epoch: number, sequence: number, allowDuringWrite = false) => {
+    if ((!allowDuringWrite && writeLockedRef.current) || epoch !== syncEpochRef.current) return;
     if (sequence < appliedSessionsSeqRef.current) return;
     appliedSessionsSeqRef.current = sequence;
     setSessions(list);
@@ -184,21 +187,44 @@ export function useClockStore(): ClockStore {
     toastTimerRef.current = window.setTimeout(() => setToast(null), TOAST_TTL_MS);
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (allowDuringWrite = false): Promise<boolean> => {
     const epoch = syncEpochRef.current;
     const sequence = ++refreshSeqRef.current;
-    sendPerfRef.current = performance.now(); // RTT 半程锚点：记录发出时刻
+    // 每个请求独占 RTT 起点。页面恢复、轮询和多标签同步可并发，不能让后发请求
+    // 覆盖先发请求的中点锚，否则 Safari 等慢响应环境会把服务端时钟推到错误位置。
+    const sentAtPerfMs = performance.now();
     try {
       // 一次 Worker 请求：state 与当天 sessions 共享服务端同次 D1 快照，避免原先每轮两次请求、
       // 日期临界点 state/sessions 跨日不一致，以及重复的 D1 session/segment 查询。
       const snapshot = await apiGet<SnapshotApi>('/api/v1/snapshot');
-      applySessions(snapshot.sessions, epoch, sequence);
-      applyState(snapshot.state, epoch);
+      // 先接受状态，再提交同一快照的 sessions。并发 refresh 的旧响应若被状态时间戳
+      // 拒绝，不能只更新时间轴而留下 state/sessions 不同一时刻的混合画面。
+      if (applyState(snapshot.state, epoch, sentAtPerfMs, allowDuringWrite)) {
+        applySessions(snapshot.sessions, epoch, sequence, allowDuringWrite);
+        if (!writeLockedRef.current || allowDuringWrite) return true;
+      }
       if (!writeLockedRef.current) setError(null);
+      return false;
     } catch {
       if (epoch === syncEpochRef.current) flashError('暂时无法同步，正在重试');
+      return false;
     }
   }, [applyState, applySessions, flashError]);
+
+  /** 写操作完成后，先让旧轮询失效，再在写锁内应用一次权威快照，最后才解锁。 */
+  const refreshAfterWrite = useCallback(async (): Promise<boolean> => {
+    syncEpochRef.current += 1;
+    const applied = await refresh(true);
+    writeLockedRef.current = false;
+    return applied;
+  }, [refresh]);
+
+  const restoreWriteSnapshot = useCallback((snapshot: StateApi | null) => {
+    if (!snapshot) return;
+    stateRef.current = snapshot;
+    setState(snapshot);
+    perfAtStateRef.current = performance.now();
+  }, []);
 
   // 同源其他标签页完成写操作后立即同步；跨设备仍由服务端轮询校准。
   // 只读监督态同样需要同步（公开端点），故 readonly 一并订阅。
@@ -342,15 +368,20 @@ export function useClockStore(): ClockStore {
    * 暂停时把确认秒数推进到当前单调时刻再冻结，避免 UI 先显示旧锚点、后被轮询"跳秒"。
    */
   const optimisticSetStatus = useCallback((status: 'running' | 'paused' | null) => {
+    const nowPerfMs = performance.now();
+    const basePerfMs = perfAtStateRef.current;
+    const elapsedMs = Number.isFinite(basePerfMs) && basePerfMs > 0 ? Math.max(0, nowPerfMs - basePerfMs) : 0;
+    const restartingPausedSegment = status === 'running' && stateRef.current?.active_session?.status === 'paused';
+    if (restartingPausedSegment) perfAtStateRef.current = nowPerfMs;
     setState((prev) => {
       if (!prev?.active_session) return prev;
-      const projectedServerNowMs = prev.server_now_ms + Math.max(0, performance.now() - perfAtStateRef.current);
+      const projectedServerNowMs = prev.server_now_ms + elapsedMs;
       let seconds = prev.active_session.active_seconds;
       let currentSegmentSeconds = prev.active_session.current_segment_active_seconds;
       let currentSegmentStartedAt = prev.active_session.current_segment_started_at;
       if (status === 'paused' && prev.active_session.status === 'running') {
         // 暂停：把秒数推进到当前单调时刻再冻结，避免跳回旧锚点
-        const elapsed = Math.max(0, (performance.now() - perfAtStateRef.current) / 1000);
+        const elapsed = elapsedMs / 1000;
         const elapsedSeconds = Math.floor(elapsed);
         seconds = prev.active_session.active_seconds + elapsedSeconds;
         currentSegmentSeconds = Math.max(0, (prev.active_session.current_segment_active_seconds ?? 0) + elapsedSeconds);
@@ -358,14 +389,12 @@ export function useClockStore(): ClockStore {
       }
       if (status === 'running' && prev.active_session.status === 'paused') {
         // 继续：重锚到"现在"，否则会把暂停时长也算进 elapsed
-        perfAtStateRef.current = performance.now();
         currentSegmentSeconds = 0;
         currentSegmentStartedAt = new Date(projectedServerNowMs).toISOString();
       }
-      // 乐观时间戳同样以服务端锚点外推，避免客户端墙钟偏差触发错误的休息逾期。
-      const paused_at = status === 'paused'
-        ? prev.active_session.paused_at ?? new Date(projectedServerNowMs).toISOString()
-        : null;
+      // paused_at 是休息事实的服务端时间戳。暂停请求在途期间保持 null，
+      // 由 ClockFace 显示“正在确认暂停”，避免本地墙钟或旧快照触发提醒。
+      const paused_at = status === 'paused' ? prev.active_session.paused_at : null;
       return {
         ...prev,
         active_session: status === null ? null : {
@@ -382,23 +411,26 @@ export function useClockStore(): ClockStore {
 
   const start = useCallback(
     async (subjectId: string, intentNote: string | null) => {
+      if (writeLockedRef.current) return null;
+      const rollback = stateRef.current;
       beginWrite();
       setBusy(true);
       const res = await apiPost<{ session_id: string; started_at: string }>('/api/v1/sessions', {
         subject_id: subjectId,
         intent_note: intentNote || null,
-      });
-      setBusy(false);
-      await releaseWriteLock();
-      if (!res.ok) {
-        const errCode = res.data && (res.data as { error?: string }).error;
+      }).catch(() => null);
+      if (!res?.ok) {
+        setBusy(false);
+        await releaseWriteLock();
+        restoreWriteSnapshot(rollback);
+        const errCode = (res?.data as { error?: string } | null | undefined)?.error;
         flashError(errCode === 'ACTIVE_SESSION_EXISTS' ? '已有进行中的会话' : '开始失败，请重试');
         refresh(); // 可能别处已有活动会话，拉取真实状态
         return null;
       }
       notifyPeers();
       // 乐观进入运行态：立即渲染，不等 refresh 往返
-      const d = res.data;
+      const d = res?.data;
       if (d) {
         perfAtStateRef.current = performance.now();
         setState((prev) =>
@@ -417,93 +449,104 @@ export function useClockStore(): ClockStore {
                   intent_note: intentNote || null,
                 },
               }
-            : prev,
+          : prev,
         );
       }
-      refresh();
+      await refreshAfterWrite();
+      setBusy(false);
       return d?.session_id ?? null;
     },
-    [beginWrite, refresh, flashError, notifyPeers],
+    [beginWrite, refresh, refreshAfterWrite, flashError, notifyPeers, restoreWriteSnapshot],
   );
 
   const pause = useCallback(async () => {
-    if (!activeId) return;
+    if (!activeId || writeLockedRef.current) return;
+    const rollback = stateRef.current;
     beginWrite(); // 锁定：轮询不得覆盖乐观状态
     optimisticSetStatus('paused'); // 立即反馈
     setBusy(true);
-    const res = await apiPost(`/api/v1/sessions/${activeId}/pause`);
-    setBusy(false);
-    await releaseWriteLock();
-    if (!res.ok) {
-      optimisticSetStatus('running'); // 失败回滚
+    const res = await apiPost(`/api/v1/sessions/${activeId}/pause`).catch(() => null);
+    if (!res?.ok) {
+      setBusy(false);
+      await releaseWriteLock();
+      restoreWriteSnapshot(rollback); // 失败回滚到写前权威快照
       flashError('暂停失败，请重试');
-      refresh();
+      void refresh();
       return;
     }
     notifyPeers();
-    refresh();
-  }, [activeId, beginWrite, refresh, optimisticSetStatus, flashError, notifyPeers]);
+    // paused_at 只能由权威快照确认。确认前 ClockFace 保持中性占位，不渲染休息等级。
+    await refreshAfterWrite();
+    setBusy(false);
+  }, [activeId, beginWrite, refresh, refreshAfterWrite, optimisticSetStatus, flashError, notifyPeers, restoreWriteSnapshot]);
 
   const resume = useCallback(async () => {
-    if (!activeId) return;
+    if (!activeId || writeLockedRef.current) return;
+    const rollback = stateRef.current;
     beginWrite();
     optimisticSetStatus('running');
     setBusy(true);
-    const res = await apiPost(`/api/v1/sessions/${activeId}/resume`);
-    setBusy(false);
-    await releaseWriteLock();
-    if (!res.ok) {
-      optimisticSetStatus('paused');
+    const res = await apiPost(`/api/v1/sessions/${activeId}/resume`).catch(() => null);
+    if (!res?.ok) {
+      setBusy(false);
+      await releaseWriteLock();
+      restoreWriteSnapshot(rollback); // 失败回滚，不把请求耗时伪算成休息
       flashError('继续失败，请重试');
-      refresh();
+      void refresh();
       return;
     }
     notifyPeers();
-    refresh();
-  }, [activeId, beginWrite, refresh, optimisticSetStatus, flashError, notifyPeers]);
+    await refreshAfterWrite();
+    setBusy(false);
+  }, [activeId, beginWrite, refresh, refreshAfterWrite, optimisticSetStatus, flashError, notifyPeers, restoreWriteSnapshot]);
 
   const stop = useCallback(
     async (endNote: string | null) => {
-      if (!activeId) return null;
+      if (!activeId || writeLockedRef.current) return null;
+      const rollback = stateRef.current;
       beginWrite();
       optimisticSetStatus(null); // 立即回到空闲/结束反馈
       setBusy(true);
-      const res = await apiPost<StopSessionApi>(`/api/v1/sessions/${activeId}/stop`, { end_note: endNote || null });
-      setBusy(false);
-      await releaseWriteLock();
-      if (!res.ok) {
-        // 失败回滚：恢复运行态（乐观清空过头了，以服务端为准）
+      const res = await apiPost<StopSessionApi>(`/api/v1/sessions/${activeId}/stop`, { end_note: endNote || null }).catch(() => null);
+      if (!res?.ok) {
+        setBusy(false);
+        await releaseWriteLock();
+        restoreWriteSnapshot(rollback); // 失败回滚到写前状态，避免短暂空闲/错误休息
         flashError('结束失败，请重试');
-        refresh();
+        void refresh();
         return null;
       }
       notifyPeers();
       // stop 会推进 conch_revision；等待本次权威快照落地，确保用户刚结束又打开海螺时
       // 不会拿到旧语义缓存（开始/暂停/继续则仍保持异步刷新，避免不必要阻塞）。
-      await refresh();
+      await refreshAfterWrite();
+      setBusy(false);
       return res.data;
     },
-    [activeId, beginWrite, refresh, optimisticSetStatus, flashError, notifyPeers],
+    [activeId, beginWrite, refreshAfterWrite, optimisticSetStatus, flashError, notifyPeers, restoreWriteSnapshot],
   );
 
   const switchSubject = useCallback(
     async (subjectId: string) => {
-      if (!activeId) return;
+      if (!activeId || writeLockedRef.current) return;
+      const rollback = stateRef.current;
       beginWrite();
       setBusy(true);
-      const res = await apiPost(`/api/v1/sessions/${activeId}/switch`, { subject_id: subjectId });
-      setBusy(false);
-      await releaseWriteLock();
-      if (!res.ok) {
+      const res = await apiPost(`/api/v1/sessions/${activeId}/switch`, { subject_id: subjectId }).catch(() => null);
+      if (!res?.ok) {
+        setBusy(false);
+        await releaseWriteLock();
+        restoreWriteSnapshot(rollback);
         flashError('切换失败，请重试');
-        refresh();
+        void refresh();
         return;
       }
       notifyPeers();
       // switch 会结束旧科目的一段已完成专注，故需等待语义缓存版本更新。
-      await refresh();
+      await refreshAfterWrite();
+      setBusy(false);
     },
-    [activeId, beginWrite, refresh, flashError, notifyPeers],
+    [activeId, beginWrite, refresh, refreshAfterWrite, flashError, notifyPeers, restoreWriteSnapshot],
   );
 
   /**
@@ -513,25 +556,31 @@ export function useClockStore(): ClockStore {
    */
   const withdraw = useCallback(
     async (sessionId: string, reason: string | null = '误记') => {
+      if (writeLockedRef.current) return false;
+      const rollbackState = stateRef.current;
+      const rollbackSessions = sessions;
       beginWrite();
       const removedSeconds = sessions.find((session) => session.session_id === sessionId)?.active_seconds ?? 0;
       setBusy(true);
-      const res = await apiPost(`/api/v1/sessions/${sessionId}/void`, { reason });
-      setBusy(false);
-      await releaseWriteLock();
-      if (!res.ok) {
+      const res = await apiPost(`/api/v1/sessions/${sessionId}/void`, { reason }).catch(() => null);
+      if (!res?.ok) {
+        setBusy(false);
+        await releaseWriteLock();
+        restoreWriteSnapshot(rollbackState);
+        setSessions(rollbackSessions);
         flashError('撤回失败，请重试');
-        refresh();
+        void refresh();
         return false;
       }
       setSessions((current) => current.filter((session) => session.session_id !== sessionId));
       setState((current) => current ? { ...current, today_active_seconds: Math.max(0, current.today_active_seconds - removedSeconds) } : current);
       flashToast('已撤回这条记录');
       notifyPeers();
-      await refresh();
+      await refreshAfterWrite();
+      setBusy(false);
       return true;
     },
-    [beginWrite, sessions, refresh, flashError, flashToast, notifyPeers],
+    [beginWrite, sessions, refresh, refreshAfterWrite, flashError, flashToast, notifyPeers, restoreWriteSnapshot],
   );
 
   /**
@@ -540,31 +589,38 @@ export function useClockStore(): ClockStore {
    */
   const resumeSession = useCallback(
     async (sessionId: string) => {
+      if (writeLockedRef.current) return false;
+      const rollback = stateRef.current;
       beginWrite();
       setBusy(true);
-      const res = await apiPost(`/api/v1/sessions/${sessionId}/resume`);
-      setBusy(false);
-      await releaseWriteLock();
-      if (!res.ok) {
+      const res = await apiPost(`/api/v1/sessions/${sessionId}/resume`).catch(() => null);
+      if (!res?.ok) {
+        setBusy(false);
+        await releaseWriteLock();
+        restoreWriteSnapshot(rollback);
         flashError('继续失败，请重试');
-        refresh();
+        void refresh();
         return false;
       }
       flashToast('已继续这段会话');
       notifyPeers();
-      await refresh();
+      await refreshAfterWrite();
+      setBusy(false);
       return true;
     },
-    [beginWrite, refresh, flashError, flashToast, notifyPeers],
+    [beginWrite, refresh, refreshAfterWrite, flashError, flashToast, notifyPeers, restoreWriteSnapshot],
   );
 
   const setNote = useCallback(
     async (sessionId: string, note: string) => {
+      if (writeLockedRef.current) return false;
       const pending = pendingNoteIdempotencyRef.current.get(sessionId);
       const idempotencyKey = pending?.note === note ? pending.key : createClientUuid();
       pendingNoteIdempotencyRef.current.set(sessionId, { note, key: idempotencyKey });
+      beginWrite();
       const res = await apiPatch(`/api/v1/sessions/${sessionId}/note`, { note }, { idempotencyKey }).catch(() => null);
       if (!res?.ok) {
+        await releaseWriteLock();
         flashError('备注保存失败，请重试');
         return false;
       }
@@ -574,28 +630,35 @@ export function useClockStore(): ClockStore {
       }
       notifyPeers();
       // 已完成备注是海螺输入，等待 conch_revision 快照落地再返回。
-      await refresh();
+      await refreshAfterWrite();
       return true;
     },
-    [refresh, notifyPeers, flashError],
+    [beginWrite, refreshAfterWrite, releaseWriteLock, notifyPeers, flashError],
   );
 
   const adjustStart = useCallback(async (sessionId: string, startedAt: string) => {
+    if (writeLockedRef.current) return false;
+    const rollback = stateRef.current;
+    beginWrite();
     setBusy(true);
     const res = await apiPost(`/api/v1/sessions/${sessionId}/adjust-start`, {
       started_at: startedAt,
       reason: '补录实际开始时间',
-    });
-    setBusy(false);
-    if (!res.ok) {
+    }).catch(() => null);
+    if (!res?.ok) {
+      setBusy(false);
+      await releaseWriteLock();
+      restoreWriteSnapshot(rollback);
       flashError('开始时间无效，请检查是否早于结束时间');
+      void refresh();
       return false;
     }
     flashToast('开始时间已更新');
     notifyPeers();
-    await refresh();
+    await refreshAfterWrite();
+    setBusy(false);
     return true;
-  }, [flashError, flashToast, refresh, notifyPeers]);
+  }, [beginWrite, refresh, refreshAfterWrite, releaseWriteLock, flashError, flashToast, notifyPeers, restoreWriteSnapshot]);
 
   // 构造单调时钟锚点：随 state 身份 memo，避免每次渲染重新锚定导致秒数跳变。
   // 防拖锚点纪律（NTP 式）：偏差 ≤1.2s 时保持旧锚继续平滑，只有大偏差才重锚。
@@ -604,6 +667,7 @@ export function useClockStore(): ClockStore {
       anchorRef.current = null;
       return null;
     }
+    const sessionId = state.active_session.session_id;
     const next: SyncAnchor = {
       confirmedSeconds: state.active_session.active_seconds,
       running: state.active_session.status === 'running',
@@ -611,19 +675,19 @@ export function useClockStore(): ClockStore {
       serverNowMs: state.server_now_ms,
     };
     const prev = anchorRef.current;
-    if (prev && prev.running === next.running && prev.confirmedSeconds === next.confirmedSeconds) {
+    if (prev && prev.sessionId === sessionId && prev.anchor.running === next.running && prev.anchor.confirmedSeconds === next.confirmedSeconds) {
       // 服务端确认值未变：保持旧锚，避免重锚引起的小拖
-      return prev;
+      return prev.anchor;
     }
-    if (prev && prev.running === next.running) {
+    if (prev && prev.sessionId === sessionId && prev.anchor.running === next.running) {
       // 偏差 = 旧锚外推值 - 新确认值；小于阈值则视为本地单调时钟更平滑，不重锚
-      const driftSec = Math.abs(prev.confirmedSeconds + (performance.now() - prev.anchorPerfMs) / 1000 - next.confirmedSeconds);
-      if (driftSec <= 1.2) return prev;
+      const driftSec = Math.abs(prev.anchor.confirmedSeconds + (performance.now() - prev.anchor.anchorPerfMs) / 1000 - next.confirmedSeconds);
+      if (driftSec <= 1.2) return prev.anchor;
       // 弱网防护：大偏差需要重锚，但高 RTT 样本的中点估计误差界 ±RTT/2 太大，
       // 宁可继续外推等下一个好样本（NTP 最小延迟择优思想）
-      if (!rttUsable()) return prev;
+      if (!rttUsable()) return prev.anchor;
     }
-    anchorRef.current = next;
+    anchorRef.current = { sessionId, anchor: next };
     return next;
   }, [state]);
 
@@ -641,6 +705,8 @@ export function useClockStore(): ClockStore {
       segmentAnchorRef.current = null;
       return null;
     }
+    const sessionId = a.session_id;
+    const segmentKey = a.current_segment_started_at ?? `closed:${a.paused_at ?? a.current_segment_active_seconds}`;
     const next: SyncAnchor = {
       confirmedSeconds: Math.max(0, Math.floor(a.current_segment_active_seconds)),
       running: a.status === 'running',
@@ -648,12 +714,12 @@ export function useClockStore(): ClockStore {
       serverNowMs: state.server_now_ms,
     };
     const prev = segmentAnchorRef.current;
-    if (prev && prev.running === next.running) {
-      const driftSec = Math.abs(prev.confirmedSeconds + (performance.now() - prev.anchorPerfMs) / 1000 - next.confirmedSeconds);
-      if (driftSec <= 1.2) return prev;
-      if (!rttUsable()) return prev; // 弱网高 RTT 样本不重锚
+    if (prev && prev.sessionId === sessionId && prev.segmentKey === segmentKey && prev.anchor.running === next.running) {
+      const driftSec = Math.abs(prev.anchor.confirmedSeconds + (performance.now() - prev.anchor.anchorPerfMs) / 1000 - next.confirmedSeconds);
+      if (driftSec <= 1.2) return prev.anchor;
+      if (!rttUsable()) return prev.anchor; // 弱网高 RTT 样本不重锚
     }
-    segmentAnchorRef.current = next;
+    segmentAnchorRef.current = { sessionId, segmentKey, anchor: next };
     return next;
   }, [state]);
 
@@ -676,16 +742,16 @@ export function useClockStore(): ClockStore {
       serverNowMs: state.server_now_ms,
     };
     const prev = awayAnchorRef.current;
-    if (prev && prev.running) {
-      const extrapolated = prev.confirmedSeconds + (performance.now() - prev.anchorPerfMs) / 1000;
+    if (prev?.pausedAtMs === pausedMs && prev.anchor.running) {
+      const extrapolated = prev.anchor.confirmedSeconds + (performance.now() - prev.anchor.anchorPerfMs) / 1000;
       const driftSec = Math.abs(extrapolated - next.confirmedSeconds);
       // 休息时长单调前进：偏差小保持旧锚（平滑）；新确认值落后于本地外推时也保持旧锚，
       // 防止「已休息」数字回跳（轮询校准竞态下服务端确认值可能暂时落后于单调外推）。
       // 仅当确认值领先外推 >1.2s（如设备休眠后真实休息比外推更长）且 RTT 样本可信才重锚。
-      if (driftSec <= 1.2 || next.confirmedSeconds < extrapolated) return prev;
-      if (!rttUsable()) return prev; // 弱网高 RTT 样本不重锚
+      if (driftSec <= 1.2 || next.confirmedSeconds < extrapolated) return prev.anchor;
+      if (!rttUsable()) return prev.anchor; // 弱网高 RTT 样本不重锚
     }
-    awayAnchorRef.current = next;
+    awayAnchorRef.current = { anchor: next, pausedAtMs: pausedMs };
     return next;
   }, [state]);
 

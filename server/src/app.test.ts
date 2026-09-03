@@ -202,6 +202,18 @@ describe('API 集成', () => {
     expect(stopped.longest_continuous_seconds).toBeLessThanOrEqual(stopped.session_active_seconds);
     expect(stopped.last_continuous_seconds).toBeGreaterThanOrEqual(0);
     expect(stopped.last_continuous_ended_at).toMatch(/Z$/);
+
+    // stop 响应与紧随其后的原子快照必须引用同一组已关闭片段；
+    // Safari/慢网下不能出现结束卡和时间轴各自展示不同的总专注/最长连续专注。
+    const snapshot = await (await ctx.app.request('/api/v1/snapshot')).json();
+    const session = snapshot.sessions.find((entry: { session_id: string }) => entry.session_id === id);
+    expect(session).toBeDefined();
+    expect(session).toMatchObject({
+      session_active_seconds: stopped.session_active_seconds,
+      longest_continuous_seconds: stopped.longest_continuous_seconds,
+      last_continuous_seconds: stopped.last_continuous_seconds,
+      last_continuous_ended_at: stopped.last_continuous_ended_at,
+    });
   });
 
   it('adjust-start 同步修改首段、会话起点与净时长', async () => {

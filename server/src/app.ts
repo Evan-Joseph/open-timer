@@ -330,7 +330,7 @@ export function createApp(deps: AppDeps): Hono {
     return sessions.map((s) => {
       const segs = segMap.get(s.id) ?? [];
       const metrics = sessionFocusMetrics(segs, nowMs);
-      let secs = 0;
+      let sessionMs = 0;
       const clippedSegs: Array<{ started_at: string; ended_at: string | null }> = [];
       for (const seg of segs) {
         // 误触过滤：短于阈值的已关闭片段不计入、不下发（开放段不受影响）
@@ -339,7 +339,9 @@ export function createApp(deps: AppDeps): Hono {
         const cs = Math.max(seg.startedAtMs, startMs);
         const ce = Math.min(rawEnd, endMs);
         if (ce > cs) {
-          secs += Math.floor((ce - cs) / 1000);
+          // 与结束反馈和 daily-summary 一致：先累加窗口内毫秒，最后统一 floor。
+          // 多段各自取整会把 1.5s + 1.5s 错算成 2s，而全量事实应为 3s。
+          sessionMs += ce - cs;
           clippedSegs.push({
             started_at: toIso(cs),
             ended_at: seg.endedAtMs === null ? null : toIso(ce),
@@ -347,6 +349,7 @@ export function createApp(deps: AppDeps): Hono {
         }
 
       }
+      const secs = Math.floor(sessionMs / 1000);
       return {
         session_id: s.id,
         subject_id: s.subjectId,

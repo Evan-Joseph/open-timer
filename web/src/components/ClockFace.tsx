@@ -65,12 +65,16 @@ function DurationTicker({ seconds }: { seconds: number }) {
   const motionValue = useMotionValue(0);
   const springValue = useSpring(motionValue, { damping: 60, stiffness: 100 });
   useEffect(() => {
-    if (!skip) motionValue.set(seconds);
-  }, [motionValue, seconds, skip]);
-  useEffect(() => {
-    if (skip) return;
-    return springValue.on('change', (latest) => setDisplay(Math.max(0, Math.round(latest))));
-  }, [springValue, skip]);
+    if (skip) {
+      setDisplay(seconds);
+      return;
+    }
+    // 先订阅再推进 motion value。WebKit 在首个 set 后才开始调度 spring，反过来写会让
+    // 第一帧通知偶发丢失，结束卡的“最长连续专注”便可能停在旧数字。
+    const unsubscribe = springValue.on('change', (latest) => setDisplay(Math.max(0, Math.round(latest))));
+    motionValue.set(seconds);
+    return unsubscribe;
+  }, [motionValue, seconds, skip, springValue]);
   return <>{formatDurationZh(display)}</>;
 }
 
@@ -178,8 +182,10 @@ export default function ClockFace({ store }: { store: ClockStore }) {
   const awayChimePlayedRef = useRef(false);                   // L2 提示音只播一次
   const overdueChimePlayedRef = useRef(false);                // L3 逾期升级音只播一次
   const paused = active?.status === 'paused';
+  /** 只有服务端快照带回 paused_at 后，才开始计算离开时长和提醒等级。 */
+  const pausePending = paused && !active?.paused_at;
   /** 离开中 = 暂停中断 或 科目结束后（本质都是"人不在学习"） */
-  const awayActive = paused || (!active && !stoppingSession && (lastStopped !== null || recentRestAnchor !== null));
+  const awayActive = (paused && !pausePending) || (!active && !stoppingSession && (lastStopped !== null || recentRestAnchor !== null));
   /** 暂停用服务端 paused_at；结束反馈持有该会话自己的稳定锚点，绝不回退到旧会话。 */
   const awayAnchor = paused
     ? store.awayAnchor
@@ -237,24 +243,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     }
     prevLevelRef.current = reminderLevel;
   }, [reminderLevel]);
-
-  const phaseNow = active ? (paused ? 'paused' : 'running') : lastStopped ? 'finish' : 'idle';
-  const prevPhaseRef = useRef(phaseNow);
-  const [fx, setFx] = useState<{ kind: 'ignite' | 'settle' | 'recover'; key: number } | null>(null);
-  useEffect(() => {
-    const prev = prevPhaseRef.current;
-    prevPhaseRef.current = phaseNow;
-    if (prev === phaseNow) return;
-    const kind =
-      prev === 'idle' && phaseNow === 'running'
-        ? 'ignite'
-        : prev === 'running' && phaseNow === 'paused'
-          ? 'settle'
-          : (prev === 'paused' || prev === 'finish') && phaseNow === 'running'
-            ? 'recover'
-            : null;
-    if (kind) setFx((f) => ({ kind, key: (f?.key ?? 0) + 1 }));
-  }, [phaseNow]);
 
   // 级别上升只触发本地状态条的一次性反馈；L2 用琥珀，L3 才进入红色语义。
   const levelPulseKey = levelPulse?.key ?? 0;
@@ -618,10 +606,6 @@ export default function ClockFace({ store }: { store: ClockStore }) {
     const subj = subjectOf(active.subject_id);
     return (
       <section className={`clockface ${paused ? 'is-paused' : 'is-running'}`} data-away-level={reminderLevel} data-color={subj?.color_id}>
-      {/* 状态转换一次性 fx：点火（开始）/帷幕（暂停）/回升（继续），key 重触发 */}
-      {fx && ((fx.kind === 'settle' && paused) || (fx.kind !== 'settle' && !paused)) && (
-        <span key={fx.key} className={`clock-fx fx-${fx.kind}`} aria-hidden />
-      )}
         <div className="subject-pill large" data-color={subj?.color_id}>
           <SubjectIcon subjectId={active.subject_id} size={18} />
           {subj?.display_name ?? active.subject_id}
@@ -648,15 +632,19 @@ export default function ClockFace({ store }: { store: ClockStore }) {
             渐进提醒只作用于固定状态条：L1/L2 琥珀，L3 红色，无阻断弹窗。 */}
         <div className="away-slot" aria-live="off">
           {paused && (
-            <div
-              key={`al-${levelPulseKey}`}
-              className={awayLineCls}
-              data-testid="away-line"
-            >
-              <RestRing seconds={awaySeconds} recommended={restPlan.recommendedSeconds} />
-              {restLabel} · 已休息 {formatHms(awaySeconds)}
-              <span className="away-note"> · 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
-            </div>
+            pausePending ? (
+              <div className="away-pending" data-testid="pause-sync-pending" role="status">正在确认暂停…</div>
+            ) : (
+              <div
+                key={`al-${levelPulseKey}`}
+                className={awayLineCls}
+                data-testid="away-line"
+              >
+                <RestRing seconds={awaySeconds} recommended={restPlan.recommendedSeconds} />
+                {restLabel} · 已休息 {formatHms(awaySeconds)}
+                <span className="away-note"> · 建议 {formatDurationZh(restPlan.recommendedSeconds)}</span>
+              </div>
+            )
           )}
         </div>
 

@@ -1867,6 +1867,33 @@ test.describe('首页休息状态', () => {
 });
 
 test.describe('离开渐进提醒', () => {
+  test('暂停快照未确认前不显示休息提醒，确认后才建立休息锚点', async ({ page }) => {
+    await doSetup(page);
+    await page.getByRole('radio', { name: '数据结构' }).click();
+    await page.getByTestId('start-btn').click();
+    await page.waitForTimeout(1_100);
+
+    let releasePause!: () => void;
+    const pauseReleased = new Promise<void>((resolve) => { releasePause = resolve; });
+    await page.route('**/api/v1/sessions/*/pause', async (route) => {
+      const response = await route.fetch();
+      await pauseReleased;
+      await route.fulfill({ response });
+    });
+
+    await page.getByRole('button', { name: '暂停计时' }).click();
+    await expect(page.getByText('· 离开中')).toBeVisible();
+    await expect(page.getByTestId('pause-sync-pending')).toBeVisible();
+    await expect(page.getByTestId('away-line')).toHaveCount(0);
+    await page.waitForTimeout(1_200);
+    await expect(page.getByTestId('pause-sync-pending')).toBeVisible();
+
+    releasePause();
+    await expect(page.getByTestId('away-line')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('pause-sync-pending')).toHaveCount(0);
+    await page.unroute('**/api/v1/sessions/*/pause');
+  });
+
   test('专注运行中无论持续多久都不进入休息提醒', async ({ page }) => {
     await page.clock.install({ time: beijingTodayAt(10) });
     await doSetup(page);

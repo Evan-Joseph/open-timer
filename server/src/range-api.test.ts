@@ -27,7 +27,9 @@ async function createRangeCtx(nowMs = Date.UTC(2026, 7, 26, 4, 0, 0)): Promise<R
     port: 0,
     baseUrl: 'http://127.0.0.1:0',
     isProduction: false,
-    sessionTtlMs: 7 * 86_400_000,
+    // 该夹具会把业务时钟回拨到固定的 2026-08 日期，而存储层认证过期判断
+    // 使用宿主机 Date.now()；留出足够窗口，测试只验证 range 时间语义。
+    sessionTtlMs: 365 * 86_400_000,
     minSegmentMs: 0,
     conch: null,
     version: 'range-test',
@@ -176,6 +178,43 @@ describe('range read APIs', () => {
     expect(unknown.status).toBe(404);
     expect(unknown.headers.get('content-type')).toContain('application/json');
     expect((await unknown.json()).error).toBe('NOT_FOUND');
+  });
+
+  it('多段窗口秒数先累加毫秒再统一取整，与 stop 全量指标一致', async () => {
+    const ctx = await createRangeCtx();
+    contexts.push(ctx);
+    const base = Date.UTC(2026, 7, 4, 1, 0);
+    ctx.setNow(base);
+    const start = await ctx.app.request('/api/v1/sessions', {
+      method: 'POST',
+      headers: writeHeaders(ctx),
+      body: JSON.stringify({ subject_id: 'math' }),
+    });
+    expect(start.status).toBe(201);
+    const id = (await start.json()).session_id as string;
+
+    ctx.setNow(base + 1_500);
+    const pause = await ctx.app.request(`/api/v1/sessions/${id}/pause`, { method: 'POST', headers: writeHeaders(ctx) });
+    expect(pause.status).toBe(200);
+    ctx.setNow(base + 3_000);
+    const resume = await ctx.app.request(`/api/v1/sessions/${id}/resume`, { method: 'POST', headers: writeHeaders(ctx) });
+    expect(resume.status).toBe(200);
+    ctx.setNow(base + 4_500);
+    const stop = await ctx.app.request(`/api/v1/sessions/${id}/stop`, { method: 'POST', headers: writeHeaders(ctx), body: JSON.stringify({}) });
+    expect(stop.status).toBe(200);
+    const stopBody = await stop.json();
+    expect(stopBody.session_active_seconds).toBe(3);
+    expect(stopBody.longest_continuous_seconds).toBe(1);
+
+    const day = await (await ctx.app.request('/api/v1/sessions?date=2026-08-04')).json();
+    expect(day.sessions).toHaveLength(1);
+    expect(day.sessions[0]).toMatchObject({
+      session_id: id,
+      active_seconds: 3,
+      window_active_seconds: 3,
+      session_active_seconds: 3,
+      longest_continuous_seconds: 1,
+    });
   });
 
   it('支持 subject、408 aggregate、status、has_note 过滤，并暴露撤回审计', async () => {

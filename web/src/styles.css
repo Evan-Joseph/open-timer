@@ -462,9 +462,7 @@ button:focus-visible, input:focus-visible {
   display: flex; flex-direction: column; align-items: center; gap: var(--clock-gap);
   width: 100%; max-width: 560px; text-align: center;
 }
-.clockface > * {
-  animation: fade-rise var(--dur-enter) var(--ease-standard) both;
-}
+/* 状态主区不挂载覆盖层动画，避免开始/暂停/结束时先闪出无语义的矩形框。 */
 
 /* 空闲态 */
 .idle-clock {
@@ -580,6 +578,17 @@ button:focus-visible, input:focus-visible {
   transition-property: background-color, border-color, color, box-shadow, transform;
   transition-duration: var(--dur-state);
   transition-timing-function: var(--ease-standard);
+}
+.away-pending {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-radius: 999px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border);
+  font-size: var(--fs-sm);
 }
 .away-note { color: var(--text-3); font-size: var(--fs-sm); }
 /* L1：建议休息即将结束，轻提示而不打断。 */
@@ -1424,21 +1433,6 @@ html.animations-off .conch-spin { animation: none; }
 
 /* ---------- 动效与交互升级（2026-08-24；设计：docs/动效与交互升级-设计-2026-08-24.md） ---------- */
 
-/* B. 状态转换一次性 fx（覆盖层，key 重触发；均为合成层友好属性） */
-.clock-fx { position: absolute; inset: 0; pointer-events: none; border-radius: var(--radius-xl); }
-.fx-ignite { animation: fx-ignite var(--dur-wash) var(--ease-expo) both; }
-@keyframes fx-ignite {
-  from { opacity: 1; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--success) 50%, transparent), inset 0 0 60px color-mix(in srgb, var(--success) 16%, transparent); }
-  to { opacity: 0; box-shadow: inset 0 0 0 2px transparent, inset 0 0 140px transparent; }
-}
-.fx-settle { animation: fx-settle 0.5s var(--ease-standard) both; background: color-mix(in srgb, var(--bg) 45%, transparent); }
-@keyframes fx-settle { 0% { opacity: 0; } 35% { opacity: 1; } 100% { opacity: 0; } }
-.fx-recover { animation: fx-recover var(--dur-wash) var(--ease-expo) both; }
-@keyframes fx-recover {
-  from { opacity: 1; box-shadow: inset 0 0 70px color-mix(in srgb, var(--accent) 18%, transparent); }
-  to { opacity: 0; box-shadow: inset 0 0 140px transparent; }
-}
-
 /* A1. 提醒级别跳变事件感：只让固定的休息状态条反馈一次。 */
 .away-line.knock { animation: away-knock var(--dur-shake) var(--ease-standard); }
 @keyframes away-knock {
@@ -1472,16 +1466,13 @@ html.animations-off .conch-spin { animation: none; }
 
 /* D. 降级：reduced-motion / 应用内关动画 → 一次性动效隐藏、循环动效静止 */
 @media (prefers-reduced-motion: reduce) {
-  .clock-fx, .away-line.knock, .away-line.urgent, .finish-recording-indicator, .subject-chip.selected, [data-testid='conch-toggle']:hover svg { animation: none; }
-  .clock-fx { opacity: 0; }
+  .away-line.knock, .away-line.urgent, .finish-recording-indicator, .subject-chip.selected, [data-testid='conch-toggle']:hover svg { animation: none; }
 }
-html.animations-off .clock-fx,
 html.animations-off .away-line.knock,
 html.animations-off .away-line.urgent,
 html.animations-off .finish-recording-indicator,
 html.animations-off .subject-chip.selected,
 html.animations-off [data-testid='conch-toggle']:hover svg { animation: none; }
-html.animations-off .clock-fx { opacity: 0; }
 
 /* ---------- 复刻：同类项目技法落地（2026-08-24，出处见 docs/调研笔记-同类项目与动效库-2026-08-24.md） ---------- */
 

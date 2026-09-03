@@ -310,12 +310,13 @@ export class D1Storage implements Storage {
       .bind(sessionId)
       .first<Record<string, unknown>>();
     if (!first || first.ended_at_ms == null || startedAtMs >= Number(first.ended_at_ms)) throw new Error('INVALID_START');
-    const deltaSeconds = Math.round((Number(first.started_at_ms) - startedAtMs) / 1000);
-    const activeSeconds = session.activeSeconds + deltaSeconds;
-    if (activeSeconds < 0) throw new Error('INVALID_START');
     await this.db.batch([
-      this.db.prepare('UPDATE session SET started_at_ms = ?, active_seconds = ? WHERE id = ?').bind(startedAtMs, activeSeconds, sessionId),
       this.db.prepare('UPDATE active_segment SET started_at_ms = ? WHERE id = ?').bind(startedAtMs, Number(first.id)),
+      this.db
+        .prepare(
+          'UPDATE session SET started_at_ms = ?, active_seconds = (SELECT COALESCE(SUM(MAX(0, ended_at_ms - started_at_ms)), 0) / 1000 FROM active_segment WHERE session_id = ?) WHERE id = ?',
+        )
+        .bind(startedAtMs, sessionId, sessionId),
       this.db
         .prepare('INSERT INTO manual_adjustment (session_id, kind, before_json, after_json, reason, created_at_ms) VALUES (?, ?, ?, ?, ?, ?)')
         .bind(sessionId, 'retime', JSON.stringify({ started_at_ms: session.startedAtMs }), JSON.stringify({ started_at_ms: startedAtMs }), reason, nowMs),
