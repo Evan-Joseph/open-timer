@@ -405,32 +405,28 @@
       card.id = "card-" + item.id;
       card.style.setProperty("--card-color", item.color);
 
-      let subHtml = "";
+      var subHtml = "";
       item.substeps.forEach(function(s) {
-        subHtml += [
-          "<div class="substep-item">",
-          "  <span class="substep-time tabular">" + s.start + "–" + s.end + "</span>",
-          "  <span class="substep-dur tabular">" + s.duration + "m</span>",
-          "  <div class="substep-body"><strong>" + s.title + "</strong><span>" + s.detail + "</span></div>",
-          "</div>"
-        ].join("");
+        subHtml += '<div class="substep-item">'
+          + '<span class="substep-time tabular">' + s.start + '–' + s.end + '</span>'
+          + '<span class="substep-dur tabular">' + s.duration + 'm</span>'
+          + '<div class="substep-body"><strong>' + s.title + '</strong><span>' + s.detail + '</span></div>'
+          + '</div>';
       });
 
-      card.innerHTML = [
-        "<div class="card-top">",
-        "  <div class="card-time-group">",
-        "    <span class="card-time-range tabular">" + item.start + " – " + item.end + "</span>",
-        "    <span class="card-duration-badge tabular">" + formatDuration(item.durationMinutes) + "</span>",
-        "  </div>",
-        "  <span class="card-status-badge pending">○ 待执行</span>",
-        "</div>",
-        "<div class="card-name-row">",
-        "  <div class="card-name"><span class="card-name-dot"></span>" + item.name + "</div>",
-        "</div>",
-        "<p class="card-summary">" + item.summary + "</p>",
-        "<div class="substep-list">" + subHtml + "</div>",
-        "<div class="card-science-pill"><span class="icon">🔬</span><span>" + item.scienceNote + "</span></div>"
-      ].join("");
+      card.innerHTML = '<div class="card-top">'
+        + '<div class="card-time-group">'
+        + '<span class="card-time-range tabular">' + item.start + ' – ' + item.end + '</span>'
+        + '<span class="card-duration-badge tabular">' + formatDuration(item.durationMinutes) + '</span>'
+        + '</div>'
+        + '<span class="card-status-badge pending">○ 待执行</span>'
+        + '</div>'
+        + '<div class="card-name-row">'
+        + '<div class="card-name"><span class="card-name-dot"></span>' + item.name + '</div>'
+        + '</div>'
+        + '<p class="card-summary">' + item.summary + '</p>'
+        + '<div class="substep-list">' + subHtml + '</div>'
+        + '<div class="card-science-pill"><span class="icon">🔬</span><span>' + item.scienceNote + '</span></div>';
 
       container.appendChild(card);
     });
@@ -492,12 +488,18 @@
     slider.value = bDate.getHours() * 60 + bDate.getMinutes();
   }
 
-  document.addEventListener("DOMContentLoaded", function() {
+  function init() {
     buildTimelineDOM();
     initTheme();
     initScrubber();
     tick();
     setInterval(tick, 1000);
-  });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
 
 })();
