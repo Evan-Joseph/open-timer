@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { Maximize, X } from 'lucide-react';
+import { CalendarDays, Maximize, X } from 'lucide-react';
 import { setAnimationsEnabled, useAnimationsEnabled, useSettings, updateSettings } from '../lib/settings.js';
 import { AMBIENT_LABELS } from '../lib/ambient.js';
 import { requestAppFullscreen, type DeviceRole } from '../lib/device.js';
@@ -146,6 +146,24 @@ export default function SettingsDialog({ open, onOpenChange, theme, onThemeChang
             {fullscreenError && <p className="setting-hint setting-hint-error" role="status">{fullscreenError}</p>}
             <p className="setting-hint">
               当前识别：<output data-testid="device-role">{deviceRole === 'pad' ? 'Pad（副屏）' : 'Desktop（主控）'}</output>。Pad 与 Desktop 共用完整界面；全屏仅在你点击后请求。
+            </p>
+          </div>
+
+          <div className="setting-row">
+            <span className="setting-label">作息参照</span>
+            <div>
+              <a
+                className="ghost-btn"
+                href="/schedule.html"
+                target="_blank"
+                rel="noreferrer"
+                style={{ textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                <CalendarDays size={15} aria-hidden /> 查看 24 小时作息参照看板
+              </a>
+            </div>
+            <p className="setting-hint">
+              实时呈现当前应处状态、子动作进度、错峰就餐与晚间洗澡硬约束倒计时。
             </p>
           </div>
 

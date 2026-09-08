@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>11408 备考日程 · 实时参照看板</title>
+  <link rel="stylesheet" href="/schedule.css">
+</head>
+<body>
+  <!-- 顶部状态栏与时钟 -->
+  <header class="top-nav">
+    <div class="nav-left">
+      <div class="brand-badge">
+        <span class="brand-dot"></span>
+        <span>11408 备考作息 · 实时参照</span>
+      </div>
+    </div>
+    <div class="nav-center">
+      <div id="nav-clock" class="clock-display tabular">00:00:00</div>
+      <div id="nav-date" class="clock-date">2026年9月8日 星期二</div>
+    </div>
+    <div class="nav-right">
+      <button id="btn-theme" class="nav-btn" type="button">🌙 夜间</button>
+      <a href="/" class="nav-btn" title="进入沉浸计时器">⏱️ 沉浸时钟</a>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- 实时灵动 Hero 卡片 -->
+    <section class="hero-card" id="hero-card">
+      <div class="hero-glow"></div>
+      
+      <div class="hero-header">
+        <span class="hero-status-tag" id="hero-status-tag">● 当前进行 · 唤醒与就绪</span>
+        <span class="hero-time-range tabular" id="hero-time-range">07:30 – 08:20 (50 分钟)</span>
+      </div>
+
+      <div class="hero-title-row">
+        <h1 class="hero-title" id="hero-title">早间起跑</h1>
+        <p class="hero-subtitle" id="hero-subtitle">洗漱更衣、营养早餐与自习室环境就绪，平稳进入学习状态</p>
+      </div>
+
+      <!-- 进度条与时间流 -->
+      <div class="hero-progress-wrap">
+        <div class="hero-progress-labels tabular">
+          <span id="hero-elapsed-label">已进行 0 分钟 (0%)</span>
+          <strong id="hero-remaining-label">剩余 50 分钟</strong>
+        </div>
+        <div class="hero-progress-bar">
+          <div class="hero-progress-fill" id="hero-progress-fill"></div>
+        </div>
+      </div>
+
+      <!-- 当前微细动作指示框 -->
+      <div class="hero-substep-box" id="hero-substep-box">
+        <div class="hero-substep-head">
+          <span class="hero-substep-badge" id="hero-substep-badge">📍 当前微动作</span>
+          <span class="hero-substep-time tabular" id="hero-substep-time">07:30 – 07:55 · 25m</span>
+        </div>
+        <div class="hero-substep-text" id="hero-substep-text">醒晨洗漱与早餐</div>
+        <div class="hero-substep-detail" id="hero-substep-detail">起居、洗漱、温水一杯，摄入富含优质蛋白与复合碳水的早餐为大脑皮层供能</div>
+      </div>
+
+      <div class="hero-footer">
+        <div class="hero-note-item">
+          <span class="hero-note-icon">🔬</span>
+          <div class="hero-note-content">
+            <strong>科学依据与生理机制</strong>
+            <span id="hero-science-note">晨光照射有效抑制褪黑素分泌，温水与咀嚼激活自主神经系统与脑供血</span>
+          </div>
+        </div>
+        <div class="hero-note-item">
+          <span class="hero-note-icon">⏭️</span>
+          <div class="hero-note-content">
+            <strong>下一个环节预告</strong>
+            <span id="hero-next-preview">08:20 上午攻坚专注 (50 分钟后启动)</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 时光机滑动控制器 -->
+    <div class="scrubber-bar">
+      <span class="scrubber-label" id="scrubber-val">实时模式 (UTC+8)</span>
+      <input type="range" class="scrubber-slider" id="time-scrubber" min="0" max="1439" step="5" value="480">
+      <button class="scrubber-reset" id="scrubber-reset" type="button" style="display:none;">恢复实时</button>
+    </div>
+
+    <!-- 24小时全景时间流 -->
+    <div class="timeline-section-title">
+      <span>全天 24 小时节奏一览（10 大关键闭环）</span>
+      <span style="font-size: 13px; font-weight: 500; color: var(--text-3);">自动聚焦高亮当前时段</span>
+    </div>
+
+    <div class="timeline-flow" id="timeline-flow-list">
+      <!-- 由 schedule.js 动态渲染填充 10 个精细卡片 -->
+    </div>
+
+    <!-- 科学认知与健康指标看板 -->
+    <section class="metrics-section">
+      <div class="timeline-section-title">
+        <span>作息设计底线与科学指标保障</span>
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <span class="icon">🧠</span>
+          <div class="value tabular">9h 55m</div>
+          <div class="label">专注总容量</div>
+          <p class="desc">3 大攻坚段，实际净思考 7.5–8.5h，贴合前额叶极限</p>
+        </div>
+        <div class="metric-card">
+          <span class="icon">🍱</span>
+          <div class="value tabular">提前 25m</div>
+          <div class="label">午间错峰就餐</div>
+          <p class="desc">11:25 到食堂零排队选好菜，细嚼慢咽平抑血糖峰值</p>
+        </div>
+        <div class="metric-card">
+          <span class="icon">⚡</span>
+          <div class="value tabular">30 min</div>
+          <div class="label">黄金神经小睡</div>
+          <p class="desc">NREM2 浅睡清空腺苷，不进入深睡避免严重睡眠惯性</p>
+        </div>
+        <div class="metric-card">
+          <span class="icon">🚿</span>
+          <div class="value tabular">+10 min</div>
+          <div class="label">浴室闭门缓冲</div>
+          <p class="desc">22:00 入浴、22:20 出门，距 22:30 闭门留足余量降体温</p>
+        </div>
+        <div class="metric-card">
+          <span class="icon">🌙</span>
+          <div class="value tabular">8h 00m</div>
+          <div class="label">夜间深度睡眠</div>
+          <p class="desc">23:30–07:30 满载 5 个周期，深度巩固白天海马体记忆</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/schedule.js"></script>
+</body>
+</html>
