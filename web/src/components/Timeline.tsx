@@ -24,7 +24,7 @@ import { PREFS_APPLIED_EVT, schedulePrefsPush, setConchOpenLocal, setHistoryOpen
 import ConchOverlay from './ConchOverlay.js';
 import SubjectIcon from './SubjectIcon.js';
 import { useModalFocus } from '../lib/modal-focus.js';
-import { LEARNING_DAY, QUIET_PERIODS, shanghaiDayRangeUtc, timelineRange, type TimelineScale } from '@clock/shared';
+import { FULL_DAY, LEARNING_DAY, quietPeriodSegments, shanghaiDayRangeUtc, timelineRange, type TimelineScale } from '@clock/shared';
 
 const NOW_TICK_MS = 30_000;
 
@@ -460,14 +460,15 @@ export default function Timeline({ store }: { store: ClockStore }) {
 
   const ticks = useMemo(() => {
     const values = [visibleRange.startMinute];
-    const step = scale === 'full-day' ? 120 : 60;
+    const step = scale === 'full-day' ? 240 : 60;
     for (let minute = Math.ceil(visibleRange.startMinute / step) * step; minute < visibleRange.endMinute; minute += step) {
       if (minute > visibleRange.startMinute) values.push(minute);
     }
     values.push(visibleRange.endMinute);
     return values.map((minute) => ({
       minute,
-      label: `${String(Math.floor(minute / 60) % 24).padStart(2, '0')}:${String(Math.round(minute) % 60).padStart(2, '0')}`,
+      label: minute === 24 * 60 ? '24:00' : `${String(Math.floor(minute / 60) % 24).padStart(2, '0')}:${String(Math.round(minute) % 60).padStart(2, '0')}`,
+      isEnd: minute === visibleRange.endMinute,
       leftPercent: minuteToPercent(minute),
       major: minute % 60 === 0,
       // 左边缘的具体时间会与轨道起点/静默区边界文字争夺同一块空间，保留刻度线但不重复标字。
@@ -754,6 +755,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
 
   const historyLanes = useMemo(() => historyModel.current.map((day) => {
     const { startMs: dayStart, endMs: dayEnd } = shanghaiDayRangeUtc(day.date);
+    const daySpanMinutes = (FULL_DAY.endMinute - FULL_DAY.startMinute);
     const segments = (historyWeekSessions.get(day.date) ?? []).flatMap((session) => {
       if (session.status === 'voided') return [];
       const subject = store.subjects.find((item) => item.subject_id === session.subject_id);
@@ -764,12 +766,12 @@ export default function Timeline({ store }: { store: ClockStore }) {
         if (end <= start) return [];
         const startMinute = (start - dayStart) / 60_000;
         const endMinute = (end - dayStart) / 60_000;
-        if (endMinute <= LEARNING_DAY.startMinute || startMinute >= LEARNING_DAY.endMinute) return [];
+        if (endMinute <= FULL_DAY.startMinute || startMinute >= FULL_DAY.endMinute) return [];
         return [{
           key: `${session.session_id}-${index}`,
           colorId: subject?.color_id ?? 'blue',
-          left: ((Math.max(startMinute, LEARNING_DAY.startMinute) - LEARNING_DAY.startMinute) / (LEARNING_DAY.endMinute - LEARNING_DAY.startMinute)) * 100,
-          width: Math.max(0.35, ((Math.min(endMinute, LEARNING_DAY.endMinute) - Math.max(startMinute, LEARNING_DAY.startMinute)) / (LEARNING_DAY.endMinute - LEARNING_DAY.startMinute)) * 100),
+          left: ((Math.max(startMinute, FULL_DAY.startMinute) - FULL_DAY.startMinute) / daySpanMinutes) * 100,
+          width: Math.max(0.2, ((Math.min(endMinute, FULL_DAY.endMinute) - Math.max(startMinute, FULL_DAY.startMinute)) / daySpanMinutes) * 100),
         }];
       });
     });
@@ -780,20 +782,24 @@ export default function Timeline({ store }: { store: ClockStore }) {
     ? `${historyModel.current[0]!.date.slice(5)} – ${historyModel.current.at(-1)!.date.slice(5)}`
     : '正在读取';
   const historyNowMinute = (nowMs - shanghaiDayRangeUtc(store.todayDate).startMs) / 60_000;
-  const historyNowPercent = historyNowMinute >= LEARNING_DAY.startMinute && historyNowMinute <= LEARNING_DAY.endMinute
-    ? ((historyNowMinute - LEARNING_DAY.startMinute) / (LEARNING_DAY.endMinute - LEARNING_DAY.startMinute)) * 100
+  const historyNowPercent = historyNowMinute >= FULL_DAY.startMinute && historyNowMinute <= FULL_DAY.endMinute
+    ? ((historyNowMinute - FULL_DAY.startMinute) / (FULL_DAY.endMinute - FULL_DAY.startMinute)) * 100
     : null;
 
-  const visibleQuietPeriods = useMemo(() => QUIET_PERIODS.flatMap((period) => {
-    const startMinute = Math.max(period.startMinute, visibleRange.startMinute);
-    const endMinute = Math.min(period.endMinute, visibleRange.endMinute);
-    if (endMinute <= startMinute) return [];
-    return [{
+  const visibleQuietPeriods = useMemo(() => quietPeriodSegments(visibleRange).map((period) => ({
+    ...period,
+    left: minuteToPercent(period.startMinute),
+    width: minuteToPercent(period.endMinute) - minuteToPercent(period.startMinute),
+  })), [minuteToPercent, visibleRange]);
+
+  const historyQuietPeriods = useMemo(() => quietPeriodSegments(FULL_DAY).map((period) => {
+    const daySpanMinutes = (FULL_DAY.endMinute - FULL_DAY.startMinute);
+    return {
       ...period,
-      left: minuteToPercent(startMinute),
-      width: minuteToPercent(endMinute) - minuteToPercent(startMinute),
-    }];
-  }), [minuteToPercent, visibleRange.endMinute, visibleRange.startMinute]);
+      left: ((period.startMinute - FULL_DAY.startMinute) / daySpanMinutes) * 100,
+      width: ((period.endMinute - period.startMinute) / daySpanMinutes) * 100,
+    };
+  }), []);
 
   return (
     <>
@@ -962,7 +968,7 @@ export default function Timeline({ store }: { store: ClockStore }) {
             >{period.label}</span>
           ))}
           {ticks.map((t) => (
-            <div key={t.minute} className={`tick ${t.major ? 'major' : ''}`} style={{ left: `${t.leftPercent}%` }}>
+            <div key={t.minute} className={`tick ${t.major ? 'major' : ''} ${t.isEnd ? 'end' : ''}`} style={{ left: `${t.leftPercent}%` }}>
               {t.showLabel && <span className="tick-label">{t.label}</span>}
             </div>
           ))}
@@ -1228,11 +1234,23 @@ export default function Timeline({ store }: { store: ClockStore }) {
                   <div className="history-axis" aria-hidden>
                     <span />
                     <div className="history-axis-track">
-                      <span className="axis-start">08:00</span>
-                      <span style={{ left: '27.586%' }}>12:00</span>
-                      <span style={{ left: '55.172%' }}>16:00</span>
-                      <span style={{ left: '82.759%' }}>20:00</span>
-                      <span className="axis-end">22:30</span>
+                      {[
+                        { minute: 0, label: '00:00', start: true },
+                        { minute: 4 * 60, label: '04:00', start: false },
+                        { minute: 8 * 60, label: '08:00', start: false },
+                        { minute: 12 * 60, label: '12:00', start: false },
+                        { minute: 16 * 60, label: '16:00', start: false },
+                        { minute: 20 * 60, label: '20:00', start: false },
+                        { minute: 24 * 60, label: '24:00', start: false },
+                      ].map((tick) => (
+                        <span
+                          key={tick.label}
+                          className={tick.start ? 'axis-start' : tick.minute === 24 * 60 ? 'axis-end' : undefined}
+                          style={tick.start || tick.minute === 24 * 60 ? undefined : {
+                            left: `${(tick.minute / (FULL_DAY.endMinute - FULL_DAY.startMinute)) * 100}%`,
+                          }}
+                        >{tick.label}</span>
+                      ))}
                     </div>
                   </div>
                   {historyLanes.map((day) => (
@@ -1242,14 +1260,11 @@ export default function Timeline({ store }: { store: ClockStore }) {
                         <span>{day.date.slice(5)} · {formatHistoryDuration(day.total_active_seconds)}</span>
                       </div>
                       <div className="history-lane-track">
-                        {QUIET_PERIODS.map((period) => (
+                        {historyQuietPeriods.map((period) => (
                           <span
-                            key={period.id}
+                            key={`${period.id}-${period.startMinute}`}
                             className="history-quiet-period"
-                            style={{
-                              left: `${((period.startMinute - LEARNING_DAY.startMinute) / (LEARNING_DAY.endMinute - LEARNING_DAY.startMinute)) * 100}%`,
-                              width: `${((period.endMinute - period.startMinute) / (LEARNING_DAY.endMinute - LEARNING_DAY.startMinute)) * 100}%`,
-                            }}
+                            style={{ left: `${period.left}%`, width: `${period.width}%` }}
                             title={`${period.label}静默时段`}
                           >{period.label}</span>
                         ))}

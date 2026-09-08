@@ -600,10 +600,11 @@ test.describe('时间轴空态与窗口', () => {
     // 片段不在当前窗口内，未渲染
     await expect(page.locator('.seg')).toHaveCount(0);
 
-    // 切到全天尺度：清晨片段落在 08:00–22:30 之外（06–07 点），仍不得误报空日
+    // 切到全天尺度：00:00–24:00 暴露全部时段，清晨片段直接可见
     await page.getByRole('radio', { name: '全天' }).click();
     await expect(page.getByTestId('timeline-empty')).toHaveCount(0);
-    await expect(page.locator('.timeline-empty-window')).toBeVisible();
+    await expect(page.locator('.timeline-empty-window')).toHaveCount(0);
+    await expect(page.locator('.seg')).toHaveCount(1);
   });
 
   test('真正无记录的一天显示空日文案', async ({ page }) => {
@@ -748,13 +749,14 @@ test.describe('近 7 天执行回顾', () => {
     await expect(report.locator('.history-lane')).toHaveCount(7);
     await expect(report.locator('.history-lane-segment')).toHaveCount(7);
     await expect(report.locator('.history-now-line')).toHaveCount(1);
-    await expect(report.locator('.history-quiet-period')).toHaveCount(28);
+    await expect(report.locator('.history-quiet-period')).toHaveCount(42);
     await expect(report.locator('.history-lane').first()).toContainText('午饭');
     await expect(report.locator('.history-lane').first()).toContainText('午睡');
     await expect(report.locator('.history-lane').first()).toContainText('晚饭');
-    await expect(report.locator('.history-lane').first()).toContainText('洗漱');
-    await expect(report.getByText('08:00', { exact: true })).toBeVisible();
-    await expect(report.getByText('22:30', { exact: true })).toBeVisible();
+    await expect(report.locator('.history-lane').first()).toContainText('晚间收尾');
+    await expect(report.locator('.history-lane').first()).toContainText('夜间');
+    await expect(report.getByText('00:00', { exact: true })).toBeVisible();
+    await expect(report.getByText('24:00', { exact: true })).toBeVisible();
     await expect(report.getByText('睡眠结束', { exact: true })).toHaveCount(0);
     await expect(report.getByText('睡眠', { exact: true })).toHaveCount(0);
     await expect(report.locator('.history-subject-list > span')).toHaveCount(2);
@@ -1703,9 +1705,9 @@ test.describe('时间轴尺度与流水账视图', () => {
 
     await scales.getByRole('radio', { name: '全天', exact: true }).click();
     await expect(track).toHaveAttribute('data-scale', 'full-day');
-    // 左端只保留刻度线：08:00 与轨道/静默区边界重合时不重复标字，避免可读性冲突。
+    // 左端 00:00 与轨道/静默区边界重合时保留刻度线但不重复标字，避免可读性冲突。
     await expect(track.locator('.tick').first().locator('.tick-label')).toHaveCount(0);
-    await expect(track.locator('.tick-label').last()).toHaveText('22:30');
+    await expect(track.locator('.tick-label').last()).toHaveText('24:00');
 
     await expect(scales.getByRole('radio', { name: '有效全天' })).toHaveCount(0);
 
