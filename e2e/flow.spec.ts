@@ -748,10 +748,11 @@ test.describe('近 7 天执行回顾', () => {
     await expect(report.locator('.history-lane')).toHaveCount(7);
     await expect(report.locator('.history-lane-segment')).toHaveCount(7);
     await expect(report.locator('.history-now-line')).toHaveCount(1);
-    await expect(report.locator('.history-quiet-period')).toHaveCount(21);
+    await expect(report.locator('.history-quiet-period')).toHaveCount(28);
     await expect(report.locator('.history-lane').first()).toContainText('午饭');
     await expect(report.locator('.history-lane').first()).toContainText('午睡');
     await expect(report.locator('.history-lane').first()).toContainText('晚饭');
+    await expect(report.locator('.history-lane').first()).toContainText('洗漱');
     await expect(report.getByText('08:00', { exact: true })).toBeVisible();
     await expect(report.getByText('22:30', { exact: true })).toBeVisible();
     await expect(report.getByText('睡眠结束', { exact: true })).toHaveCount(0);
@@ -1915,7 +1916,7 @@ test.describe('离开渐进提醒', () => {
 
     const pausedSnapshot = await (await page.request.get('/api/v1/snapshot')).json();
     const pausedState = pausedSnapshot.state;
-    const quietNowMs = beijingTodayAt(11, 8).getTime();
+    const quietNowMs = beijingTodayAt(11, 30).getTime();
     await page.route('**/api/v1/snapshot', async (route) => {
       await route.fulfill({
         status: 200,
@@ -1934,7 +1935,7 @@ test.describe('离开渐进提醒', () => {
       });
     });
 
-    // 恢复 11:08 的服务端状态；即使休息超时，午饭午睡静默期也不得升级或召回。
+    // 恢复 11:30 的服务端状态；即使休息超时，午饭午睡静默期也不得升级或召回。
     await page.reload();
     await expect(page.getByTestId('away-line')).toContainText('静默中');
     await expect(page.locator('.clockface.is-paused')).toHaveAttribute('data-away-level', '0');

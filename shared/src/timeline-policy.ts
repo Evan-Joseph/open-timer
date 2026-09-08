@@ -6,9 +6,10 @@ export const LEARNING_DAY: { startMinute: number; endMinute: number } = {
 };
 
 export const QUIET_PERIODS = [
-  { id: 'lunch', label: '午饭', startMinute: 11 * 60, endMinute: 12 * 60 },
-  { id: 'nap', label: '午睡', startMinute: 12 * 60, endMinute: 13 * 60 + 30 },
-  { id: 'dinner', label: '晚饭', startMinute: 17 * 60, endMinute: 18 * 60 },
+  { id: 'lunch', label: '午饭', startMinute: 11 * 60 + 20, endMinute: 12 * 60 + 25 },
+  { id: 'nap', label: '午睡', startMinute: 12 * 60 + 25, endMinute: 13 * 60 + 40 },
+  { id: 'dinner', label: '晚饭', startMinute: 17 * 60 + 15, endMinute: 18 * 60 + 25 },
+  { id: 'bath', label: '洗漱', startMinute: 21 * 60 + 45, endMinute: 22 * 60 + 30 },
 ] as const;
 
 const DEFAULT_WINDOW_MINUTES = 4 * 60;
